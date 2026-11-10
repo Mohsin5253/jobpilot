@@ -12,7 +12,7 @@ import { EmptyState, Kbd, PageHeader, Segmented, Skeleton } from "@/components/u
 import { ScoreRing } from "@/components/ui/score-ring";
 import { Sheet, SheetContent } from "@/components/ui/sheet";
 import { gmailUrl, mailtoUrl, reserveTab, sendTo } from "@/lib/compose";
-import { useConfig, useDecideDraft, useDrafts, useSendApplication, useUsage } from "@/lib/queries";
+import { useConfig, useDecideDraft, useDrafts, useQuota, useSendApplication, useUsage } from "@/lib/queries";
 import type { DraftWithJob } from "@/lib/types";
 import { useMediaQuery } from "@/lib/use-media";
 import { ago, cn } from "@/lib/utils";
@@ -49,6 +49,7 @@ function QueueItem({ d, active, onSelect }: { d: DraftWithJob; active: boolean; 
 export default function ApprovalsPage() {
   const [view, setView] = useState<View>("pending");
   const { data, isLoading } = useDrafts(view);
+  const { data: quota } = useQuota();
   const decide = useDecideDraft();
   const sendApp = useSendApplication();
   const { data: config } = useConfig();
@@ -131,6 +132,11 @@ export default function ApprovalsPage() {
         description="The crew pauses here. Nothing is sent until you approve it."
         action={
           <div className="flex flex-wrap items-center gap-3">
+            {quota && (
+              <Link href="/settings#quota" className="num text-[12.5px] text-text-2 hover:text-text" title="Approved sends left today (resets at midnight IST)">
+                {quota.remaining} of {quota.cap} sends left today
+              </Link>
+            )}
             {usage && (
               <span className="num text-[12.5px] text-text-3">
                 {usage.week_applications} of {usage.weekly_cap} this week

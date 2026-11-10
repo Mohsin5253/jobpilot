@@ -7,7 +7,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import selectinload
 
 from app.db import session_scope
-from app.models import DraftStatus, JobMatch, OutreachDraft, Profile
+from app.models import ApprovalEvent, DraftStatus, JobMatch, OutreachDraft, Profile
 from app.schemas import ResumeData
 from app.services import resume_doc
 from app.services.mailer import send_as_user
@@ -21,7 +21,7 @@ def with_opt_out(body: str) -> str:
     return body if "won't follow up" in body else f"{body.rstrip()}\n\n{OPT_OUT}"
 
 
-async def send_application(draft_id: uuid.UUID, wait: bool = False) -> OutreachDraft:
+async def send_application(draft_id: uuid.UUID, wait: bool = False, channel: str = "web") -> OutreachDraft:
     """Email an approved draft from the user's own mailbox, with the job-tailored resume PDF attached; marks it
     sent. Raises MailNotConnected if they haven't connected one."""
     async with session_scope() as s:
@@ -48,4 +48,5 @@ async def send_application(draft_id: uuid.UUID, wait: bool = False) -> OutreachD
         row = await s.get(OutreachDraft, draft_id)
         row.status = DraftStatus.sent
         row.sent_at = datetime.now(UTC)
+        s.add(ApprovalEvent(application_id=row.id, user_id=row.user_id, action="send", channel=row.approval_channel or channel))  # audit: every send
         return row

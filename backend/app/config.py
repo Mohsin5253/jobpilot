@@ -26,8 +26,8 @@ DEFAULT_JWT_SECRET = "dev-secret-change-me-in-production-please"
 
 # Per-plan daily limits. Free is generous enough to land internships; Pro is for heavy applying.
 PLAN_LIMITS: dict[str, dict[str, float]] = {
-    "free": {"drafts_per_day": 10, "manual_runs_per_day": 3, "min_refresh_minutes": 15, "llm_usd_per_day": 0.05},
-    "pro": {"drafts_per_day": 50, "manual_runs_per_day": 20, "min_refresh_minutes": 1, "llm_usd_per_day": 0.50},
+    "free": {"sends_per_day_max": 10, "drafts_per_day": 10, "manual_runs_per_day": 3, "min_refresh_minutes": 15, "llm_usd_per_day": 0.05},
+    "pro": {"sends_per_day_max": 50, "drafts_per_day": 50, "manual_runs_per_day": 20, "min_refresh_minutes": 1, "llm_usd_per_day": 0.50},
 }
 
 

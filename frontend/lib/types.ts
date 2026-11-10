@@ -159,7 +159,18 @@ export interface Match {
 
 export type Outcome = "none" | "no_reply" | "replied" | "interview" | "offer" | "rejected";
 
-export interface TailoredBullet { source_id: string; original: string; rewritten: string; keywords: string[]; reverted: boolean; declined?: boolean }
+export interface SourceRef { id: string; kind: "resume" | "proof"; label: string }
+export interface TailoredBullet {
+  source_id: string;
+  original: string;
+  rewritten: string;
+  keywords: string[];
+  reverted: boolean;
+  declined?: boolean;
+  source_refs?: SourceRef[];
+  revert_reason?: string;
+}
+export interface QuotaState { cap: number; used: number; remaining: number; max: number; resets_at: string }
 
 export interface Contact {
   id: string;
@@ -208,6 +219,8 @@ export interface DraftWithJob extends Draft {
   legit_status?: "verified" | "caution" | "suspicious" | null;
   legit_reasons?: string[];
   ghost_score?: number | null;
+  send_worthiness?: number | null;
+  worthiness_parts?: Record<string, number>;
 }
 
 export interface MatchDetail extends Match {

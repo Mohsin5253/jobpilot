@@ -112,6 +112,27 @@ async def google_callback(user: RealUserDep, session: SessionDep, state: str = "
     return RedirectResponse(f"{back}?mail=connected#mail", status_code=303)
 
 
+class QuotaIn(BaseModel):
+    cap: int
+
+
+@router.get("/quota")
+async def get_quota(user: UserDep, session: SessionDep) -> dict:
+    """Today's quality quota: approved sends used, the cap, and the plan's maximum."""
+    from app.services import quota
+
+    return await quota.state(session, user)
+
+
+@router.put("/quota")
+async def put_quota(body: QuotaIn, user: RealUserDep, session: SessionDep) -> dict:
+    from app.services import quota
+
+    await quota.set_cap(session, user, body.cap)
+    await session.commit()
+    return await quota.state(session, user)
+
+
 class AgeIn(BaseModel):
     adult: bool
 

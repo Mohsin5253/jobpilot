@@ -78,3 +78,83 @@ def check_bullet(rewritten: str, source_context: str, resume_skills: set[str]) -
 def check_freeform(text: str, resume_skills: set[str]) -> list[str]:
     """For emails / notes: specific tools mentioned that the resume does not contain."""
     return sorted(s for s in set(extract_skills(text)) - GENERIC if s not in resume_skills)
+
+
+# ── Claim provenance (guard v2) ─────────────────────────────────────────────────────────────────────────────
+# Every tailored bullet cites its sources: resume bullets ("exp0.b1", "proj2.b0", "add1") and/or proof items
+# ("proof.gh.<repo>" for a verified GitHub repo, "proof.item.<id>" for a linked project or certificate). A bullet
+# with no valid source, or with a skill, tool or number its sources don't contain, is reverted and logged.
+
+
+def proof_contexts(evidence: dict | None) -> dict[str, str]:
+    """source_id -> text for the proof items a bullet may cite. Only ownership-verified GitHub repos count."""
+    ev = evidence or {}
+    ctx: dict[str, str] = {}
+    gh = ev.get("github") or {}
+    if gh.get("verified"):
+        for r in gh.get("top_repos", []):
+            name = r.get("name") or ""
+            if name:
+                ctx[f"proof.gh.{name}"] = f"{name} {r.get('language') or ''} {r.get('description') or ''} {' '.join(r.get('topics', []))}"
+    for it in ev.get("items", []):
+        if it.get("id") and it.get("live") is not False:
+            ctx[f"proof.item.{it['id']}"] = f"{it.get('kind', '')} {it.get('title', '')}"
+    return ctx
+
+
+def source_label(source_id: str, resume: ResumeData, proofs: dict[str, str]) -> str:
+    """A human label for the source chip in the review queue."""
+    import re as _re
+
+    if source_id.startswith("proof.gh."):
+        return f"GitHub · {source_id.removeprefix('proof.gh.')}"
+    if source_id.startswith("proof.item."):
+        return "Proof · " + proofs.get(source_id, "linked item").split(" ", 1)[-1][:60]
+    m = _re.fullmatch(r"(exp|proj)(\d+)\.b(\d+)", source_id)
+    if m:
+        kind, i, j = m.group(1), int(m.group(2)), int(m.group(3))
+        if kind == "exp" and i < len(resume.experience):
+            return f"Resume · {resume.experience[i].title or resume.experience[i].organization} · line {j + 1}"
+        if kind == "proj" and i < len(resume.projects):
+            return f"Resume · {resume.projects[i].name} · line {j + 1}"
+    m = _re.fullmatch(r"add(\d+)", source_id)
+    if m and int(m.group(1)) < len(resume.additional):
+        return f"Skill check · {resume.additional[int(m.group(1))].skill}"
+    return "Resume"
+
+
+@dataclass
+class ClaimVerdict:
+    ok: bool
+    reason: str = ""
+    fabricated: list[str] = field(default_factory=list)
+    misattributed: list[str] = field(default_factory=list)
+    numbers: list[str] = field(default_factory=list)
+    sources: list[str] = field(default_factory=list)  # the valid refs
+
+    def as_dict(self) -> dict:
+        return {"reason": self.reason, "fabricated": self.fabricated, "misattributed": self.misattributed, "numbers": self.numbers}
+
+
+def check_claim(rewritten: str, refs: list[str], contexts: dict[str, str], allowed_skills: set[str]) -> ClaimVerdict:
+    """contexts: every citable source (resume bullets + proof items). allowed_skills: the resume's skills plus the
+    skills proof items demonstrate."""
+    valid = [r for r in dict.fromkeys(refs) if r in contexts]
+    if not valid:
+        return ClaimVerdict(False, "No source: the bullet doesn't cite a line of your resume or a proof item")
+    cited = "\n".join(contexts[r] for r in valid)
+    # A resume bullet's own line holds its numbers; the role/project header line doesn't count for figures.
+    cited_lines = "\n".join(contexts[r].split("\n", 1)[-1] for r in valid)
+    used = set(extract_skills(rewritten)) - GENERIC
+    in_sources = set(extract_skills(cited))
+    fabricated = sorted(s for s in used if s not in allowed_skills and s not in in_sources)
+    misattributed = sorted(s for s in used if s not in fabricated and s not in in_sources)
+    numbers = sorted(_numbers(rewritten) - _numbers(cited_lines))
+    reasons = []
+    if fabricated:
+        reasons.append(f"adds {', '.join(fabricated)}, which isn't in your resume or proof")
+    if misattributed:
+        reasons.append(f"moves {', '.join(misattributed)} from elsewhere into this line")
+    if numbers:
+        reasons.append(f"adds the figure {', '.join(numbers)}, which isn't in the source")
+    return ClaimVerdict(not reasons, "; ".join(reasons).capitalize(), fabricated, misattributed, numbers, valid)

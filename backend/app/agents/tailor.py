@@ -12,7 +12,9 @@ from sqlalchemy import select
 from sqlalchemy.dialects.postgresql import insert
 
 from app.agents.common import PipelineState, agent_step, bump_stats, ctx_of, load_profile
-from app.agents.guard import bullet_contexts, check_bullet, resume_skillset
+from app.agents.guard import bullet_contexts, check_claim, proof_contexts, resume_skillset, source_label
+from app.logging import log
+from app.services.evidence import evidenced_skills
 from app.db import session_scope
 from app.llm import CallContext, LLMOutputError, LLMUnavailable, get_llm
 from app.models import JobMatch, TailoredResume
@@ -24,6 +26,7 @@ MAX_BULLETS = 6
 
 class Rewrite(BaseModel):
     source_id: str = Field(description="id of the resume bullet being rephrased, e.g. exp0.b1")
+    source_refs: list[str] = Field(default_factory=list, description="every source the rewrite draws on: the bullet id, plus any proof ids (proof.gh.<repo>, proof.item.<id>) it uses")
     rewritten: str = Field(description="the rephrased bullet, at most ~30 words")
     keywords: list[str] = Field(description="job keywords this bullet now foregrounds (must already be in the source)")
 
@@ -41,7 +44,13 @@ Rules (strict):
    not in the source. Keep every number exactly as written. If the source has no metric, add none.
 4. You may reorder clauses, use the job's vocabulary for things the bullet already shows, start with
    a strong verb, and cut filler.
-5. Keep each bullet to one line (about 30 words max)."""
+5. Keep each bullet to one line (about 30 words max).
+6. List in source_refs every source the rewrite uses: its bullet id, and a proof id only if the rewrite names
+   something that proof item shows (e.g. the repo's language). Anything without a source will be reverted."""
+
+
+def _ref(sid: str, resume: ResumeData, proofs: dict[str, str]) -> dict:
+    return {"id": sid, "kind": "proof" if sid.startswith("proof.") else "resume", "label": source_label(sid, resume, proofs)}
 
 
 def _offline_tailor(resume: ResumeData, job_skills: list[str]) -> list[dict]:
@@ -59,13 +68,16 @@ def _offline_tailor(resume: ResumeData, job_skills: list[str]) -> list[dict]:
             "rewritten": text,
             "keywords": [s for s in extract_skills(text) if s.lower() in want],
             "reverted": False,
+            "source_refs": [_ref(sid, resume, {})],
+            "revert_reason": "",
         }
         for sid, text in ranked[:MAX_BULLETS]
     ]
 
 
-async def tailor_one(match: JobMatch, resume: ResumeData, resume_text: str, ctx: CallContext) -> tuple[list[dict], dict, str]:
+async def tailor_one(match: JobMatch, resume: ResumeData, resume_text: str, ctx: CallContext, evidence: dict | None = None) -> tuple[list[dict], dict, str]:
     index = dict(resume.bullet_index())
+    proofs = proof_contexts(evidence)
     if not index:
         return [], {"passed": True, "checked": 0, "violations": [], "note": "resume has no bullets"}, "none"
 
@@ -86,6 +98,7 @@ async def tailor_one(match: JobMatch, resume: ResumeData, resume_text: str, ctx:
                 + "\n"
                 + "\n".join(f"add{i}: {a.skill} (described by the candidate)" for i, a in enumerate(resume.additional))
                 + "\n</headers>\n\n"
+                + ("<proof>\n" + "\n".join(f"[{pid}] {text}" for pid, text in proofs.items()) + "\n</proof>\n\n" if proofs else "")
                 + f"<job title=\"{job.title}\" company=\"{job.company}\">\n{role_digest(job.description, 4000)}\n</job>\n\n"
                 + f"Candidate strengths for this job: {', '.join(match.strengths) or 'n/a'}"
             ),
@@ -97,16 +110,17 @@ async def tailor_one(match: JobMatch, resume: ResumeData, resume_text: str, ctx:
     except (LLMUnavailable, LLMOutputError):
         return _offline_tailor(resume, job.skills or []), {"passed": True, "checked": 0, "violations": [], "note": "offline: original bullets ranked by relevance"}, "offline"
 
-    contexts = bullet_contexts(resume)
-    skills = resume_skillset(resume, resume_text)
+    contexts = {**bullet_contexts(resume), **proofs}
+    allowed = resume_skillset(resume, resume_text) | set(evidenced_skills(evidence or {}))
     bullets, violations = [], []
     for rw in rewrites:
-        if rw.source_id not in index:
-            violations.append({"source_id": rw.source_id, "rewritten": rw.rewritten, "unknown_source": True})
-            continue
-        verdict = check_bullet(rw.rewritten, contexts[rw.source_id], skills)
+        refs = list(dict.fromkeys([*rw.source_refs, rw.source_id]))
+        verdict = check_claim(rw.rewritten, refs, contexts, allowed)
         if not verdict.ok:
             violations.append({"source_id": rw.source_id, "rewritten": rw.rewritten, **verdict.as_dict()})
+        if rw.source_id not in index:
+            continue  # nothing of the resume to fall back to: the bullet is dropped (logged above)
+        valid = verdict.sources or [rw.source_id]
         bullets.append(
             {
                 "source_id": rw.source_id,
@@ -114,8 +128,13 @@ async def tailor_one(match: JobMatch, resume: ResumeData, resume_text: str, ctx:
                 "rewritten": rw.rewritten if verdict.ok else index[rw.source_id],
                 "keywords": [k for k in rw.keywords if k.lower() in contexts[rw.source_id].lower()],
                 "reverted": not verdict.ok,
+                # Reverted lines go back to the original resume line, so their source is that line alone.
+                "source_refs": [_ref(r, resume, proofs) for r in (valid if verdict.ok else [rw.source_id])],
+                "revert_reason": verdict.reason,
             }
         )
+    if violations:
+        log.info("guard.reverted", match_id=str(match.id), count=len(violations))  # ids and counts only, no text
     report = {"passed": not violations, "checked": len(rewrites), "violations": violations}
     return bullets, report, model
 
@@ -127,7 +146,7 @@ async def run_tailor(state: PipelineState) -> dict:
         async with session_scope() as s:
             matches = (await s.execute(select(JobMatch).where(JobMatch.id.in_(ids)))).scalars().all()
 
-        results = await asyncio.gather(*(tailor_one(m, resume, profile.resume_text, ctx_of(state)) for m in matches))
+        results = await asyncio.gather(*(tailor_one(m, resume, profile.resume_text, ctx_of(state), profile.evidence) for m in matches))
         rows, reverted = [], 0
         for m, (bullets, report, model) in zip(matches, results):
             if not bullets:

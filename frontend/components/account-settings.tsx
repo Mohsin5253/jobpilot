@@ -23,10 +23,12 @@ import {
   useMailAccount,
   useMe,
   useProInterest,
+  useQuota,
   useRevokeToken,
   useRights,
   useSaveWhatsApp,
   useSetConsent,
+  useSetQuota,
   useStopWhatsApp,
   useTestWhatsApp,
   useUsage,
@@ -478,6 +480,47 @@ export function RightsCard() {
             ))}
           </ul>
         )}
+      </div>
+    </Card>
+  );
+}
+
+/** The quality quota: approved sends per day, default 5, up to the plan's maximum. */
+export function QuotaCard() {
+  const { data: q } = useQuota();
+  const set = useSetQuota();
+  const [cap, setCap] = useState<number | null>(null);
+  if (!q) return <Skeleton className="h-32" />;
+  const value = cap ?? q.cap;
+  return (
+    <Card id="quota">
+      <CardHeader
+        icon={<ShieldCheck className="size-4" />}
+        title="Daily send quota"
+        description="Fewer, stronger applications get more interviews. The crew never sends more than this in a day, and resets at midnight IST."
+      />
+      <div className="space-y-3 p-5">
+        <div className="flex items-center justify-between text-[13.5px]">
+          <span>Approved sends a day</span>
+          <span className="num font-semibold">{value}</span>
+        </div>
+        <input
+          type="range"
+          min={1}
+          max={q.max}
+          value={value}
+          onChange={(e) => setCap(Number(e.target.value))}
+          aria-label="Approved sends a day"
+          className="w-full accent-[var(--cobalt)]"
+        />
+        <div className="flex items-center justify-between text-[12px] text-subtle">
+          <span>
+            {q.used} used today · up to {q.max} on your plan
+          </span>
+          <Button size="sm" disabled={value === q.cap} loading={set.isPending} onClick={() => set.mutate({ cap: value }, { onSuccess: () => setCap(null) })}>
+            Save
+          </Button>
+        </div>
       </div>
     </Card>
   );

@@ -1,11 +1,12 @@
 import uuid
-from datetime import datetime
+from datetime import date, datetime
 from enum import StrEnum
 from typing import Any
 
 from pgvector.sqlalchemy import Vector
 from sqlalchemy import (
     Boolean,
+    Date,
     DateTime,
     Float,
     ForeignKey,
@@ -75,6 +76,7 @@ class User(Base):
     last_seen_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     adult_confirmed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))  # age gate: said they're 18+
     inactivity_notice_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))  # warned before the 12-month deletion
+    daily_send_cap: Mapped[int] = mapped_column(Integer, default=5, server_default="5")  # quality quota, up to the plan max
 
     profile: Mapped["Profile | None"] = relationship(back_populates="user", uselist=False)
 
@@ -270,10 +272,37 @@ class OutreachDraft(Base):
     status: Mapped[str] = mapped_column(String(20), default=DraftStatus.pending)
     decided_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     sent_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    send_worthiness: Mapped[int | None] = mapped_column(Integer)  # 0-100, recorded when approved
+    approval_channel: Mapped[str | None] = mapped_column(String(20))  # web | whatsapp
     created_at: Mapped[datetime] = _now_col()
 
     match: Mapped[JobMatch] = relationship(back_populates="drafts")
     contact: Mapped["CompanyContact | None"] = relationship(lazy="joined")
+
+
+class Quota(Base):
+    """Approved sends per user per day (IST), against the cap in force that day."""
+
+    __tablename__ = "quotas"
+
+    user_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), primary_key=True)
+    date: Mapped[date] = mapped_column(Date, primary_key=True)
+    sends_used: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
+    cap: Mapped[int] = mapped_column(Integer)
+
+
+class ApprovalEvent(Base):
+    """Audit log: every approve / reject / send, from which channel. The IP is stored only as a salted hash."""
+
+    __tablename__ = "approval_events"
+
+    id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=uuid.uuid4)
+    application_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("outreach_drafts.id", ondelete="CASCADE"), index=True)
+    user_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    action: Mapped[str] = mapped_column(String(20))  # approve | reject | send
+    channel: Mapped[str] = mapped_column(String(20), default="web", server_default="web")  # web | whatsapp
+    ip_hash: Mapped[str] = mapped_column(String(64), default="", server_default="")
+    created_at: Mapped[datetime] = _now_col()
 
 
 class AgentRun(Base):

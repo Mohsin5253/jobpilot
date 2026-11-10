@@ -2,12 +2,13 @@ import re
 import uuid
 from datetime import UTC, datetime
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Request
 from sqlalchemy import func, select
 
 from app.api.deps import SessionDep, UserDep
 from app.api.routes.matches import apply_stage
-from app.models import CompanyContact, DraftStatus, Job, JobMatch, OutreachDraft, Stage
+from app.models import CompanyContact, Consent, DraftStatus, Job, JobMatch, OutreachDraft, Stage, TailoredResume, User
+from app.services import quota
 from app.schemas import ContactOut, DraftDecision, DraftEdit, DraftWithJob
 from app.services.applications import send_application
 from app.services.mailer import SendTooSoon, user_sender
@@ -42,7 +43,7 @@ async def _apply_edits(session, d: OutreachDraft, body: DraftEdit) -> None:
         setattr(d, field, value)
 
 
-def _with_job(d: OutreachDraft, m: JobMatch, j: Job) -> DraftWithJob:
+def _with_job(d: OutreachDraft, m: JobMatch, j: Job, worth: tuple[int, dict[str, int]] | None = None) -> DraftWithJob:
     return DraftWithJob(
         id=d.id,
         match_id=d.match_id,
@@ -68,6 +69,8 @@ def _with_job(d: OutreachDraft, m: JobMatch, j: Job) -> DraftWithJob:
         legit_status=j.legit_status,
         legit_reasons=j.legit_reasons or [],
         ghost_score=j.ghost_score,
+        send_worthiness=d.send_worthiness if d.send_worthiness is not None else (worth[0] if worth else None),
+        worthiness_parts=worth[1] if worth else {},
     )
 
 
@@ -103,7 +106,34 @@ async def list_drafts(user: UserDep, session: SessionDep, status: str | None = "
     if status:
         q = q.where(OutreachDraft.status == status)
     rows = (await session.execute(q.order_by(JobMatch.score.desc(), OutreachDraft.created_at.desc()).limit(200))).all()
-    return [_with_job(d, m, j) for d, m, j in rows]
+    tailored = {
+        t.match_id: t for t in (await session.execute(select(TailoredResume).where(TailoredResume.match_id.in_([m.id for _, m, _ in rows])))).scalars()
+    }
+    proof = (await session.execute(select(Consent.id).where(Consent.user_id == user.id, Consent.purpose == "public_proof", Consent.withdrawn_at.is_(None)))).first() is not None
+    return [_with_job(d, m, j, quota.send_worthiness(m, j, d, tailored.get(m.id), proof)) for d, m, j in rows]
+
+
+async def approve(session, user: User, d: OutreachDraft, m: JobMatch, j: Job, channel: str = "web", request: Request | None = None) -> None:
+    """The one way a draft becomes approved (web or WhatsApp): scam block, daily quota, send-worthiness and the
+    audit event, then the run resumes once its last draft is decided."""
+    _block_scams(j)
+    await quota.consume(session, user)
+    d.send_worthiness = (await quota.draft_worthiness(session, d, m, j))[0]
+    d.status, d.decided_at, d.approval_channel = DraftStatus.approved, datetime.now(UTC), channel
+    apply_stage(m, Stage.applied)
+    await quota.record(session, d.id, user.id, "approve", channel, request)
+    await _maybe_resume(session, d)
+
+
+async def _maybe_resume(session, d: OutreachDraft) -> None:
+    # When the last draft of a run is decided, hand the run back to the worker to resume the graph.
+    if d.run_id:
+        await session.flush()
+        remaining = (
+            await session.execute(select(func.count()).where(OutreachDraft.run_id == d.run_id, OutreachDraft.status == DraftStatus.pending))
+        ).scalar_one()
+        if remaining == 0:
+            await request_resume(session, d.run_id)
 
 
 @router.patch("/{draft_id}", response_model=DraftWithJob)
@@ -117,30 +147,19 @@ async def edit_draft(draft_id: uuid.UUID, body: DraftEdit, user: UserDep, sessio
 
 
 @router.post("/{draft_id}/decision", response_model=DraftWithJob)
-async def decide(draft_id: uuid.UUID, body: DraftDecision, user: UserDep, session: SessionDep) -> DraftWithJob:
+async def decide(draft_id: uuid.UUID, body: DraftDecision, user: UserDep, session: SessionDep, request: Request) -> DraftWithJob:
     d, m, j = await _load(session, user.id, draft_id)
     if d.status != DraftStatus.pending:
         raise HTTPException(409, f"Draft already {d.status}")
-    if body.decision == "approve":
-        _block_scams(j)
     await _apply_edits(session, d, body)
-    d.status = DraftStatus.approved if body.decision == "approve" else DraftStatus.rejected
-    d.decided_at = datetime.now(UTC)
     if body.decision == "approve":
-        apply_stage(m, Stage.applied)
-
-    # When the last draft of a run is decided, hand the run back to the worker to resume the graph.
-    if d.run_id:
-        await session.flush()
-        remaining = (
-            await session.execute(
-                select(func.count()).where(OutreachDraft.run_id == d.run_id, OutreachDraft.status == DraftStatus.pending)
-            )
-        ).scalar_one()
-        if remaining == 0:
-            await request_resume(session, d.run_id)
+        await approve(session, user, d, m, j, "web", request)
+    else:
+        d.status, d.decided_at = DraftStatus.rejected, datetime.now(UTC)
+        await quota.record(session, d.id, user.id, "reject", "web", request)
+        await _maybe_resume(session, d)
     await session.commit()
-    return _with_job(d, m, j)
+    return _with_job(d, m, j, await quota.draft_worthiness(session, d, m, j))
 
 
 @router.post("/{draft_id}/mark-sent", response_model=DraftWithJob)
@@ -156,7 +175,7 @@ async def mark_sent(draft_id: uuid.UUID, user: UserDep, session: SessionDep) -> 
 
 
 @router.post("/{draft_id}/send", response_model=DraftWithJob)
-async def send(draft_id: uuid.UUID, body: DraftEdit, user: UserDep, session: SessionDep) -> DraftWithJob:
+async def send(draft_id: uuid.UUID, body: DraftEdit, user: UserDep, session: SessionDep, request: Request) -> DraftWithJob:
     """One click: approve (if still pending) and email the application with the tailored resume
     attached, from your own mailbox (connected in Settings)."""
     if await user_sender(user.id) is None:
@@ -169,18 +188,7 @@ async def send(draft_id: uuid.UUID, body: DraftEdit, user: UserDep, session: Ses
     if not d.to_email:
         raise HTTPException(422, "Add the recipient's email address first")
     if d.status == DraftStatus.pending:
-        d.status = DraftStatus.approved
-        d.decided_at = datetime.now(UTC)
-        apply_stage(m, Stage.applied)
-        if d.run_id:
-            await session.flush()
-            remaining = (
-                await session.execute(
-                    select(func.count()).where(OutreachDraft.run_id == d.run_id, OutreachDraft.status == DraftStatus.pending)
-                )
-            ).scalar_one()
-            if remaining == 0:
-                await request_resume(session, d.run_id)
+        await approve(session, user, d, m, j, "web", request)
     await session.commit()
     try:
         await send_application(d.id)

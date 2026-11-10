@@ -48,6 +48,14 @@ and LinkedIn note, and tracks everything you've applied to. **Nothing is sent un
 - **Verifier v2**: the same checks on every posting at ingest, plus a 0-100 ghost-job score (age, reposts, last seen,
   ATS open status, careers-page presence); every job carries a verification row, "Likely scam" postings never reach the
   queue and the API refuses to approve or send them
+- **Claim provenance (guard v2)**: every tailored bullet cites its sources (resume lines, ownership-verified GitHub
+  repos, linked proof items) and shows them as chips in the review queue; a bullet with no source, or with a skill,
+  tool or number its sources don't contain, is reverted with the reason logged. A property test injects 400 fake
+  claims and requires 100% to be reverted
+- **Quality quota**: 5 approved sends a day by default (adjustable up to the plan's max, Free 10), enforced
+  server-side and reset at midnight IST; a 0-100 send-worthiness score (fit, verification, ghost score,
+  completeness) on every draft; an audit event for every approve / reject / send with its channel; a Monday report
+  "we skipped N weak or risky matches for you" by email and WhatsApp
 - **Gmail via Google sign-in**: send-only access (`gmail.send`), refresh token encrypted, sends spaced 90 s apart,
   an opt-out line on every application; app passwords remain for other providers
 - **Production basics**: per-user mailboxes (encrypted), Free / Pro plan limits and a daily AI budget per user,

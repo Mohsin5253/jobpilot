@@ -138,6 +138,9 @@ def _patterns() -> list[tuple[str, re.Pattern[str]]]:
             else:
                 pat = re.compile(_BOUNDARY_L + re.escape(term) + _BOUNDARY_R, re.IGNORECASE)
             pats.append((canonical, pat))
+        if canonical in _ALIASES_ONLY:
+            # The bare letter / word counts in a programming context: "written in Go", "using C", "with R and".
+            pats.append((canonical, re.compile(r"\b(?:in|using|with|and|or)\s+" + canonical + r"(?![A-Za-z0-9+#&'/]|\.[A-Za-z])(?!\s+(?:grade|section|block|wing|level|ahead|live|to))")))
     return pats
 
 

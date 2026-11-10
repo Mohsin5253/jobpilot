@@ -368,6 +368,8 @@ class DraftWithJob(DraftOut):
     legit_status: str | None = None  # verified | caution | suspicious (Verifier v2)
     legit_reasons: list[str] = []
     ghost_score: int | None = None
+    send_worthiness: int | None = None  # 0-100, shown before approval (F5)
+    worthiness_parts: dict[str, int] = {}
 
 
 # ---------- Runs ----------

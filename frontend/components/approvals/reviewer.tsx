@@ -44,6 +44,8 @@ const typing = (t: EventTarget | null) => {
   return !!el && (el.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(el.tagName));
 };
 
+const WORTH: Record<string, string> = { fit: "Fit (of 40)", verification: "Verified posting (of 25)", not_ghost: "Not a ghost job (of 15)", completeness: "Complete application (of 20)" };
+
 /** Verifier v2 verdict, with its evidence on hover / focus. */
 function VerifyBadge({ draft }: { draft: DraftWithJob }) {
   if (!draft.legit_status) return null;
@@ -249,6 +251,25 @@ export function Reviewer({ draft, index, total, onMove, onApprove, onReject, bus
             {draft.kind === "referral" && <Badge tone="accent">Referral request</Badge>}
             {edited && <Badge tone="warning">Edited</Badge>}
             <VerifyBadge draft={draft} />
+            {draft.send_worthiness != null && (
+              <Tooltip
+                side="bottom"
+                label={
+                  <span className="block text-left">
+                    Send-worthiness {draft.send_worthiness}/100
+                    {Object.entries(draft.worthiness_parts ?? {}).map(([k, v]) => (
+                      <span key={k} className="block text-text-3">
+                        {WORTH[k] ?? k}: {v}
+                      </span>
+                    ))}
+                  </span>
+                }
+              >
+                <button type="button" className="rounded-full" aria-label={`Send-worthiness ${draft.send_worthiness} out of 100`}>
+                  <Badge tone={draft.send_worthiness >= 70 ? "success" : draft.send_worthiness >= 50 ? "outline" : "warning"}>Worth sending · {draft.send_worthiness}</Badge>
+                </button>
+              </Tooltip>
+            )}
           </div>
           <div className="mt-0.5 flex flex-wrap gap-x-2 text-[13px] text-text-2">
             <span className="font-medium text-text">{draft.company}</span>

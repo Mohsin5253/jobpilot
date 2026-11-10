@@ -17,6 +17,7 @@ from app.config import settings
 from app.logging import configure_logging, log
 from app.services.ingest import ingest_tick
 from app.services.evidence_refresh import refresh_evidence
+from app.services.quota import weekly_report
 from app.services.retention import retention_sweep
 from app.services.whatsapp import digest_sweep
 from app.sources.authenticity import reverify_jobs
@@ -70,6 +71,8 @@ class Worker:
         self.scheduler.add_job(retention_sweep, "cron", hour=2, minute=30, id="retention", replace_existing=True, max_instances=1)
         # WhatsApp digest: hourly, each user at the hour they picked (no-op until the WHATSAPP_* keys are set).
         self.scheduler.add_job(digest_sweep, "cron", minute=2, id="whatsapp-digest", replace_existing=True, max_instances=1)
+        # Mondays 09:00 IST: "we skipped N weak or risky matches for you".
+        self.scheduler.add_job(weekly_report, "cron", day_of_week="mon", hour=3, minute=30, id="weekly-report", replace_existing=True, max_instances=1)
         # Proof-of-skills pack: re-read linked GitHub / Codeforces profiles once a week.
         self.scheduler.add_job(refresh_evidence, "cron", hour=4, minute=20, id="evidence", replace_existing=True, max_instances=1)
         self.scheduler.start()

@@ -79,7 +79,7 @@ function BulletRow({ b, matchId, editable }: { b: TailoredBullet; matchId: strin
       )}
       <div className="flex flex-wrap items-center gap-2">
         {b.reverted ? (
-          <Badge tone="warning">
+          <Badge tone="warning" title={b.revert_reason || undefined}>
             <ShieldAlert /> Guard kept your original wording
           </Badge>
         ) : !changed ? (
@@ -113,6 +113,20 @@ function BulletRow({ b, matchId, editable }: { b: TailoredBullet; matchId: strin
           </span>
         ))}
       </div>
+      {(b.source_refs?.length || b.revert_reason) && (
+        <div className="flex flex-wrap items-center gap-1.5 text-[11.5px]">
+          {(b.source_refs ?? []).map((r) => (
+            <span
+              key={r.id}
+              title={`Source: ${r.id}`}
+              className="inline-flex items-center gap-1 rounded-full border border-[color-mix(in_oklab,var(--done)_30%,transparent)] px-2 py-0.5 text-text-2"
+            >
+              <ShieldCheck className="size-3 text-done" /> {r.label}
+            </span>
+          ))}
+          {b.reverted && b.revert_reason && <span className="text-text-3">Reverted: {b.revert_reason}</span>}
+        </div>
+      )}
     </li>
   );
 }

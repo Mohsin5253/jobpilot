@@ -31,6 +31,7 @@ import type {
   Campus,
   CollegeDashboard,
   ConsentState,
+  QuotaState,
   RightsRequest,
   RightsState,
   Evidence,
@@ -172,7 +173,7 @@ export function useDecideDraft() {
       api.post<DraftWithJob>(`/drafts/${id}/decision`, body),
     onSuccess: (d) => {
       toast.success(d.status === "approved" ? `Approved · ${d.company} moved to Applied` : `Rejected draft for ${d.company}`);
-      invalidate("drafts", "overview", "matches", "match", "runs");
+      invalidate("drafts", "overview", "matches", "match", "runs", "quota");
     },
     onError: (e: Error) => toast.error(e.message),
   });
@@ -345,7 +346,7 @@ export function useSendApplication() {
       api.post<DraftWithJob>(`/drafts/${id}/send`, body),
     onSuccess: (d) => {
       toast.success(`Application sent to ${d.to_email}`, { description: `${d.company} · tailored resume attached · moved to Applied` });
-      invalidate("drafts", "overview", "matches", "match", "runs");
+      invalidate("drafts", "overview", "matches", "match", "runs", "quota");
     },
     onError: (e: Error) => toast.error(e.message),
   });
@@ -469,6 +470,9 @@ export const useCollege = () => useQuery({ queryKey: ["college"], queryFn: () =>
 export const useConsents = () => useQuery({ queryKey: ["consents"], queryFn: () => api.get<ConsentState>("/consents") });
 export const useSetConsent = () =>
   useAct((b: { purpose: string; granted: boolean }) => api.put<ConsentState>(`/consents/${b.purpose}`, { granted: b.granted }), ["consents", "evidence", "whatsapp", "campus"]);
+
+export const useQuota = () => useQuery({ queryKey: ["quota"], queryFn: () => api.get<QuotaState>("/quota") });
+export const useSetQuota = () => useAct((b: { cap: number }) => api.put<QuotaState>("/quota", b), ["quota"], (q) => `Up to ${q.cap} approved sends a day`);
 
 export const useRights = () => useQuery({ queryKey: ["rights"], queryFn: () => api.get<RightsState>("/rights") });
 export const useCreateRight = () => useAct((b: { kind: string; details: string }) => api.post<RightsRequest>("/rights", b), ["rights"], "Request sent. We’ll reply within 30 days.");
