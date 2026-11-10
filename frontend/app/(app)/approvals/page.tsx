@@ -2,6 +2,8 @@
 
 import { ArrowRight, Inbox } from "lucide-react";
 import Link from "next/link";
+
+import { useT } from "@/lib/i18n";
 import { useCallback, useEffect, useMemo, useState } from "react";
 
 import { Reviewer, type ApproveWith, type DraftEdits } from "@/components/approvals/reviewer";
@@ -50,6 +52,7 @@ export default function ApprovalsPage() {
   const [view, setView] = useState<View>("pending");
   const { data, isLoading } = useDrafts(view);
   const { data: quota } = useQuota();
+  const t = useT();
   const decide = useDecideDraft();
   const sendApp = useSendApplication();
   const { data: config } = useConfig();
@@ -128,13 +131,13 @@ export default function ApprovalsPage() {
   return (
     <div>
       <PageHeader
-        title="Approvals"
-        description="The crew pauses here. Nothing is sent until you approve it."
+        title={t("approvals.title")}
+        description={t("approvals.sub")}
         action={
           <div className="flex flex-wrap items-center gap-3">
             {quota && (
               <Link href="/settings#quota" className="num text-[12.5px] text-text-2 hover:text-text" title="Approved sends left today (resets at midnight IST)">
-                {quota.remaining} of {quota.cap} sends left today
+                {t("approvals.left", { n: quota.remaining, cap: quota.cap })}
               </Link>
             )}
             {usage && (

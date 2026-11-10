@@ -133,6 +133,20 @@ async def put_quota(body: QuotaIn, user: RealUserDep, session: SessionDep) -> di
     return await quota.state(session, user)
 
 
+class LanguageIn(BaseModel):
+    language: str
+
+
+@router.put("/account/language")
+async def set_language(body: LanguageIn, user: UserDep, session: SessionDep) -> dict:
+    """English, Hindi or Marathi: the app's labels, WhatsApp digests and replies."""
+    if body.language not in ("en", "hi", "mr"):
+        raise HTTPException(422, "Choose en, hi or mr")
+    user.language = body.language
+    await session.commit()
+    return {"language": user.language}
+
+
 class AgeIn(BaseModel):
     adult: bool
 

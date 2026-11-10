@@ -78,6 +78,7 @@ class User(Base):
     inactivity_notice_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))  # warned before the 12-month deletion
     daily_send_cap: Mapped[int] = mapped_column(Integer, default=5, server_default="5")  # quality quota, up to the plan max
     inbound_token: Mapped[str | None] = mapped_column(String(24), unique=True)  # alerts+<token>@INBOUND_EMAIL_DOMAIN
+    language: Mapped[str] = mapped_column(String(5), default="en", server_default="en")  # en | hi | mr
 
     profile: Mapped["Profile | None"] = relationship(back_populates="user", uselist=False)
 
@@ -307,6 +308,15 @@ class ProofLinkView(Base):
     proof_link_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("proof_links.id", ondelete="CASCADE"), index=True)
     viewed_at: Mapped[datetime] = _now_col()
     ua_family: Mapped[str] = mapped_column(String(30), default="other", server_default="other")  # chrome | safari | ... | bot
+
+
+class WhatsAppEvent(Base):
+    """Message ids already handled: Meta retries webhooks, and an approval must never run twice."""
+
+    __tablename__ = "whatsapp_events"
+
+    id: Mapped[str] = mapped_column(String(128), primary_key=True)
+    received_at: Mapped[datetime] = _now_col()
 
 
 class Quota(Base):

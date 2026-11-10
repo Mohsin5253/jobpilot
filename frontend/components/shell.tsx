@@ -43,6 +43,7 @@ import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover
 import { Sheet, SheetContent } from "@/components/ui/sheet";
 import { Tooltip, TooltipProvider } from "@/components/ui/tooltip";
 import { api, signOut } from "@/lib/api";
+import { useT, type Key } from "@/lib/i18n";
 import { useLiveUpdates } from "@/lib/live";
 import { isActive, useCampus, useMe, useOverview, useProfile, useStartRun } from "@/lib/queries";
 import type { Overview, User } from "@/lib/types";
@@ -62,6 +63,11 @@ export interface NavItem {
   icon: ComponentType<{ className?: string }>;
   badge?: "approvals" | "questions";
 }
+
+const NAV_KEYS: Record<string, Key> = {
+  "/dashboard": "nav.dashboard", "/jobs": "nav.matches", "/approvals": "nav.approvals", "/skills": "nav.skills", "/tracker": "nav.tracker",
+  "/insights": "nav.insights", "/campus": "nav.campus", "/proof": "nav.proof", "/runs": "nav.runs", "/settings": "nav.settings",
+};
 
 const NAV: NavItem[] = [
   { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
@@ -578,8 +584,9 @@ export function AppShell({ children }: { children: ReactNode }) {
 
   const logout = () => signOut(); // always lands on the landing page
 
+  const t = useT();
   const nav: NavItem[] = [
-    ...NAV,
+    ...NAV.map((n) => ({ ...n, label: NAV_KEYS[n.href] ? t(NAV_KEYS[n.href]) : n.label })),
     ...(campus?.college?.role === "officer" ? [{ href: "/college", label: "College", icon: Building2 }] : []),
     ...(me?.is_admin ? [{ href: "/admin", label: "Admin", icon: Gauge }] : []),
   ];

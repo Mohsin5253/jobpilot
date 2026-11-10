@@ -87,6 +87,10 @@ class Settings(BaseSettings):
     whatsapp_template: str = "jobpilot_daily_digest"  # an approved template with 2 body params: name, summary
     whatsapp_template_lang: str = "en"
     whatsapp_app_secret: str | None = None  # verifies webhook signatures
+    # Approval template: 3 body params (role, company, send-worthiness) and quick-reply buttons Approve / Edit in app / Skip.
+    # Off (digest only) until it's approved in WhatsApp Manager and named here.
+    whatsapp_approval_template: str | None = None
+    whatsapp_template_langs: Annotated[list[str], NoDecode] = ["en"]  # languages both templates are approved in (en, hi, mr)
     whatsapp_verify_token: str | None = None  # webhook subscription handshake
 
     # LLM: "auto" uses the provider when its API key is set, otherwise the deterministic offline agents.
@@ -178,7 +182,7 @@ class Settings(BaseSettings):
                 return "postgresql+psycopg://" + v[len(prefix) :]
         return v
 
-    @field_validator("cors_origins", "admin_emails", "github_listings_urls", mode="before")
+    @field_validator("cors_origins", "admin_emails", "github_listings_urls", "whatsapp_template_langs", mode="before")
     @classmethod
     def _split_origins(cls, v):
         if isinstance(v, str) and not v.startswith("["):

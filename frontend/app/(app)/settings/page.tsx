@@ -7,7 +7,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Suspense, useEffect, useState } from "react";
 import { toast } from "sonner";
 
-import { ConsentCard, DataCard, QuotaCard, RightsCard, ExtensionCard, MailCard, PlanCard, SecurityCard, WhatsAppCard } from "@/components/account-settings";
+import { ConsentCard, DataCard, LanguageCard, QuotaCard, RightsCard, ExtensionCard, MailCard, PlanCard, SecurityCard, WhatsAppCard } from "@/components/account-settings";
 import { ResumeDropzone } from "@/components/resume-dropzone";
 import { RunButton } from "@/components/shell";
 import { Badge } from "@/components/ui/badge";
@@ -336,6 +336,7 @@ export default function SettingsPage() {
           <ResumeCard />
           <MailCard />
           <QuotaCard />
+          <LanguageCard />
           <WhatsAppCard />
           <ExtensionCard />
           <PlanCard />

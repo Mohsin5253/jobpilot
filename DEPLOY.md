@@ -125,6 +125,16 @@ with an opt-out line ("reply no and I won't follow up").
 4. Webhook: callback `https://<api>/api/whatsapp/webhook`, verify token as above, subscribe to `messages`.
    Replies of STOP withdraw that student's consent automatically.
 
+### WhatsApp approvals (optional)
+
+5. Create a second *Utility* template, e.g. `jobpilot_approval`, with a body of three parameters,
+   `{{1}} at {{2}} is ready to send. Worth sending: {{3}}`, and three **quick reply** buttons in this order:
+   `Approve`, `Edit in app`, `Skip`. Add Hindi (`hi`) and Marathi (`mr`) versions of both templates if you want them.
+6. Set `WHATSAPP_APPROVAL_TEMPLATE=jobpilot_approval` and `WHATSAPP_TEMPLATE_LANGS=en,hi,mr` (only the languages you
+   got approved). The morning digest is then followed by the 3-5 best drafts with buttons. Each button is signed for
+   that student, expires in 24 hours and stops working if they sign out everywhere. Approving uses the same daily
+   quota and scam block as the web, and is recorded with channel `whatsapp`. Retries from Meta are ignored by message id.
+
 ## Chrome extension
 
 Load `extension/` unpacked for testing (see `extension/README.md`). To publish it, zip the folder for the Chrome Web

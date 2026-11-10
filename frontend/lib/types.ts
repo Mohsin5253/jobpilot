@@ -10,6 +10,7 @@ export interface User {
   is_admin: boolean;
   expires_at: string | null;
   adult_confirmed_at?: string | null;
+  language?: "en" | "hi" | "mr";
 }
 
 export interface Usage {

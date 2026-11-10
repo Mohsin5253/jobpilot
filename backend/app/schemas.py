@@ -138,6 +138,7 @@ class UserOut(BaseModel):
     is_admin: bool = False
     expires_at: datetime | None = None
     adult_confirmed_at: datetime | None = None
+    language: str = "en"
 
 
 class ForgotPasswordIn(BaseModel):

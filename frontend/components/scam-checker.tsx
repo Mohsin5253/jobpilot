@@ -6,6 +6,7 @@ import { useRef, useState, type FormEvent } from "react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { ApiError } from "@/lib/api";
+import { LANGS, useLang, translate, type Key } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
 
 type CheckRow = { id: string; label: string; status: "pass" | "warn" | "fail" | "unverified"; evidence: string[] };
@@ -20,6 +21,8 @@ const ICON = { fail: X, warn: AlertTriangle, pass: Check, unverified: CircleHelp
 const ORDER = { fail: 0, warn: 1, unverified: 2, pass: 3 };
 
 export function ScamChecker() {
+  const [lang, setLang] = useLang(false);
+  const t = (k: Key, v?: Record<string, string | number>) => translate(lang, k, v);
   const [text, setText] = useState("");
   const [url, setUrl] = useState("");
   const [file, setFile] = useState<File | null>(null);
@@ -85,21 +88,35 @@ export function ScamChecker() {
   const tone = result ? TONE[result.verdict] : null;
   return (
     <div className="mt-8">
+      <div role="radiogroup" aria-label="Language" className="mb-3 flex gap-1.5">
+        {LANGS.map((l) => (
+          <button
+            key={l.v}
+            type="button"
+            role="radio"
+            aria-checked={lang === l.v}
+            onClick={() => setLang(l.v)}
+            className={cn("min-h-9 rounded-full border px-3 text-[13px]", lang === l.v ? "border-cobalt bg-cobalt-subtle text-text" : "border-border text-text-2")}
+          >
+            {l.label}
+          </button>
+        ))}
+      </div>
       <form onSubmit={submit} className="card space-y-4 p-4 md:p-5">
         <label className="block">
-          <span className="text-[13.5px] font-medium">The message or offer</span>
+          <span className="text-[13.5px] font-medium">{t("scam.message")}</span>
           <textarea
             value={text}
             onChange={(e) => setText(e.target.value)}
             rows={7}
             maxLength={20000}
-            placeholder="Paste the WhatsApp, Telegram or email message here…"
+            placeholder={t("scam.placeholder")}
             className="mt-1.5 w-full rounded-[var(--radius-control)] border border-border bg-surface px-3 py-2.5 text-[15px] leading-relaxed"
           />
         </label>
         <div className="grid gap-3 sm:grid-cols-[1fr_auto] sm:items-end">
           <label className="block">
-            <span className="text-[13.5px] font-medium">Link (optional)</span>
+            <span className="text-[13.5px] font-medium">{t("scam.link")}</span>
             <input
               value={url}
               onChange={(e) => setUrl(e.target.value)}
@@ -109,7 +126,7 @@ export function ScamChecker() {
             />
           </label>
           <label className="inline-flex h-11 cursor-pointer items-center justify-center gap-2 rounded-[var(--radius-control)] border border-border px-4 text-[14px] text-text-2 hover:border-border-strong hover:text-text">
-            <Upload className="size-4" /> {file ? file.name.slice(0, 24) : "Offer letter (PDF or image)"}
+            <Upload className="size-4" /> {file ? file.name.slice(0, 24) : t("scam.file")}
             <input type="file" accept=".pdf,.png,.jpg,.jpeg,.webp,.txt" className="sr-only" onChange={(e) => setFile(e.target.files?.[0] ?? null)} />
           </label>
         </div>
@@ -119,9 +136,9 @@ export function ScamChecker() {
           </p>
         )}
         <Button type="submit" variant="primary" size="lg" className="w-full sm:w-auto" loading={busy} disabled={!text.trim() && !url.trim() && !file}>
-          Check it
+          {t("scam.check")}
         </Button>
-        <p className="text-[12.5px] text-text-3">Nothing you paste or upload is saved. We keep only an anonymous count of verdicts.</p>
+        <p className="text-[12.5px] text-text-3">{t("scam.private")}</p>
       </form>
 
       <div ref={out} tabIndex={-1} aria-live="polite" className="outline-none">
@@ -136,17 +153,17 @@ export function ScamChecker() {
               <tone.icon className="size-10 shrink-0" style={{ color: tone.color }} />
               <div className="min-w-0 flex-1">
                 <h2 className="text-[24px] font-semibold tracking-[-0.02em]" style={{ color: tone.color }}>
-                  {result.verdict}
+                  {t(`verdict.${result.verdict}` as Key)}
                 </h2>
-                <p className="num text-[13px] text-text-2">Risk score {result.score}/100</p>
+                <p className="num text-[13px] text-text-2">{t("scam.risk", { n: result.score })}</p>
               </div>
               <Button onClick={share} className="shrink-0">
-                <Share2 /> Share
+                <Share2 /> {t("scam.share")}
               </Button>
             </div>
 
             <div className="card p-5">
-              <h3 className="text-[16px] font-semibold">What to do</h3>
+              <h3 className="text-[16px] font-semibold">{t("scam.todo")}</h3>
               <ul className="mt-3 space-y-2 text-[14.5px] leading-relaxed text-text-2">
                 {result.advice.map((a) => (
                   <li key={a} className="flex gap-2.5">

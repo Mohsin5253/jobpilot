@@ -53,6 +53,10 @@ envVarGroups:
         sync: false
       - key: WHATSAPP_VERIFY_TOKEN
         sync: false
+      - key: WHATSAPP_APPROVAL_TEMPLATE # optional: Approve / Edit / Skip buttons (see DEPLOY.md)
+        sync: false
+      - key: WHATSAPP_TEMPLATE_LANGS # optional: en,hi,mr
+        sync: false
       - key: LANGFUSE_PUBLIC_KEY
         sync: false
       - key: LANGFUSE_SECRET_KEY

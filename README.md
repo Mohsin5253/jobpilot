@@ -67,6 +67,11 @@ and LinkedIn note, and tracks everything you've applied to. **Nothing is sent un
   community internship lists on GitHub (SimplifyJobs JSON); government portals as deep links; job-board alert
   emails forwarded to a private inbound address and pasted links, kept as links the student opens. Dedupe by company,
   normalised title and location (the same role on several boards becomes one job with several apply links)
+- **WhatsApp approvals + languages**: the morning digest is followed by the best 3-5 drafts with Approve / Edit in
+  app / Skip buttons (signed per student, 24-hour expiry, voided by "sign out everywhere"); approvals pass the same
+  scam block and daily quota as the web and are audited with channel `whatsapp`; webhook retries are idempotent; STOP
+  opts out. English / हिन्दी / मराठी for WhatsApp messages and the app's main labels (Settings → Language; the Scam
+  Shield page has its own switch)
 - **Gmail via Google sign-in**: send-only access (`gmail.send`), refresh token encrypted, sends spaced 90 s apart,
   an opt-out line on every application; app passwords remain for other providers
 - **Production basics**: per-user mailboxes (encrypted), Free / Pro plan limits and a daily AI budget per user,

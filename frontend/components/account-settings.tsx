@@ -1,7 +1,7 @@
 "use client";
 
 import { useQueryClient } from "@tanstack/react-query";
-import { Copy, CreditCard, Download, KeyRound, Mail, MessageCircle, Puzzle, ShieldCheck, Trash2 } from "lucide-react";
+import { Copy, CreditCard, Download, Globe, KeyRound, Mail, MessageCircle, Puzzle, ShieldCheck, Trash2 } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useEffect, useState, type FormEvent } from "react";
 import { toast } from "sonner";
@@ -34,6 +34,7 @@ import {
   useUsage,
   useWhatsApp,
 } from "@/lib/queries";
+import { LANGS, useLang, useT, type Lang } from "@/lib/i18n";
 import { ago, cn } from "@/lib/utils";
 
 function DemoNote() {
@@ -480,6 +481,37 @@ export function RightsCard() {
             ))}
           </ul>
         )}
+      </div>
+    </Card>
+  );
+}
+
+/** English / हिन्दी / मराठी: saved on the account (also used for WhatsApp messages). */
+export function LanguageCard() {
+  const [lang, setLocal] = useLang();
+  const qc = useQueryClient();
+  const t = useT();
+  const choose = async (l: Lang) => {
+    setLocal(l);
+    await api.put("/account/language", { language: l });
+    qc.invalidateQueries({ queryKey: ["me"] });
+  };
+  return (
+    <Card id="language">
+      <CardHeader icon={<Globe className="size-4" />} title={t("settings.language")} description={t("settings.language.sub")} />
+      <div role="radiogroup" aria-label={t("settings.language")} className="flex flex-wrap gap-2 p-5">
+        {LANGS.map((l) => (
+          <button
+            key={l.v}
+            type="button"
+            role="radio"
+            aria-checked={lang === l.v}
+            onClick={() => choose(l.v)}
+            className={cn("min-h-11 rounded-[var(--radius-control)] border px-4 text-[14px]", lang === l.v ? "border-cobalt bg-cobalt-subtle font-medium" : "border-border text-muted")}
+          >
+            {l.label}
+          </button>
+        ))}
       </div>
     </Card>
   );
