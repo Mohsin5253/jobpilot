@@ -171,6 +171,7 @@ async def main() -> None:
         print(f"\nTailor   {t['rewrites']} rewrites · fabrication rate before guard {t['fabrication_rate_before_guard']:.1%} · after guard {t['violations_after_guard']}")
 
     out = ROOT / "reports" / f"eval-{datetime.now(UTC):%Y%m%d-%H%M%S}.json"
+    out.parent.mkdir(exist_ok=True)  # git-ignored, so missing on a fresh checkout (CI)
     out.write_text(json.dumps(report, indent=2, default=str))
     print(f"\nReport: {out.relative_to(ROOT.parent)}")
 
