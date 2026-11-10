@@ -58,7 +58,7 @@ async def run_dispatch(state: PipelineState) -> dict:
             to = draft.to_email or match.job.recruiter_email
             if connected and to:
                 try:
-                    await send_application(draft.id)
+                    await send_application(draft.id, wait=True)  # sends are spaced; the background job waits
                 except Exception as exc:  # leave it approved-but-unsent; user can send manually
                     log.warning("dispatch.send_failed", draft_id=str(draft.id), error=str(exc))
                     manual += 1

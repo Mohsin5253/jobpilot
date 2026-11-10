@@ -22,7 +22,7 @@ async def _user(email: str, **prefs_update) -> AsyncClient:
     from app.main import app
 
     c = AsyncClient(transport=ASGITransport(app=app), base_url="http://test")
-    r = await c.post("/api/auth/register", json={"consent": True, "email": email, "password": "password123"})
+    r = await c.post("/api/auth/register", json={"consent": True, "adult": True, "email": email, "password": "password123"})
     c.headers["authorization"] = f"Bearer {r.json()['access_token']}"
     assert (await c.post("/api/profile/resume", files={"file": ("resume.md", SAMPLE.read_bytes(), "text/markdown")})).status_code == 200
     if prefs_update:

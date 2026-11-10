@@ -13,7 +13,15 @@ from app.services import resume_doc
 from app.services.mailer import send_as_user
 
 
-async def send_application(draft_id: uuid.UUID) -> OutreachDraft:
+# Outreach etiquette: every application email says how to opt out of the one follow-up.
+OPT_OUT = "If this isn't relevant, just reply \"no\" and I won't follow up."
+
+
+def with_opt_out(body: str) -> str:
+    return body if "won't follow up" in body else f"{body.rstrip()}\n\n{OPT_OUT}"
+
+
+async def send_application(draft_id: uuid.UUID, wait: bool = False) -> OutreachDraft:
     """Email an approved draft from the user's own mailbox, with the job-tailored resume PDF attached; marks it
     sent. Raises MailNotConnected if they haven't connected one."""
     async with session_scope() as s:
@@ -28,7 +36,8 @@ async def send_application(draft_id: uuid.UUID) -> OutreachDraft:
         draft.user_id,
         draft.to_email or match.job.recruiter_email or "",
         draft.subject,
-        draft.email_body,
+        with_opt_out(draft.email_body),
+        wait=wait,
         reply_to=resume.email or None,
         attachments=[(resume_doc.filename(doc, "pdf"), resume_doc.render_pdf(doc), "application/pdf")],
         cc=draft.cc_email,

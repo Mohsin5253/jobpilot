@@ -26,7 +26,10 @@ export function AuthForm({ mode }: { mode: "login" | "register" }) {
     setError(null);
     try {
       const body: Record<string, unknown> = Object.fromEntries(fd);
-      if (mode === "register") body.consent = fd.get("consent") === "on";
+      if (mode === "register") {
+        body.consent = fd.get("consent") === "on";
+        body.adult = fd.get("adult") === "on";
+      }
       await api.post(`/auth/${mode}`, body);
       router.replace(mode === "register" ? "/onboarding" : params.get("next") || "/dashboard");
       router.refresh();
@@ -77,10 +80,18 @@ export function AuthForm({ mode }: { mode: "login" | "register" }) {
           </Field>
           {mode === "register" && (
             <label className="flex items-start gap-2.5 text-[12.5px] leading-relaxed text-text-2">
+              <input name="adult" type="checkbox" required className="mt-0.5 size-4 shrink-0 accent-[var(--cobalt)]" />
+              <span>I am 18 or older.</span>
+            </label>
+          )}
+          {mode === "register" && (
+            <label className="flex items-start gap-2.5 text-[12.5px] leading-relaxed text-text-2">
               <input name="consent" type="checkbox" required className="mt-0.5 size-4 shrink-0 accent-[var(--cobalt)]" />
               <span>
                 I agree that JobPilot may process my resume and preferences to find and prepare applications for me, as described in the{" "}
-                <Link href="/privacy" className="text-cobalt-text underline">Privacy policy</Link>. I can export or delete my data any time.
+                <Link href="/privacy" className="text-cobalt-text underline">Privacy policy</Link> and the{" "}
+                <Link href="/trust#consent" className="text-cobalt-text underline">consent notice</Link>. Other uses (sending, a public proof page, WhatsApp) are
+                separate switches I can turn on later. I can export or delete my data any time.
               </span>
             </label>
           )}

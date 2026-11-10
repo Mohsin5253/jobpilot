@@ -2,7 +2,20 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import type { ReactNode } from "react";
 
+import { GrievanceForm } from "@/components/grievance-form";
 import { CONTACT_EMAIL, GRIEVANCE_EMAIL, GRIEVANCE_OFFICER } from "@/components/legal";
+import { API_URL } from "@/lib/server-api";
+
+type NoticeItem = { purpose: string; description: string; data: string; why: string; retention: string; withdraw: string };
+
+async function getNotice(): Promise<{ version: string; purposes: NoticeItem[] } | null> {
+  try {
+    const r = await fetch(`${API_URL}/api/consents/notice`, { next: { revalidate: 3600 }, signal: AbortSignal.timeout(4000) });
+    return r.ok ? r.json() : null;
+  } catch {
+    return null;
+  }
+}
 
 export const metadata: Metadata = {
   title: "Trust",
@@ -10,7 +23,7 @@ export const metadata: Metadata = {
   alternates: { canonical: "/trust" },
 };
 
-const UPDATED = "10 November 2026";
+const UPDATED = "10 November 2026";  // bump with the consent notice version
 
 function Section({ id, title, children }: { id: string; title: string; children: ReactNode }) {
   return (
@@ -38,6 +51,7 @@ const TOC = [
   ["checks", "What we check"],
   ["never", "What we never do"],
   ["data", "Data we store"],
+  ["consent", "Consent notice"],
   ["rights", "Your rights"],
   ["grievance", "Grievance contact"],
   ["subprocessors", "Who processes data for us"],
@@ -51,10 +65,14 @@ const SUBPROCESSORS: [string, string, string][] = [
   ["GitHub, Codeforces", "Public profile data for your proof page. They receive only the handle you link", "United States, Russia"],
   ["Our transactional email provider", "Password resets and match alerts", "Depends on the provider"],
   ["Sentry", "Error monitoring, configured not to receive personal data", "United States"],
+  ["Google (Gmail API)", "Only if you connect Gmail: sends the applications you approve. Send-only access; we can’t read your mail", "Global"],
   ["Meta (WhatsApp Cloud API)", "Only if you turn on the WhatsApp digest: your number and the digest text", "Global"],
 ];
 
-export default function TrustPage() {
+export const revalidate = 3600;
+
+export default async function TrustPage() {
+  const notice = await getNotice();
   return (
     <article className="mx-auto max-w-3xl px-4 py-16 sm:px-6">
       <div className="eyebrow mb-3">Trust</div>
@@ -99,6 +117,7 @@ export default function TrustPage() {
             "Press Submit on an application form. The browser extension fills forms; you submit them.",
             "Invent resume content: skills, tools, numbers or experience you didn’t give us.",
             "Guess email addresses, or email anyone a company doesn’t list publicly.",
+            "Read your inbox. Gmail access is limited to sending, and every send needs your approval.",
             "Store your prompts or the AI’s replies in run traces. Traces keep timings, token counts and cost.",
             "Sell your data, or use your resume to train AI models.",
           ]}
@@ -111,19 +130,48 @@ export default function TrustPage() {
             "Your account: name, email address and a hashed password.",
             "Your resume, the skills you confirm, and your search preferences.",
             "What the agents make for you: matches, tailored resumes, drafts and your application tracker.",
-            "Your mailbox connection, if you add one: the password is encrypted and used only to send what you approve.",
+            "Your mailbox connection, if you add one: for Gmail, a Google token that can only send email; for other providers, an app password. Either is encrypted with a key kept outside the database, and used only to send what you approve, at least 90 seconds apart.",
             "Your consents: each purpose you agreed to, when, and which version of the notice you saw.",
             "Run traces and AI usage records: which agent ran, how long it took, tokens and cost.",
           ]}
         />
         <p>
-          We keep your data while your account is open. AI usage records are deleted after 90 days and notifications after 60. Demo accounts are deleted after 24 hours. When you delete your
+          We keep your data while your account is open. AI usage records are deleted after 90 days and notifications after 60. Demo accounts are deleted after 24 hours. Accounts nobody has used for 12 months are deleted, after an email notice 30 days before. When you delete your
           account, everything in it is deleted. More detail is in the{" "}
           <Link href="/privacy" className="text-cobalt-text hover:underline">
             privacy policy
           </Link>
           .
         </p>
+      </Section>
+
+      <Section id="consent" title="Consent notice">
+        <p>
+          JobPilot is for students aged 18 or older. Each use of your data is a separate consent you can give or withdraw on its own in Settings → Privacy & consent;
+          withdrawing is as easy as agreeing and stops that use at once. We record what you agreed to, when, how, and which version of this notice you saw.
+        </p>
+        {notice ? (
+          <div className="space-y-3">
+            {notice.purposes.map((p) => (
+              <div key={p.purpose} className="card p-4">
+                <div className="text-[15px] font-semibold text-text">{p.description}</div>
+                <dl className="mt-2 grid gap-1.5 text-[14px] sm:grid-cols-[110px_1fr]">
+                  <dt className="text-text-3">Data used</dt>
+                  <dd>{p.data}</dd>
+                  <dt className="text-text-3">Why</dt>
+                  <dd>{p.why}</dd>
+                  <dt className="text-text-3">How long</dt>
+                  <dd>{p.retention}</dd>
+                  <dt className="text-text-3">To withdraw</dt>
+                  <dd>{p.withdraw}</dd>
+                </dl>
+              </div>
+            ))}
+            <p className="text-[13px] text-text-3">Notice version {notice.version}.</p>
+          </div>
+        ) : (
+          <p>The itemized notice is shown at sign-up and in Settings → Privacy & consent.</p>
+        )}
       </Section>
 
       <Section id="rights" title="Your rights under the DPDP Act">
@@ -143,7 +191,7 @@ export default function TrustPage() {
               <b className="text-text">Withdraw consent:</b> Settings → Privacy & consent. Withdrawing is as easy as agreeing, and switches that feature off at once.
             </>,
             <>
-              <b className="text-text">Grievance:</b> write to the contact below. We aim to reply within 30 days.
+              <b className="text-text">Grievance:</b> use Settings → Your data rights, the form below, or write to the contact below. We aim to reply within 30 days.
             </>,
             <>
               <b className="text-text">Nomination:</b> you can name someone to exercise these rights for you if you die or become unable to. Write to us to set this up.
@@ -163,6 +211,10 @@ export default function TrustPage() {
           </p>
         </div>
         {GRIEVANCE_EMAIL !== CONTACT_EMAIL && <p className="text-[14px]">Anything else: {CONTACT_EMAIL}.</p>}
+        <div className="card p-5">
+          <h3 className="mb-3 text-[15px] font-semibold text-text">Send a request without an account</h3>
+          <GrievanceForm />
+        </div>
       </Section>
 
       <Section id="subprocessors" title="Who processes data for us">

@@ -32,6 +32,7 @@ import { useCallback, useEffect, useRef, useState, type ComponentType, type Reac
 
 import { AgentAvatar } from "@/components/agents/agent-avatar";
 import { CrewStatusProvider, statusesFromRun } from "@/components/agents/crew-status";
+import { AgeGateBanner } from "@/components/account-settings";
 import { CommandPalette } from "@/components/command-palette";
 import { Logo } from "@/components/logo";
 import { NotificationBell } from "@/components/notification-bell";
@@ -656,6 +657,7 @@ export function AppShell({ children }: { children: ReactNode }) {
               tabIndex={-1}
               className="mx-auto w-full max-w-[1440px] flex-1 px-4 pt-5 pb-[calc(152px+env(safe-area-inset-bottom))] outline-none md:px-6 md:pt-6 md:pb-10 lg:px-8 lg:pt-8"
             >
+              <AgeGateBanner />
               {children}
             </main>
           </div>

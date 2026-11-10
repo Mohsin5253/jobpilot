@@ -1,7 +1,9 @@
 """Outgoing mail.
 
-* Applications go out from the user's own mailbox (their MailAccount: e.g. Gmail with an app password),
-  never from a shared address. Without one, approving a draft opens it in the user's mail app instead.
+* Applications go out from the user's own mailbox (their MailAccount): Gmail through Google OAuth (gmail.send
+  only), or any SMTP server with an app password (legacy). Never from a shared address. Without one, approving a
+  draft opens it in the user's mail app instead. Sends from one mailbox are spaced at least SEND_SPACING_S apart, and
+  only while the user's 'sending' consent is active.
 * System mail (password resets, new-match alerts) uses the service's own SMTP settings (SMTP_*).
 """
 
@@ -9,6 +11,7 @@ import asyncio
 import smtplib
 import uuid
 from dataclasses import dataclass
+from datetime import UTC, datetime
 from email.message import EmailMessage
 from email.utils import formataddr
 
@@ -17,8 +20,9 @@ from sqlalchemy import select
 from app.config import settings
 from app.db import session_scope
 from app.logging import log
-from app.models import MailAccount
+from app.models import Consent, MailAccount
 from app.security import decrypt_secret
+from app.services import gmail
 
 Attachment = tuple[str, bytes, str]  # (filename, content, mime type)
 
@@ -31,10 +35,20 @@ class Sender:
     password: str | None
     from_email: str
     from_name: str = ""
+    provider: str = "smtp"  # smtp | gmail_oauth
+    refresh_token: str | None = None
 
 
 class MailNotConnected(RuntimeError):
     pass
+
+
+class SendTooSoon(RuntimeError):
+    """Another email left this mailbox less than SEND_SPACING_S ago."""
+
+    def __init__(self, wait_s: int):
+        super().__init__(f"To protect your mailbox, sends are spaced {settings.send_spacing_s} seconds apart. Try again in {wait_s} seconds.")
+        self.wait_s = wait_s
 
 
 def system_sender() -> Sender | None:
@@ -48,7 +62,13 @@ async def user_sender(user_id: uuid.UUID) -> Sender | None:
         acct = (await s.execute(select(MailAccount).where(MailAccount.user_id == user_id))).scalar_one_or_none()
     if acct is None:
         return None
-    password = decrypt_secret(acct.password_enc)
+    if acct.provider == "gmail_oauth":
+        refresh = decrypt_secret(acct.refresh_token_enc or "")
+        if refresh is None:
+            log.warning("mail.undecryptable", user_id=str(user_id))
+            return None
+        return Sender(acct.host, acct.port, acct.username, None, acct.from_email, acct.from_name, provider="gmail_oauth", refresh_token=refresh)
+    password = decrypt_secret(acct.password_enc or "")
     if password is None:  # the encryption key changed: the user has to reconnect
         log.warning("mail.undecryptable", user_id=str(user_id))
         return None
@@ -76,7 +96,7 @@ async def verify_login(sender: Sender) -> None:
     await asyncio.to_thread(_verify_sync, sender)
 
 
-def _send_sync(sender: Sender, to: str, subject: str, body: str, reply_to: str | None, attachments: list[Attachment], cc: str | None) -> None:
+def _build(sender: Sender, to: str, subject: str, body: str, reply_to: str | None, attachments: list[Attachment], cc: str | None) -> EmailMessage:
     msg = EmailMessage()
     msg["From"] = formataddr((sender.from_name, sender.from_email)) if sender.from_name else sender.from_email
     msg["To"] = to
@@ -89,6 +109,10 @@ def _send_sync(sender: Sender, to: str, subject: str, body: str, reply_to: str |
     for name, content, mime in attachments:
         maintype, subtype = mime.split("/", 1)
         msg.add_attachment(content, maintype=maintype, subtype=subtype, filename=name)
+    return msg
+
+
+def _send_sync(sender: Sender, msg: EmailMessage) -> None:
     with _connect(sender) as smtp:
         smtp.send_message(msg)
 
@@ -96,15 +120,35 @@ def _send_sync(sender: Sender, to: str, subject: str, body: str, reply_to: str |
 async def send_email(
     to: str, subject: str, body: str, *, sender: Sender, reply_to: str | None = None, attachments: list[Attachment] | None = None, cc: str | None = None
 ) -> None:
-    await asyncio.to_thread(_send_sync, sender, to, subject, body, reply_to, attachments or [], cc)
+    msg = _build(sender, to, subject, body, reply_to, attachments or [], cc)
+    if sender.provider == "gmail_oauth":
+        await gmail.send_raw(sender.refresh_token or "", msg.as_bytes())
+    else:
+        await asyncio.to_thread(_send_sync, sender, msg)
 
 
-async def send_as_user(user_id: uuid.UUID, to: str, subject: str, body: str, **kw) -> Sender:
-    """Send from the user's own mailbox. Raises MailNotConnected when they haven't connected one."""
-    sender = await user_sender(user_id)
-    if sender is None:
-        raise MailNotConnected("Connect your email in Settings to send from your own address.")
-    await send_email(to, subject, body, sender=sender, **kw)
+async def send_as_user(user_id: uuid.UUID, to: str, subject: str, body: str, *, wait: bool = False, **kw) -> Sender:
+    """Send from the user's own mailbox. Raises MailNotConnected when they haven't connected one (or withdrew the
+    'sending' consent), and SendTooSoon inside the spacing window unless wait=True (background dispatch waits)."""
+    async with session_scope() as s:
+        # The row lock serialises concurrent sends from one mailbox, so the spacing holds across workers.
+        acct = (await s.execute(select(MailAccount).where(MailAccount.user_id == user_id).with_for_update())).scalar_one_or_none()
+        consented = (
+            await s.execute(select(Consent.id).where(Consent.user_id == user_id, Consent.purpose == "sending", Consent.withdrawn_at.is_(None)))
+        ).first()
+        if acct is None or consented is None:
+            raise MailNotConnected("Connect your email in Settings to send from your own address.")
+        if acct.last_sent_at:
+            gap = (datetime.now(UTC) - acct.last_sent_at).total_seconds()
+            if gap < settings.send_spacing_s:
+                if not wait:
+                    raise SendTooSoon(int(settings.send_spacing_s - gap) + 1)
+                await asyncio.sleep(settings.send_spacing_s - gap)
+        sender = await user_sender(user_id)
+        if sender is None:
+            raise MailNotConnected("Reconnect your email in Settings: the saved connection can't be used any more.")
+        await send_email(to, subject, body, sender=sender, **kw)
+        acct.last_sent_at = datetime.now(UTC)
     return sender
 
 

@@ -94,6 +94,26 @@ touches Vercel and two Render variables. Nothing in the code names a domain.
 - [ ] Forgot password → the reset email arrives from `SMTP_FROM`.
 - [ ] `/admin` → **Shared ingestion** shows every source with a recent last fetch and nothing failing.
 
+## Gmail sending with Google sign-in (recommended)
+
+Students connect Gmail by signing in with Google instead of pasting an app password. JobPilot asks only for
+`gmail.send` (send as the user, no reading) plus `openid email` (which address was connected).
+
+1. Google Cloud Console → create a project → **APIs & Services → Library** → enable the **Gmail API**.
+2. **OAuth consent screen**: External; app name JobPilot; support email and developer contact; app domain = your web
+   origin, privacy policy `https://<web>/privacy`, terms `https://<web>/terms`. Scopes: `openid`, `.../auth/userinfo.email`,
+   `.../auth/gmail.send`. While the app is in *Testing*, add your testers' Gmail addresses (up to 100).
+3. **Credentials → Create credentials → OAuth client ID** → Web application. Authorized redirect URI:
+   `https://<your web origin>/api/mail/google/callback` (it must match `APP_URL` exactly, through the Vercel proxy).
+4. Set `GOOGLE_CLIENT_ID` and `GOOGLE_CLIENT_SECRET` in the Render `jobpilot-shared` group. Settings → Your email then
+   shows **Connect Gmail with Google**; app passwords stay available for other providers.
+5. Before going beyond 100 test users, submit the app for **verification**. `gmail.send` is a *sensitive* scope, not a
+   *restricted* one, so Google reviews the app (demo video, privacy policy) but no third-party security assessment is
+   needed. Don't add read scopes: they're restricted and would require that assessment.
+
+Sends from one mailbox are spaced at least `SEND_SPACING_S` (90) seconds apart, and every application email ends
+with an opt-out line ("reply no and I won't follow up").
+
 ## WhatsApp digest (optional)
 
 1. Meta for Developers → create an app → add **WhatsApp** → note the **Phone number ID** and create a permanent
@@ -134,6 +154,16 @@ replicas is safe, with no Redis needed.
 - **Groq / Adzuna / JSearch / Hunter / SMTP**: change the value in the Render group; the services redeploy.
 - **JWT_SECRET**: changing it signs everyone out (harmless).
 - **ENCRYPTION_KEY**: don't, unless it leaked. Users then reconnect their mail in Settings.
+
+## Privacy operations (DPDP)
+
+- **Rights requests and grievances** arrive in `/admin` → Privacy requests, with the 30-day reply date. Answering one
+  emails the reply from `SMTP_FROM`.
+- **Inactive accounts**: the daily retention sweep emails a notice to accounts unused for 11 months and deletes them at
+  12 (`INACTIVE_DELETE_DAYS`, `INACTIVE_NOTICE_DAYS`). Signing in cancels it.
+- **Age gate**: sign-up requires "I am 18 or older"; older accounts confirm once in-app and their agents pause until they do.
+- **Consent notice**: change the text in `backend/app/services/consent.py` and bump `CONSENT_VERSION`.
+- **Breach**: follow [docs/breach-response.md](docs/breach-response.md) (72-hour report to the Data Protection Board).
 
 ## Backups and data requests
 

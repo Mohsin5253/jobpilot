@@ -4,13 +4,18 @@ import smtplib
 from datetime import UTC, datetime
 
 from fastapi import APIRouter, HTTPException, Request, Response, status
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, RedirectResponse
+from pydantic import BaseModel
 from sqlalchemy import delete, select
 
 from app.api.deps import RealUserDep, SessionDep, UserDep
-from app.models import AgentRun, JobMatch, MailAccount, Notification, OutreachDraft, Profile, SkillQuestion, User
+from app.config import settings
+from app.logging import log
+from app.models import AgentRun, Consent, JobMatch, MailAccount, Notification, OutreachDraft, Profile, RightsRequest, SkillQuestion, User
 from app.schemas import MailAccountIn, MailAccountOut
-from app.security import COOKIE_NAME, encrypt_secret, verify_password
+from app.security import COOKIE_NAME, decrypt_secret, encrypt_secret, verify_password
+from app.services import gmail
+from app.services.consent import grant, withdraw
 from app.services.mailer import Sender, verify_login
 from app.services.ratelimit import hit
 from app.services.usage import usage_today
@@ -19,10 +24,12 @@ router = APIRouter(tags=["account"])
 
 
 def _mail_out(acct: MailAccount | None) -> MailAccountOut:
+    google = settings.google_mail_enabled
     if acct is None:
-        return MailAccountOut(connected=False)
+        return MailAccountOut(connected=False, google_available=google)
     return MailAccountOut(
-        connected=True, host=acct.host, port=acct.port, from_email=acct.from_email, from_name=acct.from_name, verified_at=acct.verified_at
+        connected=True, provider=acct.provider, google_available=google, host=acct.host, port=acct.port,
+        from_email=acct.from_email, from_name=acct.from_name, verified_at=acct.verified_at,
     )
 
 
@@ -47,19 +54,79 @@ async def connect_mail_account(body: MailAccountIn, user: RealUserDep, session: 
     except (smtplib.SMTPException, OSError) as exc:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, f"Couldn't reach {body.host}:{body.port} ({type(exc).__name__}). Check the server and port.") from exc
     acct = await session.get(MailAccount, user.id) or MailAccount(user_id=user.id)
+    if acct.provider == "gmail_oauth" and acct.refresh_token_enc:
+        await gmail.revoke(decrypt_secret(acct.refresh_token_enc) or "")
+    acct.provider, acct.refresh_token_enc = "smtp", None
     acct.host, acct.port, acct.username, acct.from_email = sender.host, sender.port, str(body.username), str(body.username)
     acct.from_name = sender.from_name
     acct.password_enc = encrypt_secret(password)
     acct.verified_at = datetime.now(UTC)
     session.add(acct)
+    await grant(session, user.id, "sending", method="app_password")
     await session.commit()
     return _mail_out(acct)
 
 
 @router.delete("/mail-account", status_code=status.HTTP_204_NO_CONTENT)
 async def disconnect_mail_account(user: UserDep, session: SessionDep) -> None:
+    """Disconnecting deletes the stored credential, tells Google to drop its grant, and ends the 'sending' consent."""
+    acct = await session.get(MailAccount, user.id)
+    if acct and acct.provider == "gmail_oauth" and acct.refresh_token_enc:
+        await gmail.revoke(decrypt_secret(acct.refresh_token_enc) or "")
     await session.execute(delete(MailAccount).where(MailAccount.user_id == user.id))
+    await withdraw(session, user.id, "sending")
     await session.commit()
+
+
+@router.get("/mail/google/start")
+async def google_start(user: RealUserDep) -> dict:
+    """The Google consent screen URL (gmail.send scope only). The browser navigates there."""
+    if not settings.google_mail_enabled:
+        raise HTTPException(404, "Google sign-in for sending isn't set up on this server")
+    await hit("mail_verify", str(user.id))
+    return {"url": gmail.auth_url(gmail.make_state(user.id), login_hint=user.email)}
+
+
+@router.get("/mail/google/callback")
+async def google_callback(user: RealUserDep, session: SessionDep, state: str = "", code: str = "", error: str = "") -> RedirectResponse:
+    back = f"{settings.app_url.rstrip('/')}/settings"
+    if error or not code:
+        return RedirectResponse(f"{back}?mail=cancelled#mail", status_code=303)
+    if not gmail.check_state(state, user.id):
+        return RedirectResponse(f"{back}?mail=expired#mail", status_code=303)
+    try:
+        refresh, email = await gmail.exchange_code(code)
+    except gmail.GmailError as exc:
+        log.warning("mail.google_connect_failed", error=str(exc)[:200])
+        return RedirectResponse(f"{back}?mail=failed#mail", status_code=303)
+    acct = await session.get(MailAccount, user.id) or MailAccount(user_id=user.id)
+    acct.provider, acct.host, acct.port = "gmail_oauth", "gmail.googleapis.com", 443
+    acct.username = acct.from_email = email
+    acct.from_name = acct.from_name or user.name
+    acct.password_enc = None  # the app password (if any) is gone for good
+    acct.refresh_token_enc = encrypt_secret(refresh)
+    acct.verified_at = datetime.now(UTC)
+    session.add(acct)
+    await grant(session, user.id, "sending", method="google_oauth")
+    await session.commit()
+    return RedirectResponse(f"{back}?mail=connected#mail", status_code=303)
+
+
+class AgeIn(BaseModel):
+    adult: bool
+
+
+@router.post("/account/age")
+async def confirm_age(body: AgeIn, user: RealUserDep, session: SessionDep) -> dict:
+    """Age gate for accounts created before it existed. Under 18: nothing is processed (no runs) until a parent's
+    verifiable consent can be collected; the account can still be exported or deleted."""
+    if not body.adult:
+        user.adult_confirmed_at = None
+        await session.commit()
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "JobPilot can't process data for students under 18 yet. You can export or delete your account in Settings.")
+    user.adult_confirmed_at = user.adult_confirmed_at or datetime.now(UTC)
+    await session.commit()
+    return {"adult_confirmed_at": user.adult_confirmed_at.isoformat()}
 
 
 @router.get("/usage")
@@ -84,6 +151,9 @@ async def export(user: UserDep, session: SessionDep) -> JSONResponse:
     runs = (await session.execute(select(AgentRun).where(AgentRun.user_id == user.id))).scalars().all()
     questions = (await session.execute(select(SkillQuestion).where(SkillQuestion.user_id == user.id))).scalars().all()
     notes = (await session.execute(select(Notification).where(Notification.user_id == user.id))).scalars().all()
+    consents = (await session.execute(select(Consent).where(Consent.user_id == user.id))).scalars().all()
+    requests = (await session.execute(select(RightsRequest).where(RightsRequest.user_id == user.id))).scalars().all()
+    mail = await session.get(MailAccount, user.id)
     data = {
         "exported_at": datetime.now(UTC).isoformat(),
         "account": {"email": user.email, "name": user.name, "plan": user.plan, "created_at": user.created_at.isoformat()},
@@ -110,6 +180,18 @@ async def export(user: UserDep, session: SessionDep) -> JSONResponse:
         "skill_answers": [{"skill": q.skill, "status": q.status, "answer": q.answer} for q in questions],
         "runs": [{"trigger": r.trigger, "status": r.status, "created_at": r.created_at.isoformat(), "stats": r.stats} for r in runs],
         "notifications": [{"title": n.title, "body": n.body, "created_at": n.created_at.isoformat()} for n in notes],
+        "consents": [
+            {"purpose": c.purpose, "notice_version": c.notice_version, "method": c.method, "granted_at": c.granted_at.isoformat(),
+             "withdrawn_at": c.withdrawn_at.isoformat() if c.withdrawn_at else None}
+            for c in consents
+        ],
+        "rights_requests": [
+            {"kind": r.kind, "details": r.details, "status": r.status, "response": r.response, "created_at": r.created_at.isoformat(), "due_at": r.due_at.isoformat()}
+            for r in requests
+        ],
+        # Connection details only: the credential itself is never exported.
+        "mail_account": {"provider": mail.provider, "from_email": mail.from_email, "connected_at": mail.verified_at.isoformat() if mail.verified_at else None} if mail else None,
+        "age_confirmed_at": user.adult_confirmed_at.isoformat() if user.adult_confirmed_at else None,
     }
     return JSONResponse(data, headers={"Content-Disposition": 'attachment; filename="jobpilot-export.json"'})
 

@@ -15,7 +15,7 @@ from app.agents.graph import build_graph
 from app.config import settings
 from app.db import session_scope
 from app.logging import log
-from app.models import AgentRun, RunStatus
+from app.models import AgentRun, RunStatus, User
 from app.tracing import flush, observe
 
 ACTIVE = (RunStatus.queued, RunStatus.running, RunStatus.resume_queued)
@@ -48,8 +48,15 @@ async def close_graph() -> None:
     _pool, _graph = None, None
 
 
+class AgeNotConfirmed(PermissionError):
+    """DPDP age gate: no processing until the user has confirmed they're 18 or older (demo accounts excepted)."""
+
+
 async def enqueue_run(s: AsyncSession, user_id: uuid.UUID, trigger: str = "manual", params: dict | None = None) -> tuple[AgentRun, bool]:
-    """Returns (run, created). One active run per user at a time."""
+    """Returns (run, created). One active run per user at a time. Raises AgeNotConfirmed behind the age gate."""
+    adult, demo = (await s.execute(select(User.adult_confirmed_at, User.is_demo).where(User.id == user_id))).one()
+    if adult is None and not demo:
+        raise AgeNotConfirmed("Confirm you're 18 or older in Settings before the agents can run.")
     existing = (
         await s.execute(
             select(AgentRun).where(AgentRun.user_id == user_id, AgentRun.status.in_(ACTIVE)).order_by(AgentRun.created_at.desc())
@@ -186,7 +193,10 @@ async def enqueue_scheduled_runs() -> int:
             )
         ).scalars().all()
         for uid in rows:
-            _, was_created = await enqueue_run(s, uid, trigger="scheduled")
+            try:
+                _, was_created = await enqueue_run(s, uid, trigger="scheduled")
+            except AgeNotConfirmed:
+                continue
             created += was_created
     if created:
         log.info("scheduler.enqueued", count=created)
@@ -234,7 +244,10 @@ async def enqueue_research_runs() -> int:
             )
         ).scalars().all()
         for uid in rows:
-            _, was_created = await enqueue_run(s, uid, trigger="research")
+            try:
+                _, was_created = await enqueue_run(s, uid, trigger="research")
+            except AgeNotConfirmed:
+                continue
             created += was_created
     if created:
         log.info("scheduler.research_enqueued", count=created)

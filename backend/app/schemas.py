@@ -118,6 +118,7 @@ class RegisterIn(BaseModel):
     password: str = Field(min_length=8, max_length=128)
     name: str = Field(default="", max_length=200)
     consent: bool = False  # the privacy notice, explicitly accepted (DPDP)
+    adult: bool = False  # age gate: "I am 18 or older"
 
 
 class LoginIn(BaseModel):
@@ -135,6 +136,7 @@ class UserOut(BaseModel):
     is_demo: bool = False
     is_admin: bool = False
     expires_at: datetime | None = None
+    adult_confirmed_at: datetime | None = None
 
 
 class ForgotPasswordIn(BaseModel):
@@ -161,6 +163,8 @@ class MailAccountIn(BaseModel):
 
 class MailAccountOut(BaseModel):
     connected: bool
+    provider: str | None = None  # smtp | gmail_oauth
+    google_available: bool = False  # Google sign-in for sending is configured on this server
     host: str | None = None
     port: int | None = None
     from_email: str | None = None

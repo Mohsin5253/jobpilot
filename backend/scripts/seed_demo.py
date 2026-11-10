@@ -6,6 +6,7 @@ Credentials: DEMO_EMAIL / DEMO_PASSWORD env vars, defaulting to the values below
 
 import asyncio
 import os
+from datetime import UTC, datetime
 from pathlib import Path
 
 from sqlalchemy import delete
@@ -26,7 +27,7 @@ SAMPLE = Path(__file__).resolve().parents[1] / "evals" / "data" / "sample_resume
 async def main() -> None:
     async with session_scope() as s:
         await s.execute(delete(User).where(User.email == EMAIL))
-        user = User(email=EMAIL, name="Aarav Mehta", password_hash=hash_password(PASSWORD))
+        user = User(email=EMAIL, name="Aarav Mehta", password_hash=hash_password(PASSWORD), adult_confirmed_at=datetime.now(UTC))
         s.add(user)
     # The user must be committed before the LLM call: its cost row references users.id.
     text = extract_text(SAMPLE.name, SAMPLE.read_bytes())

@@ -9,8 +9,9 @@ from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.responses import JSONResponse
 from sqlalchemy import text
 
-from app.api.routes import account, admin, auth, campus, consent, drafts, events, evidence, extension, insights, matches, notifications, profile, public, questions, runs, stats, whatsapp
+from app.api.routes import account, admin, auth, campus, consent, drafts, events, evidence, extension, insights, matches, notifications, profile, public, questions, rights, runs, stats, whatsapp
 from app.services.events import hub
+from app.services.runs import AgeNotConfirmed
 from app.config import settings
 from app.db import engine
 from app.logging import configure_logging, log
@@ -55,6 +56,11 @@ app.add_middleware(
 )
 
 
+@app.exception_handler(AgeNotConfirmed)
+async def age_gate(_: Request, exc: AgeNotConfirmed) -> JSONResponse:
+    return JSONResponse({"detail": str(exc), "code": "age_not_confirmed"}, status_code=403)
+
+
 @app.middleware("http")
 async def request_context(request: Request, call_next):
     request_id = request.headers.get("x-request-id") or uuid.uuid4().hex[:16]
@@ -78,7 +84,7 @@ async def request_context(request: Request, call_next):
     return response
 
 
-for r in (auth.router, account.router, admin.router, consent.router, extension.router, evidence.router, insights.router, campus.router, whatsapp.router, profile.router, matches.router, drafts.router, questions.router, notifications.router, runs.router, stats.router, events.router, public.router):
+for r in (auth.router, account.router, admin.router, consent.router, extension.router, evidence.router, insights.router, campus.router, whatsapp.router, profile.router, matches.router, drafts.router, questions.router, notifications.router, runs.router, stats.router, events.router, public.router, rights.router):
     app.include_router(r, prefix="/api")
 
 

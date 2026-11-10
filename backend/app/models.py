@@ -73,6 +73,8 @@ class User(Base):
     expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), index=True)
     pro_interest_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     last_seen_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    adult_confirmed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))  # age gate: said they're 18+
+    inactivity_notice_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))  # warned before the 12-month deletion
 
     profile: Mapped["Profile | None"] = relationship(back_populates="user", uselist=False)
 
@@ -444,7 +446,11 @@ class MailAccount(Base):
     username: Mapped[str] = mapped_column(String(320))
     from_email: Mapped[str] = mapped_column(String(320))
     from_name: Mapped[str] = mapped_column(String(200), default="")
-    password_enc: Mapped[str] = mapped_column(Text)
+    password_enc: Mapped[str | None] = mapped_column(Text)  # SMTP app password (legacy); None for Gmail OAuth
+    # smtp (app password) | gmail_oauth (Google sign-in, gmail.send scope only: the refresh token, encrypted)
+    provider: Mapped[str] = mapped_column(String(20), default="smtp", server_default="smtp")
+    refresh_token_enc: Mapped[str | None] = mapped_column(Text)
+    last_sent_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))  # sends are spaced >= 90 s apart
     verified_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     updated_at: Mapped[datetime] = _now_col(onupdate=func.now())
 
@@ -457,10 +463,31 @@ class Consent(Base):
 
     id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=uuid.uuid4)
     user_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"))
-    purpose: Mapped[str] = mapped_column(String(30))  # core | whatsapp | college_share | public_proof
-    version: Mapped[str] = mapped_column(String(20))
+    purpose: Mapped[str] = mapped_column(String(30))  # see services/consent.PURPOSES
+    notice_version: Mapped[str] = mapped_column(String(20))  # the notice the user saw when agreeing
+    method: Mapped[str] = mapped_column(String(30), default="checkbox", server_default="checkbox")  # checkbox | google_oauth | whatsapp | migrated ...
+    guardian_user_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"))  # verifiable parental consent
     granted_at: Mapped[datetime] = _now_col()
     withdrawn_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+class RightsRequest(Base):
+    """A data-principal request under the DPDP Act (access, correction, erasure, grievance, nomination), answered
+    within 30 days. Grievances can also come from people without an account (user_id None, contact_email set)."""
+
+    __tablename__ = "rights_requests"
+    __table_args__ = (Index("ix_rights_status_due", "status", "due_at"),)
+
+    id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=uuid.uuid4)
+    user_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    contact_email: Mapped[str] = mapped_column(String(320), default="", server_default="")
+    kind: Mapped[str] = mapped_column(String(20))
+    details: Mapped[str] = mapped_column(Text, default="", server_default="")
+    status: Mapped[str] = mapped_column(String(20), default="open", server_default="open")  # open | resolved
+    response: Mapped[str] = mapped_column(Text, default="", server_default="")
+    created_at: Mapped[datetime] = _now_col()
+    due_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    resolved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
 
 class ApiToken(Base):

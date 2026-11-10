@@ -37,7 +37,7 @@ from sqlalchemy import text  # noqa: E402
 
 from app.db import engine  # noqa: E402
 
-TABLES = "drive_statuses, campus_drives, org_members, organizations, api_tokens, consents, mail_accounts, password_resets, rate_limits, board_probes, source_targets, company_contacts, notifications, skill_questions, reminders, outreach_drafts, tailored_resumes, llm_calls, job_matches, agent_runs, jobs, profiles, users"
+TABLES = "rights_requests, drive_statuses, campus_drives, org_members, organizations, api_tokens, consents, mail_accounts, password_resets, rate_limits, board_probes, source_targets, company_contacts, notifications, skill_questions, reminders, outreach_drafts, tailored_resumes, llm_calls, job_matches, agent_runs, jobs, profiles, users"
 
 
 @pytest.fixture(scope="session", autouse=True)
@@ -67,7 +67,7 @@ async def client():
 
 @pytest.fixture
 async def authed(client):
-    r = await client.post("/api/auth/register", json={"consent": True, "email": "aarav@example.com", "password": "password123", "name": "Aarav"})
+    r = await client.post("/api/auth/register", json={"consent": True, "adult": True, "email": "aarav@example.com", "password": "password123", "name": "Aarav"})
     assert r.status_code == 201
     client.headers["authorization"] = f"Bearer {r.json()['access_token']}"
     return client

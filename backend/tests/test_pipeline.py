@@ -27,9 +27,9 @@ async def _work():
 
 
 async def test_auth_flow(client):
-    r = await client.post("/api/auth/register", json={"consent": True, "email": "a@b.co", "password": "password123"})
+    r = await client.post("/api/auth/register", json={"consent": True, "adult": True, "email": "a@b.co", "password": "password123"})
     assert r.status_code == 201
-    assert (await client.post("/api/auth/register", json={"consent": True, "email": "A@b.co", "password": "password123"})).status_code == 409
+    assert (await client.post("/api/auth/register", json={"consent": True, "adult": True, "email": "A@b.co", "password": "password123"})).status_code == 409
     assert (await client.post("/api/auth/login", json={"email": "a@b.co", "password": "wrong-pass"})).status_code == 401
     assert (await client.get("/api/auth/me")).status_code == 200  # cookie session
     client.cookies.clear()

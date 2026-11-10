@@ -3,7 +3,7 @@
 import { useQueryClient } from "@tanstack/react-query";
 import { Copy, CreditCard, Download, KeyRound, Mail, MessageCircle, Puzzle, ShieldCheck, Trash2 } from "lucide-react";
 import { useRouter } from "next/navigation";
-import { useState, type FormEvent } from "react";
+import { useEffect, useState, type FormEvent } from "react";
 import { toast } from "sonner";
 
 import { Badge } from "@/components/ui/badge";
@@ -14,7 +14,9 @@ import { Skeleton } from "@/components/ui/misc";
 import { ApiError, api, signOut } from "@/lib/api";
 import {
   useConnectMail,
+  useConfirmAge,
   useConsents,
+  useCreateRight,
   useCreateToken,
   useDisconnectMail,
   useExtensionTokens,
@@ -22,6 +24,7 @@ import {
   useMe,
   useProInterest,
   useRevokeToken,
+  useRights,
   useSaveWhatsApp,
   useSetConsent,
   useStopWhatsApp,
@@ -42,6 +45,34 @@ export function MailCard() {
   const disconnect = useDisconnectMail();
   const [editing, setEditing] = useState(false);
   const [advanced, setAdvanced] = useState(false);
+  const [appPassword, setAppPassword] = useState(false);
+  const [googling, setGoogling] = useState(false);
+
+  // Back from Google's consent screen: say how it went, once.
+  useEffect(() => {
+    const result = new URLSearchParams(window.location.search).get("mail");
+    if (!result) return;
+    const msg: Record<string, () => void> = {
+      connected: () => toast.success("Gmail connected", { description: "Approved applications are sent from your Gmail. JobPilot can send only; it can’t read your mail." }),
+      cancelled: () => toast("Gmail wasn’t connected"),
+      expired: () => toast.error("That sign-in link expired. Try again."),
+      failed: () => toast.error("Google didn’t complete the connection. Make sure the “Send email” box is ticked, then try again."),
+    };
+    msg[result]?.();
+    window.history.replaceState(null, "", window.location.pathname + window.location.hash);
+  }, []);
+
+  const connectGoogle = async () => {
+    setGoogling(true);
+    try {
+      const { url } = await api.get<{ url: string }>("/mail/google/start");
+      window.location.assign(url);
+    } catch (e) {
+      toast.error(e instanceof ApiError ? e.message : "Couldn’t start Google sign-in");
+      setGoogling(false);
+    }
+  };
+  const google = Boolean(acct?.google_available);
 
   const submit = (e: FormEvent<HTMLFormElement>) => {
     e.preventDefault();
@@ -77,13 +108,38 @@ export function MailCard() {
                 <span className="size-2 rounded-full bg-success" /> Sending as {acct.from_name ? `${acct.from_name} <${acct.from_email}>` : acct.from_email}
               </div>
               <div className="text-[12px] text-subtle">
-                {acct.host}:{acct.port}
-                {acct.verified_at && ` · verified ${ago(acct.verified_at)}`}
+                {acct.provider === "gmail_oauth" ? "Gmail, connected with Google (send-only access)" : `${acct.host}:${acct.port} · app password`}
+                {acct.verified_at && ` · ${ago(acct.verified_at)}`}
               </div>
+              {acct.provider !== "gmail_oauth" && google && (
+                <button type="button" onClick={connectGoogle} className="mt-1 text-[12px] text-accent hover:underline">
+                  Switch to Google sign-in and delete the stored password
+                </button>
+              )}
             </div>
             <div className="flex gap-2">
               <Button size="sm" onClick={() => setEditing(true)}>Change</Button>
               <Button size="sm" variant="danger" onClick={() => disconnect.mutate()} loading={disconnect.isPending}>Disconnect</Button>
+            </div>
+          </div>
+        ) : google && !appPassword ? (
+          <div className="space-y-3">
+            <Button variant="primary" onClick={connectGoogle} loading={googling}>
+              <Mail /> Connect Gmail with Google
+            </Button>
+            <p className="text-[12.5px] leading-relaxed text-muted">
+              Google asks you to allow one thing: sending email as you. JobPilot can’t read, delete or search your mail, and it only sends applications you approve, at
+              least 90 seconds apart. Disconnect any time here or at myaccount.google.com/permissions.
+            </p>
+            <div className="flex gap-3">
+              <button type="button" className="text-[12.5px] text-accent hover:underline" onClick={() => setAppPassword(true)}>
+                Not Gmail? Use another mail server
+              </button>
+              {editing && (
+                <button type="button" className="text-[12.5px] text-muted hover:underline" onClick={() => setEditing(false)}>
+                  Cancel
+                </button>
+              )}
             </div>
           </div>
         ) : (
@@ -290,6 +346,14 @@ export function DataCard() {
   );
 }
 
+const METHOD: Record<string, string> = {
+  checkbox: "ticked a box",
+  google_oauth: "connected Gmail",
+  app_password: "connected your mailbox",
+  whatsapp: "on WhatsApp",
+  migrated: "carried over when this notice was itemized",
+};
+
 export function ConsentCard() {
   const { data } = useConsents();
   const set = useSetConsent();
@@ -297,21 +361,157 @@ export function ConsentCard() {
   if (!data) return <Skeleton className="h-40" />;
   return (
     <Card id="privacy">
-      <CardHeader icon={<ShieldCheck className="size-4" />} title="Privacy & consent" description={`What you’ve agreed to (notice version ${data.version}). Turning one off stops that feature at once.`} />
+      <CardHeader
+        icon={<ShieldCheck className="size-4" />}
+        title="Privacy & consent"
+        description={`One switch per purpose (notice version ${data.version}). Turning one off is as easy as turning it on, and stops that use at once.`}
+      />
       <div className="space-y-2 p-5">
         {data.purposes.map((p) => (
-          <div key={p.purpose} className="flex items-center justify-between gap-4 rounded-[var(--radius-card)] border border-border px-4 py-3">
-            <div>
-              <div className="text-[13.5px] font-medium">{p.description}</div>
-              <div className="text-[12px] text-subtle">
-                {p.required ? "Needed for your account; ends when you delete it" : p.granted && p.granted_at ? `Agreed ${ago(p.granted_at)}` : "Off"}
+          <div key={p.purpose} className="rounded-[var(--radius-card)] border border-border px-4 py-3">
+            <div className="flex items-center justify-between gap-4">
+              <div>
+                <div className="text-[13.5px] font-medium">{p.description}</div>
+                <div className="text-[12px] text-subtle">
+                  {p.required
+                    ? "Needed for your account; ends when you delete it"
+                    : p.granted && p.granted_at
+                      ? `Agreed ${ago(p.granted_at)}${p.method ? ` (${METHOD[p.method] ?? p.method})` : ""}${p.notice_version ? ` · notice ${p.notice_version}` : ""}`
+                      : "Off"}
+                </div>
               </div>
+              <Switch checked={p.granted} onChange={(v) => !p.required && !me?.is_demo && set.mutate({ purpose: p.purpose, granted: v })} label={p.purpose} />
             </div>
-            <Switch checked={p.granted} onChange={(v) => !p.required && !me?.is_demo && set.mutate({ purpose: p.purpose, granted: v })} label={p.purpose} />
+            {p.notice && (
+              <details className="mt-2 text-[12.5px] text-muted [&_summary::-webkit-details-marker]:hidden">
+                <summary className="cursor-pointer list-none text-accent hover:underline">What this uses and why</summary>
+                <dl className="mt-2 grid gap-1.5 sm:grid-cols-[90px_1fr]">
+                  <dt className="text-subtle">Data</dt>
+                  <dd>{p.notice.data}</dd>
+                  <dt className="text-subtle">Why</dt>
+                  <dd>{p.notice.why}</dd>
+                  <dt className="text-subtle">Kept</dt>
+                  <dd>{p.notice.retention}</dd>
+                  <dt className="text-subtle">To stop</dt>
+                  <dd>{p.notice.withdraw}</dd>
+                </dl>
+              </details>
+            )}
           </div>
         ))}
       </div>
     </Card>
+  );
+}
+
+const RIGHT_KINDS: [string, string][] = [
+  ["grievance", "A complaint or question about my data"],
+  ["access", "A copy of my data, explained"],
+  ["correction", "Correct something I can’t edit myself"],
+  ["erasure", "Erase specific data"],
+  ["nomination", "Nominate someone to act for me"],
+];
+
+export function RightsCard() {
+  const { data } = useRights();
+  const { data: me } = useMe();
+  const create = useCreateRight();
+  const [kind, setKind] = useState("grievance");
+  if (!data) return <Skeleton className="h-40" />;
+  const submit = (e: FormEvent<HTMLFormElement>) => {
+    e.preventDefault();
+    const form = e.currentTarget;
+    create.mutate({ kind, details: String(new FormData(form).get("details") || "") }, { onSuccess: () => form.reset() });
+  };
+  return (
+    <Card id="rights">
+      <CardHeader
+        icon={<ShieldCheck className="size-4" />}
+        title="Your data rights"
+        description={`Export, correction, erasure and consent withdrawal work instantly above. For anything else, write to us: we reply within ${data.sla_days} days.`}
+      />
+      <div className="space-y-4 p-5">
+        {me?.is_demo ? (
+          <DemoNote />
+        ) : (
+          <form onSubmit={submit} className="space-y-3">
+            <Field label="What do you need?">
+              <select
+                value={kind}
+                onChange={(e) => setKind(e.target.value)}
+                className="h-10 w-full rounded-[var(--radius-control)] border border-border bg-surface px-3 text-[14px]"
+              >
+                {RIGHT_KINDS.map(([k, l]) => (
+                  <option key={k} value={k}>
+                    {l}
+                  </option>
+                ))}
+              </select>
+            </Field>
+            {data.self_service[kind] && <p className="text-[12.5px] text-muted">Quicker: {data.self_service[kind]}</p>}
+            <Field label="Details">
+              <textarea
+                name="details"
+                rows={3}
+                maxLength={4000}
+                required
+                className="w-full rounded-[var(--radius-control)] border border-border bg-surface px-3 py-2 text-[14px]"
+              />
+            </Field>
+            <Button type="submit" loading={create.isPending}>
+              Send request
+            </Button>
+          </form>
+        )}
+        {data.requests.length > 0 && (
+          <ul className="divide-y divide-border rounded-[var(--radius-card)] border border-border">
+            {data.requests.map((r) => (
+              <li key={r.id} className="px-4 py-3 text-[13px]">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <span className="font-medium capitalize">{r.kind}</span>
+                  <Badge tone={r.status === "resolved" ? "success" : "outline"}>
+                    {r.status === "resolved" ? "Answered" : `Reply due ${new Date(r.due_at).toLocaleDateString("en-IN", { day: "numeric", month: "short" })}`}
+                  </Badge>
+                </div>
+                {r.response && <p className="mt-1.5 text-muted">{r.response}</p>}
+              </li>
+            ))}
+          </ul>
+        )}
+      </div>
+    </Card>
+  );
+}
+
+/** Accounts created before the age gate confirm once; until then the agents don't run (DPDP Act s.9). */
+export function AgeGateBanner() {
+  const { data: me } = useMe();
+  const confirm = useConfirmAge();
+  const [minor, setMinor] = useState(false);
+  if (!me || me.is_demo || me.adult_confirmed_at) return null;
+  return (
+    <div role="region" aria-label="Confirm your age" className="mb-5 rounded-[var(--radius-card)] border border-[color-mix(in_oklab,var(--your-turn-fill)_40%,transparent)] bg-[color-mix(in_oklab,var(--your-turn-fill)_10%,transparent)] p-4">
+      {minor ? (
+        <p className="text-[13.5px] leading-relaxed">
+          Thanks for telling us. JobPilot can’t process data for students under 18 yet, because the law needs a parent’s verifiable consent that we can’t collect. Your agents are
+          paused. You can export or delete your account in Settings → Your data.
+        </p>
+      ) : (
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <p className="text-[13.5px] leading-relaxed">
+            <b>One quick check:</b> are you 18 or older? Your agents are paused until you answer.
+          </p>
+          <div className="flex gap-2">
+            <Button size="sm" variant="primary" loading={confirm.isPending} onClick={() => confirm.mutate({ adult: true })}>
+              I’m 18 or older
+            </Button>
+            <Button size="sm" variant="ghost" onClick={() => confirm.mutate({ adult: false }, { onSettled: () => setMinor(true) })}>
+              I’m under 18
+            </Button>
+          </div>
+        </div>
+      )}
+    </div>
   );
 }
 

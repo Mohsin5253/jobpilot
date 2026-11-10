@@ -35,6 +35,11 @@ envVarGroups:
         sync: false
       - key: GITHUB_TOKEN
         sync: false
+      # Gmail sending through Google OAuth (gmail.send scope only). Optional: without them users connect an app password.
+      - key: GOOGLE_CLIENT_ID
+        sync: false
+      - key: GOOGLE_CLIENT_SECRET
+        sync: false
       - key: WHATSAPP_TOKEN
         sync: false
       - key: WHATSAPP_PHONE_NUMBER_ID

@@ -15,6 +15,10 @@ from app.services.ratelimit import client_ip, hit
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 RESET_TTL = timedelta(hours=1)
+UNDER_18 = (
+    "JobPilot is for students who are 18 or older. Under India's data protection law we'd need a parent's verifiable "
+    "consent to process your data, and we can't collect that yet, so we can't create an account for you."
+)
 
 
 def user_out(user: User) -> UserOut:
@@ -35,10 +39,16 @@ async def register(body: RegisterIn, request: Request, response: Response, sessi
     await hit("register", client_ip(request))
     if not body.consent:
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "Please accept the privacy notice to create an account")
+    if not body.adult:
+        # DPDP Act s.9: a child's data needs verifiable parental consent, which we can't collect yet, so we don't process it.
+        raise HTTPException(status.HTTP_403_FORBIDDEN, UNDER_18)
     email = body.email.lower()
     if (await session.execute(select(User).where(func.lower(User.email) == email))).scalar_one_or_none():
         raise HTTPException(status.HTTP_409_CONFLICT, "An account with this email already exists")
-    user = User(email=email, name=body.name.strip(), password_hash=hash_password(body.password), is_admin=email in {e.lower() for e in settings.admin_emails})
+    user = User(
+        email=email, name=body.name.strip(), password_hash=hash_password(body.password),
+        is_admin=email in {e.lower() for e in settings.admin_emails}, adult_confirmed_at=datetime.now(UTC),
+    )
     session.add(user)
     await session.flush()
     session.add(Profile(user_id=user.id, resume={}, preferences=Preferences().model_dump()))

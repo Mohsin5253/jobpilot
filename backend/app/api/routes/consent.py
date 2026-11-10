@@ -2,10 +2,12 @@
 
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
+from sqlalchemy import select
 
 from app.api.deps import RealUserDep, SessionDep, UserDep
 from app.config import settings
-from app.services.consent import PURPOSES, active, grant, withdraw
+from app.models import Consent
+from app.services.consent import NOTICE, PURPOSES, active, grant, withdraw
 
 router = APIRouter(prefix="/consents", tags=["consent"])
 
@@ -25,11 +27,31 @@ async def list_consents(user: UserDep, session: SessionDep) -> dict:
                 "description": text,
                 "granted": p in current,
                 "granted_at": current[p].granted_at.isoformat() if p in current else None,
+                "notice_version": current[p].notice_version if p in current else None,
+                "method": current[p].method if p in current else None,
                 "required": p == "core",
+                "notice": NOTICE[p],
             }
             for p, text in PURPOSES.items()
         ],
     }
+
+
+@router.get("/notice")
+async def notice() -> dict:
+    """The itemized consent notice, public (shown before sign-up)."""
+    return {"version": settings.consent_version, "purposes": [{"purpose": p, "description": t, **NOTICE[p]} for p, t in PURPOSES.items()]}
+
+
+@router.get("/history")
+async def history(user: UserDep, session: SessionDep) -> list[dict]:
+    """Every consent record, including withdrawn ones: what, when, how, and which notice version."""
+    rows = (await session.execute(select(Consent).where(Consent.user_id == user.id).order_by(Consent.granted_at.desc()))).scalars().all()
+    return [
+        {"purpose": c.purpose, "notice_version": c.notice_version, "method": c.method, "granted_at": c.granted_at.isoformat(),
+         "withdrawn_at": c.withdrawn_at.isoformat() if c.withdrawn_at else None}
+        for c in rows
+    ]
 
 
 @router.put("/{purpose}")

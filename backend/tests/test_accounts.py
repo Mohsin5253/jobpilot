@@ -34,7 +34,7 @@ async def _work():
 
 async def test_login_is_rate_limited_across_sessions(client, monkeypatch):
     monkeypatch.setattr(settings, "rate_limits_enabled", True)
-    await client.post("/api/auth/register", json={"consent": True, "email": "a@example.com", "password": "password123"})
+    await client.post("/api/auth/register", json={"consent": True, "adult": True, "email": "a@example.com", "password": "password123"})
     codes = []
     for _ in range(11):
         other = await _client()  # a fresh client each time: the limit lives in Postgres, not the session
@@ -44,7 +44,7 @@ async def test_login_is_rate_limited_across_sessions(client, monkeypatch):
 
 
 async def test_password_change_signs_out_other_sessions(client):
-    r = await client.post("/api/auth/register", json={"consent": True, "email": "a@example.com", "password": "password123"})
+    r = await client.post("/api/auth/register", json={"consent": True, "adult": True, "email": "a@example.com", "password": "password123"})
     old_token = r.json()["access_token"]
     r = await client.post("/api/auth/change-password", json={"current_password": "password123", "new_password": "newpassword456"})
     assert r.status_code == 200
@@ -63,7 +63,7 @@ async def test_password_reset_is_single_use_and_expires(client, monkeypatch):
         return True
 
     monkeypatch.setattr("app.api.routes.auth.send_system_email", fake_system)
-    await client.post("/api/auth/register", json={"consent": True, "email": "a@example.com", "password": "password123"})
+    await client.post("/api/auth/register", json={"consent": True, "adult": True, "email": "a@example.com", "password": "password123"})
     client.cookies.clear()
     assert (await client.post("/api/auth/forgot-password", json={"email": "nobody@example.com"})).status_code == 202  # same answer
     assert "body" not in sent

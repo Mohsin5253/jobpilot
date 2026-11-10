@@ -286,7 +286,7 @@ async def ingest(claimed: list[Claimed]) -> IngestResult:
 async def fan_out(job_ids: list[uuid.UUID]) -> int:
     """Wake the agents of users a new job could fit (close to their resume and inside their filters).
     Everyone else is untouched, so 10,000 users cost the same as 10 when a new posting arrives."""
-    from app.services.runs import enqueue_run
+    from app.services.runs import AgeNotConfirmed, enqueue_run
 
     if not job_ids:
         return 0
@@ -328,7 +328,10 @@ async def fan_out(job_ids: list[uuid.UUID]) -> int:
             last = recent.get(user_id)
             if last and now - last < timedelta(minutes=wait):
                 continue
-            _, was_created = await enqueue_run(s, user_id, trigger="refresh", params={"refresh": True})
+            try:
+                _, was_created = await enqueue_run(s, user_id, trigger="refresh", params={"refresh": True})
+            except AgeNotConfirmed:
+                continue
             created += was_created
     if created:
         log.info("ingest.fan_out", new_jobs=len(job_ids), runs=created)

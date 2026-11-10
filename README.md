@@ -34,7 +34,12 @@ and LinkedIn note, and tracks everything you've applied to. **Nothing is sent un
   (per-student detail only with the student's consent)
 - **WhatsApp daily digest** (official Cloud API, consent-based, STOP to opt out) and a **Chrome autofill extension**
   for Greenhouse / Lever / Ashby forms that never clicks Submit (`extension/`)
-- **DPDP-ready consent**: explicit consent at sign-up and per feature, withdrawable, with a consent log
+- **DPDP-ready consent**: an itemized notice per purpose (matching, sending, proof page, WhatsApp, campus sharing,
+  ledger), each a separate switch with a record of when, how and which notice version; rights requests and a public
+  grievance form with a 30-day reply date; an 18+ age gate; inactive accounts deleted after 12 months with notice;
+  a breach-response runbook (`docs/breach-response.md`)
+- **Gmail via Google sign-in**: send-only access (`gmail.send`), refresh token encrypted, sends spaced 90 s apart,
+  an opt-out line on every application; app passwords remain for other providers
 - **Production basics**: per-user mailboxes (encrypted), Free / Pro plan limits and a daily AI budget per user,
   rate limiting shared across replicas, revocable sessions, password reset, data export and deletion (DPDP / GDPR),
   a public landing page with a one-click demo, an admin dashboard, Sentry, CSP / HSTS and a retention sweep
@@ -252,6 +257,9 @@ Render (API, workers, Postgres) + Vercel (web). Step-by-step, with every environ
 | `WHATSAPP_TOKEN` / `WHATSAPP_PHONE_NUMBER_ID` / `WHATSAPP_TEMPLATE` / `WHATSAPP_TEMPLATE_LANG` / `WHATSAPP_APP_SECRET` / `WHATSAPP_VERIFY_TOKEN` | — | WhatsApp Cloud API daily digest (off until set) |
 | `EXTENSION_ORIGIN_REGEX` | `chrome-extension://[a-p]{32}` | Origins allowed to call the API with an extension token |
 | `LANGFUSE_*` | — | Trace every agent step and LLM generation in Langfuse |
+| `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` | — | Gmail sending through Google sign-in (`gmail.send` only); see DEPLOY.md |
+| `SEND_SPACING_S` | 90 | Minimum seconds between two sends from one mailbox |
+| `INACTIVE_DELETE_DAYS` / `INACTIVE_NOTICE_DAYS` | 365 / 30 | Delete unused accounts after a year, with a notice a month before |
 | `USD_INR_RATE` | 88.0 | Rupees per US dollar, used to show AI cost (billed in USD) in ₹ on the landing page |
 
 Web (Vercel) variables, all optional except `API_URL`: `API_URL` (the API origin), `NEXT_PUBLIC_SITE_URL` (canonical

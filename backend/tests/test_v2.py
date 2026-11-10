@@ -45,7 +45,7 @@ async def _client():
 async def test_registration_needs_consent_and_records_it(client):
     r = await client.post("/api/auth/register", json={"email": "x@example.com", "password": "password123"})
     assert r.status_code == 422 and "privacy" in r.json()["detail"]
-    r = await client.post("/api/auth/register", json={"consent": True, "email": "x@example.com", "password": "password123"})
+    r = await client.post("/api/auth/register", json={"consent": True, "adult": True, "email": "x@example.com", "password": "password123"})
     assert r.status_code == 201
     c = (await client.get("/api/consents")).json()
     core = next(p for p in c["purposes"] if p["purpose"] == "core")
@@ -176,13 +176,13 @@ async def test_college_dashboard_shows_only_students_who_share(authed, monkeypat
     monkeypatch.setattr(settings, "admin_emails", ["aarav@example.com"])
     org = (await authed.post("/api/admin/orgs", json={"name": "Mumbai Institute of Technology"})).json()
     officer = await _client()
-    r = await officer.post("/api/auth/register", json={"consent": True, "email": "tpo@mit.example", "password": "password123", "name": "TPO"})
+    r = await officer.post("/api/auth/register", json={"consent": True, "adult": True, "email": "tpo@mit.example", "password": "password123", "name": "TPO"})
     officer.headers["authorization"] = f"Bearer {r.json()['access_token']}"
     await authed.post(f"/api/admin/orgs/{org['id']}/officers", json={"email": "tpo@mit.example"})
 
     s1, s2 = await _client(), await _client()
     for c, email, share in ((s1, "s1@mit.example", True), (s2, "s2@mit.example", False)):
-        r = await c.post("/api/auth/register", json={"consent": True, "email": email, "password": "password123"})
+        r = await c.post("/api/auth/register", json={"consent": True, "adult": True, "email": email, "password": "password123"})
         c.headers["authorization"] = f"Bearer {r.json()['access_token']}"
         assert (await c.post("/api/campus/join", json={"invite_code": org["invite_code"].lower(), "share_progress": share})).status_code == 200
         await c.put("/api/campus/academics", json={"college": "MIT", "branch": "CSE", "grad_year": 2027, "cgpa": 8.0, "backlogs": 0})
@@ -214,7 +214,7 @@ async def test_whatsapp_digest_needs_keys_and_consent_and_stop_opts_out(authed, 
     await authed.post("/api/runs")
     await _work()
     assert (await authed.put("/api/whatsapp", json={"number": "98765 43210", "hour": 9, "consent": False})).status_code == 422
-    out = (await authed.put("/api/whatsapp", json={"number": "98765 43210", "hour": 9, "consent": True})).json()
+    out = (await authed.put("/api/whatsapp", json={"number": "98765 43210", "hour": 9, "consent": True, "adult": True})).json()
     assert out["number"] == "919876543210" and out["enabled"] and not out["available"]
 
     now = datetime(2026, 11, 4, 9, 5, tzinfo=IST).astimezone(UTC)

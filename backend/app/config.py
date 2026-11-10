@@ -66,6 +66,14 @@ class Settings(BaseSettings):
     # Quality gate: at most this many tailored applications a week (per-user preference, capped by plan).
     default_weekly_application_cap: int = 10
 
+    # Gmail sending through Google OAuth (scope gmail.send only). Off until both are set; the redirect URI to register
+    # in Google Cloud is {APP_URL}/api/mail/google/callback.
+    google_client_id: str | None = None
+    google_client_secret: str | None = None
+    send_spacing_s: int = 90  # minimum gap between two sends from one mailbox
+    inactive_delete_days: int = 365  # DPDP retention: accounts unused this long are deleted...
+    inactive_notice_days: int = 30  # ...after a notice this many days earlier
+
     # WhatsApp daily digest (official WhatsApp Cloud API). Off until all of these are set.
     whatsapp_token: str | None = None
     whatsapp_phone_number_id: str | None = None
@@ -212,6 +220,10 @@ class Settings(BaseSettings):
     def smtp_enabled(self) -> bool:
         # A login user without a password can't authenticate, so don't offer sending.
         return bool(self.smtp_host and self.smtp_from and (not self.smtp_user or self.smtp_password))
+
+    @property
+    def google_mail_enabled(self) -> bool:
+        return bool(self.google_client_id and self.google_client_secret)
 
     @property
     def whatsapp_enabled(self) -> bool:

@@ -10,7 +10,7 @@ from app.api.routes.matches import apply_stage
 from app.models import CompanyContact, DraftStatus, Job, JobMatch, OutreachDraft, Stage
 from app.schemas import ContactOut, DraftDecision, DraftEdit, DraftWithJob
 from app.services.applications import send_application
-from app.services.mailer import user_sender
+from app.services.mailer import SendTooSoon, user_sender
 from app.services.runs import request_resume
 
 router = APIRouter(prefix="/drafts", tags=["approvals"])
@@ -172,6 +172,8 @@ async def send(draft_id: uuid.UUID, body: DraftEdit, user: UserDep, session: Ses
     await session.commit()
     try:
         await send_application(d.id)
+    except SendTooSoon as exc:
+        raise HTTPException(429, f"Approved. {exc}", headers={"retry-after": str(exc.wait_s)}) from exc
     except Exception as exc:
         raise HTTPException(502, f"Approved, but the email couldn't be sent: {exc}") from exc
     await session.refresh(d)  # the send was recorded in its own transaction

@@ -5,7 +5,7 @@ import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { Suspense, useEffect, useState } from "react";
 
-import { ConsentCard, DataCard, ExtensionCard, MailCard, PlanCard, SecurityCard, WhatsAppCard } from "@/components/account-settings";
+import { ConsentCard, DataCard, RightsCard, ExtensionCard, MailCard, PlanCard, SecurityCard, WhatsAppCard } from "@/components/account-settings";
 import { ResumeDropzone } from "@/components/resume-dropzone";
 import { RunButton } from "@/components/shell";
 import { Badge } from "@/components/ui/badge";
@@ -332,6 +332,7 @@ export default function SettingsPage() {
           <ExtensionCard />
           <PlanCard />
           <ConsentCard />
+          <RightsCard />
           <SecurityCard />
           <DataCard />
         </div>

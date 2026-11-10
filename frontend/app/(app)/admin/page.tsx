@@ -8,7 +8,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardHeader } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { EmptyState, PageHeader, Skeleton } from "@/components/ui/misc";
-import { useAddOfficer, useAdminMetrics, useAdminOrgs, useCreateOrg, useSetPlan } from "@/lib/queries";
+import { useAddOfficer, useAdminMetrics, useAdminOrgs, useAdminRights, useCreateOrg, useResolveRight, useSetPlan } from "@/lib/queries";
 import { ago, cn } from "@/lib/utils";
 
 function Stat({ label, value, sub }: { label: string; value: ReactNode; sub?: ReactNode }) {
@@ -138,8 +138,42 @@ export default function AdminPage() {
           </div>
         </Card>
       </div>
+      <RightsQueue />
       <Colleges />
     </div>
+  );
+}
+
+/** DPDP rights requests and grievances, oldest due first, with the 30-day deadline. */
+function RightsQueue() {
+  const { data } = useAdminRights();
+  const resolve = useResolveRight();
+  const [answer, setAnswer] = useState<Record<string, string>>({});
+  const open = (data ?? []).filter((r) => r.status === "open");
+  return (
+    <Card>
+      <CardHeader icon={<Users className="size-4" />} title="Privacy requests" description={`${open.length} open · reply within 30 days`} />
+      <div className="space-y-2 p-5">
+        {open.length === 0 && <p className="text-[13px] text-subtle">Nothing waiting.</p>}
+        {open.map((r) => (
+          <div key={r.id} className="space-y-2 rounded-[var(--radius-card)] border border-border px-4 py-3">
+            <div className="flex flex-wrap items-center justify-between gap-2 text-[13px]">
+              <span className="font-medium capitalize">
+                {r.kind} · {r.contact_email}
+              </span>
+              <Badge tone={r.overdue ? "danger" : "outline"}>{r.overdue ? "Overdue" : `Due ${new Date(r.due_at).toLocaleDateString("en-IN")}`}</Badge>
+            </div>
+            <p className="text-[13px] whitespace-pre-wrap text-muted">{r.details}</p>
+            <div className="flex gap-2">
+              <Input value={answer[r.id] ?? ""} onChange={(e) => setAnswer({ ...answer, [r.id]: e.target.value })} placeholder="Reply (emailed to them)" className="flex-1" />
+              <Button size="sm" variant="primary" disabled={!answer[r.id]?.trim()} onClick={() => resolve.mutate({ id: r.id, response: answer[r.id] })}>
+                Answer
+              </Button>
+            </div>
+          </div>
+        ))}
+      </div>
+    </Card>
   );
 }
 

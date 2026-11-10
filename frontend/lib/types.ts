@@ -9,6 +9,7 @@ export interface User {
   is_demo: boolean;
   is_admin: boolean;
   expires_at: string | null;
+  adult_confirmed_at?: string | null;
 }
 
 export interface Usage {
@@ -28,6 +29,8 @@ export interface Usage {
 
 export interface MailAccount {
   connected: boolean;
+  provider?: "smtp" | "gmail_oauth" | null;
+  google_available?: boolean;
   host: string | null;
   port: number | null;
   from_email: string | null;
@@ -411,7 +414,13 @@ export interface CollegeDashboard {
   per_student: { name: string; email: string; branch: string; cgpa: number | null; applications: number; interviews: number; offers: number; ppo: number; last_active: string | null }[];
 }
 
-export interface ConsentState { version: string; purposes: { purpose: string; description: string; granted: boolean; granted_at: string | null; required: boolean }[] }
+export interface ConsentNotice { data: string; why: string; retention: string; withdraw: string }
+export interface ConsentState {
+  version: string;
+  purposes: { purpose: string; description: string; granted: boolean; granted_at: string | null; required: boolean; notice_version?: string | null; method?: string | null; notice?: ConsentNotice }[];
+}
+export interface RightsRequest { id: string; kind: string; details: string; status: "open" | "resolved"; response: string; created_at: string; due_at: string; resolved_at: string | null; contact_email?: string; overdue?: boolean }
+export interface RightsState { self_service: Record<string, string>; sla_days: number; requests: RightsRequest[] }
 
 export interface WhatsAppState { available: boolean; number: string | null; hour: number; enabled: boolean; last_sent_at: string | null }
 

@@ -31,6 +31,8 @@ import type {
   Campus,
   CollegeDashboard,
   ConsentState,
+  RightsRequest,
+  RightsState,
   Evidence,
   ExtensionToken,
   Insights,
@@ -467,6 +469,13 @@ export const useCollege = () => useQuery({ queryKey: ["college"], queryFn: () =>
 export const useConsents = () => useQuery({ queryKey: ["consents"], queryFn: () => api.get<ConsentState>("/consents") });
 export const useSetConsent = () =>
   useAct((b: { purpose: string; granted: boolean }) => api.put<ConsentState>(`/consents/${b.purpose}`, { granted: b.granted }), ["consents", "evidence", "whatsapp", "campus"]);
+
+export const useRights = () => useQuery({ queryKey: ["rights"], queryFn: () => api.get<RightsState>("/rights") });
+export const useCreateRight = () => useAct((b: { kind: string; details: string }) => api.post<RightsRequest>("/rights", b), ["rights"], "Request sent. We’ll reply within 30 days.");
+export const useAdminRights = () => useQuery({ queryKey: ["admin-rights"], queryFn: () => api.get<RightsRequest[]>("/admin/rights") });
+export const useResolveRight = () =>
+  useAct((b: { id: string; response: string }) => api.post<RightsRequest>(`/admin/rights/${b.id}/resolve`, { response: b.response }), ["admin-rights"], "Answered");
+export const useConfirmAge = () => useAct((b: { adult: boolean }) => api.post("/account/age", b), ["me"]);
 
 export const useWhatsApp = () => useQuery({ queryKey: ["whatsapp"], queryFn: () => api.get<WhatsAppState>("/whatsapp") });
 export const useSaveWhatsApp = () => useAct((b: { number: string; hour: number; consent: boolean }) => api.put<WhatsAppState>("/whatsapp", b), ["whatsapp", "consents"], "WhatsApp digest on");
