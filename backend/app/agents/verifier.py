@@ -206,6 +206,16 @@ async def run_verifier(state: PipelineState) -> dict:
             fresh = [j for j in jobs if j.legit_checked_at is None or j.legit_checked_at < now - RECHECK_AFTER]
             verdicts = {j.id: assess(j) for j in fresh}
 
+            # The ledger: a stipend far from what 3+ students report for this company asks for care (monthly figures only).
+            from app.api.routes.ledger import market_check
+
+            for j in fresh:
+                if j.salary_max and j.salary_max < 300_000 and verdicts[j.id].status != "suspicious":
+                    note = await market_check(s, j.company, j.salary_max)
+                    if note:
+                        verdicts[j.id].status = "caution"
+                        verdicts[j.id].reasons.append(note)
+
             # The LLM only reviews the most doubtful few, and can only make a verdict stricter.
             doubtful = sorted((j for j in fresh if verdicts[j.id].status == "caution" and len(verdicts[j.id].reasons) >= 2), key=lambda j: -len(verdicts[j.id].reasons))
             for j in doubtful[:MAX_LLM_REVIEWS]:

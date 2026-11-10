@@ -9,7 +9,7 @@ from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.responses import JSONResponse
 from sqlalchemy import text
 
-from app.api.routes import account, admin, auth, campus, consent, drafts, events, evidence, extension, insights, matches, notifications, payments, profile, proof_links, public, questions, rights, runs, scam, sources, stats, whatsapp
+from app.api.routes import account, admin, auth, campus, consent, drafts, events, evidence, extension, growth, insights, ledger, matches, notifications, payments, profile, proof_links, public, questions, rights, runs, scam, sources, stats, whatsapp
 from app.services.events import hub
 from app.services.runs import AgeNotConfirmed
 from app.config import settings
@@ -84,7 +84,7 @@ async def request_context(request: Request, call_next):
     return response
 
 
-for r in (auth.router, account.router, admin.router, consent.router, extension.router, evidence.router, insights.router, campus.router, whatsapp.router, profile.router, matches.router, drafts.router, questions.router, notifications.router, runs.router, stats.router, events.router, public.router, rights.router, scam.router, proof_links.router, sources.router, payments.router):
+for r in (auth.router, account.router, admin.router, consent.router, extension.router, evidence.router, insights.router, campus.router, whatsapp.router, profile.router, matches.router, drafts.router, questions.router, notifications.router, runs.router, stats.router, events.router, public.router, rights.router, scam.router, proof_links.router, sources.router, payments.router, ledger.router, growth.router):
     app.include_router(r, prefix="/api")
 
 

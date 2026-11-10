@@ -77,6 +77,16 @@ and LinkedIn note, and tracks everything you've applied to. **Nothing is sent un
   (tax invoice with a GSTIN, receipt without); cancel in two clicks (Pro lasts to the end of the paid period); an
   hourly sweep lapses expired plans. An experimental "₹99 on first interview" plan asks (never charges) when an
   interview is recorded with evidence; off until `OUTCOME_PLAN_ENABLED=true`
+- **Stipend & PPO ledger**: students report stipend, duration, mode, PPO and paid-on-time under the `ledger` consent,
+  verified by a college-email code or an offer letter that's stored encrypted only until a moderator checks it (then
+  deleted, hash kept); company aggregates only with 3+ published reports; outliers wait in a moderation queue; the
+  Verifier flags stipends far from what students report
+- **JD-specific mock interviews**: 8-12 questions from the job description's own lines and the student's projects,
+  typed or spoken (browser speech recognition), scored on relevance / specificity / structure with feedback quoting the
+  JD line; skills shown convincingly can be added in the student's own words, which re-scores the job
+- **Gap-to-proof**: a 48-hour mini-project spec for near-miss gaps; a submitted repo is checked on GitHub's public API
+  (owned by the verified account, pushed in the last 7 days, uses the skill) and the match is re-scored with before →
+  after recorded in a run trace
 - **Gmail via Google sign-in**: send-only access (`gmail.send`), refresh token encrypted, sends spaced 90 s apart,
   an opt-out line on every application; app passwords remain for other providers
 - **Production basics**: per-user mailboxes (encrypted), Free / Pro plan limits and a daily AI budget per user,

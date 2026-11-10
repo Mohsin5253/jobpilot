@@ -4,6 +4,7 @@ import { ArrowLeft } from "lucide-react";
 import Link from "next/link";
 import { use } from "react";
 
+import { GrowthPanel } from "@/components/growth";
 import { MatchDetail } from "@/components/jobs/match-detail";
 
 export default function MatchDetailPage({ params }: { params: Promise<{ id: string }> }) {
@@ -14,6 +15,7 @@ export default function MatchDetailPage({ params }: { params: Promise<{ id: stri
         <ArrowLeft className="size-3.5" /> Matches
       </Link>
       <MatchDetail id={id} />
+      <GrowthPanel matchId={id} />
     </div>
   );
 }

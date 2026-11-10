@@ -12,6 +12,7 @@ from sqlalchemy import (
     ForeignKey,
     Index,
     Integer,
+    LargeBinary,
     Numeric,
     String,
     Text,
@@ -346,6 +347,62 @@ class PaymentEvent(Base):
     id: Mapped[str] = mapped_column(String(80), primary_key=True)
     event: Mapped[str] = mapped_column(String(60))
     received_at: Mapped[datetime] = _now_col()
+
+
+class StipendReport(Base):
+    """One student's stipend / PPO report. Only aggregates of 3 or more published reports are ever shown."""
+
+    __tablename__ = "stipend_reports"
+
+    id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=uuid.uuid4)
+    user_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    company: Mapped[str] = mapped_column(String(200))
+    company_key: Mapped[str] = mapped_column(String(200), index=True)
+    role: Mapped[str] = mapped_column(String(200), default="", server_default="")
+    stipend: Mapped[int] = mapped_column(Integer)
+    duration_months: Mapped[int] = mapped_column(Integer)
+    mode: Mapped[str] = mapped_column(String(10))
+    ppo_offered: Mapped[bool] = mapped_column(Boolean)
+    paid_on_time: Mapped[bool] = mapped_column(Boolean)
+    verified_via: Mapped[str] = mapped_column(String(20), default="none", server_default="none")
+    status: Mapped[str] = mapped_column(String(20), default="pending", server_default="pending")
+    doc_enc: Mapped[bytes | None] = mapped_column(LargeBinary)
+    doc_hash: Mapped[str | None] = mapped_column(String(64))
+    otp_hash: Mapped[str | None] = mapped_column(String(64))
+    otp_expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    created_at: Mapped[datetime] = _now_col()
+
+
+class InterviewSession(Base):
+    __tablename__ = "interview_sessions"
+
+    id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=uuid.uuid4)
+    user_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    application_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("job_matches.id", ondelete="CASCADE"))
+    questions: Mapped[list[dict[str, Any]]] = mapped_column(JSONB)
+    answers: Mapped[dict[str, Any]] = mapped_column(JSONB, default=dict, server_default="{}")
+    scores: Mapped[dict[str, Any]] = mapped_column(JSONB, default=dict, server_default="{}")
+    created_at: Mapped[datetime] = _now_col()
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+class GapProject(Base):
+    """A 48-hour mini-project that closes a near-miss skill gap, verified against a repo the student owns."""
+
+    __tablename__ = "gap_projects"
+
+    id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=uuid.uuid4)
+    user_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    match_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("job_matches.id", ondelete="CASCADE"))
+    skill: Mapped[str] = mapped_column(String(80))
+    spec: Mapped[dict[str, Any]] = mapped_column(JSONB)
+    status: Mapped[str] = mapped_column(String(20), default="proposed", server_default="proposed")
+    repo_url: Mapped[str | None] = mapped_column(String(300))
+    before_score: Mapped[float | None] = mapped_column(Float)
+    after_score: Mapped[float | None] = mapped_column(Float)
+    run_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("agent_runs.id", ondelete="SET NULL"))
+    created_at: Mapped[datetime] = _now_col()
+    verified_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
 
 class Quota(Base):

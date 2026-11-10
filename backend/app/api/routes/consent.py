@@ -64,5 +64,11 @@ async def set_consent(purpose: str, body: ConsentIn, user: RealUserDep, session:
         await grant(session, user.id, purpose)
     else:
         await withdraw(session, user.id, purpose)
+        if purpose == "ledger":  # as the notice says: their reports leave the ledger
+            from sqlalchemy import update
+
+            from app.models import StipendReport
+
+            await session.execute(update(StipendReport).where(StipendReport.user_id == user.id).values(status="withdrawn"))
     await session.commit()
     return await list_consents(user, session)

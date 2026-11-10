@@ -23,8 +23,7 @@ import {
   Search,
   Settings,
   Sparkles,
-  Sun,
-} from "lucide-react";
+  Sun, IndianRupee } from "lucide-react";
 import Link from "next/link";
 import { useQueryClient } from "@tanstack/react-query";
 import { usePathname, useRouter } from "next/navigation";
@@ -83,6 +82,7 @@ const NAV: NavItem[] = [
   { href: "/insights", label: "Insights", icon: ChartLine },
   { href: "/campus", label: "Campus", icon: GraduationCap },
   { href: "/proof", label: "Proof pack", icon: BadgeCheck },
+  { href: "/stipends", label: "Stipends", icon: IndianRupee },
   { href: "/runs", label: "Agent runs", icon: Activity },
   { href: "/settings", label: "Settings", icon: Settings },
 ];

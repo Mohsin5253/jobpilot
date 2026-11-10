@@ -189,6 +189,9 @@ async def export(user: UserDep, session: SessionDep) -> JSONResponse:
     consents = (await session.execute(select(Consent).where(Consent.user_id == user.id))).scalars().all()
     requests = (await session.execute(select(RightsRequest).where(RightsRequest.user_id == user.id))).scalars().all()
     mail = await session.get(MailAccount, user.id)
+    from app.models import StipendReport
+
+    ledger = (await session.execute(select(StipendReport).where(StipendReport.user_id == user.id))).scalars().all()  # yours only
     data = {
         "exported_at": datetime.now(UTC).isoformat(),
         "account": {"email": user.email, "name": user.name, "plan": user.plan, "created_at": user.created_at.isoformat()},
@@ -227,6 +230,11 @@ async def export(user: UserDep, session: SessionDep) -> JSONResponse:
         # Connection details only: the credential itself is never exported.
         "mail_account": {"provider": mail.provider, "from_email": mail.from_email, "connected_at": mail.verified_at.isoformat() if mail.verified_at else None} if mail else None,
         "age_confirmed_at": user.adult_confirmed_at.isoformat() if user.adult_confirmed_at else None,
+        "stipend_reports": [
+            {"company": r.company, "role": r.role, "stipend": r.stipend, "duration_months": r.duration_months, "mode": r.mode,
+             "ppo_offered": r.ppo_offered, "paid_on_time": r.paid_on_time, "verified_via": r.verified_via, "status": r.status}
+            for r in ledger
+        ],
     }
     return JSONResponse(data, headers={"Content-Disposition": 'attachment; filename="jobpilot-export.json"'})
 
