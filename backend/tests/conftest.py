@@ -53,7 +53,7 @@ async def clean_db():
 
     async with engine.begin() as conn:
         await conn.execute(text(f"TRUNCATE {TABLES} CASCADE"))
-    ingest._last_sync = 0.0
+    ingest._last_sync = None
     yield
 
 

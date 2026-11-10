@@ -43,7 +43,9 @@ BUDGET = "*"  # a quota source's budget clock
 LEASE = timedelta(minutes=5)  # a crashed worker's claimed targets come back after this
 SYNC_EVERY_S = 300
 ACTIVE_DAYS = 30  # users who haven't opened the app in a month stop driving fetches
-_last_sync = 0.0
+# None until the first tick. Not 0.0: time.monotonic() counts from boot, so on a machine up for under
+# SYNC_EVERY_S (a fresh CI runner) a 0.0 start would skip the first sync.
+_last_sync: float | None = None
 
 
 def _quota(name: str) -> bool:
@@ -336,7 +338,7 @@ async def fan_out(job_ids: list[uuid.UUID]) -> int:
 async def ingest_tick() -> dict:
     """Scheduled every minute on every worker: sync demand now and then, fetch what's due, wake users."""
     global _last_sync
-    if time.monotonic() - _last_sync > SYNC_EVERY_S:
+    if _last_sync is None or time.monotonic() - _last_sync > SYNC_EVERY_S:
         _last_sync = time.monotonic()
         await sync_targets()
     result = await ingest(await claim_due(settings.ingest_max_targets_per_tick))
