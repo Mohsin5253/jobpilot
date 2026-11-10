@@ -65,7 +65,16 @@ def _with_job(d: OutreachDraft, m: JobMatch, j: Job) -> DraftWithJob:
         job_url=j.url,
         job_source=j.source,
         recruiter_email=j.recruiter_email,
+        legit_status=j.legit_status,
+        legit_reasons=j.legit_reasons or [],
+        ghost_score=j.ghost_score,
     )
+
+
+def _block_scams(j: Job) -> None:
+    """Verifier v2: a posting judged "Likely scam" can never be approved or sent, whatever the UI shows."""
+    if j.legit_status == "suspicious":
+        raise HTTPException(409, "This posting was flagged as a likely scam, so it can't be approved: " + "; ".join(j.legit_reasons[:2]))
 
 
 async def _load(session, user_id: uuid.UUID, draft_id: uuid.UUID):
@@ -112,6 +121,8 @@ async def decide(draft_id: uuid.UUID, body: DraftDecision, user: UserDep, sessio
     d, m, j = await _load(session, user.id, draft_id)
     if d.status != DraftStatus.pending:
         raise HTTPException(409, f"Draft already {d.status}")
+    if body.decision == "approve":
+        _block_scams(j)
     await _apply_edits(session, d, body)
     d.status = DraftStatus.approved if body.decision == "approve" else DraftStatus.rejected
     d.decided_at = datetime.now(UTC)
@@ -153,6 +164,7 @@ async def send(draft_id: uuid.UUID, body: DraftEdit, user: UserDep, session: Ses
     d, m, j = await _load(session, user.id, draft_id)
     if d.status in (DraftStatus.rejected, DraftStatus.sent):
         raise HTTPException(409, f"Draft already {d.status}")
+    _block_scams(j)
     await _apply_edits(session, d, body)
     if not d.to_email:
         raise HTTPException(422, "Add the recipient's email address first")

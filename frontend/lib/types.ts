@@ -205,6 +205,9 @@ export interface DraftWithJob extends Draft {
   job_url: string;
   job_source: string;
   recruiter_email: string | null;
+  legit_status?: "verified" | "caution" | "suspicious" | null;
+  legit_reasons?: string[];
+  ghost_score?: number | null;
 }
 
 export interface MatchDetail extends Match {

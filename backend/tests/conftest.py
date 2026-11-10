@@ -27,6 +27,8 @@ os.environ.update(
     FANOUT_MIN_SEMANTIC="0",
     RATE_LIMITS_ENABLED="false",
     ADMIN_EMAILS="",
+    SCAM_FETCH_URLS="false",
+    SCAM_RDAP_ENABLED="false",
 )
 
 import pytest  # noqa: E402
@@ -37,7 +39,7 @@ from sqlalchemy import text  # noqa: E402
 
 from app.db import engine  # noqa: E402
 
-TABLES = "rights_requests, drive_statuses, campus_drives, org_members, organizations, api_tokens, consents, mail_accounts, password_resets, rate_limits, board_probes, source_targets, company_contacts, notifications, skill_questions, reminders, outreach_drafts, tailored_resumes, llm_calls, job_matches, agent_runs, jobs, profiles, users"
+TABLES = "scam_reports, verifications, rights_requests, drive_statuses, campus_drives, org_members, organizations, api_tokens, consents, mail_accounts, password_resets, rate_limits, board_probes, source_targets, company_contacts, notifications, skill_questions, reminders, outreach_drafts, tailored_resumes, llm_calls, job_matches, agent_runs, jobs, profiles, users"
 
 
 @pytest.fixture(scope="session", autouse=True)

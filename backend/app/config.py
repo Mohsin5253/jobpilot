@@ -70,6 +70,11 @@ class Settings(BaseSettings):
     # in Google Cloud is {APP_URL}/api/mail/google/callback.
     google_client_id: str | None = None
     google_client_secret: str | None = None
+    # Scam Shield (public): fetch pasted links (public hosts only), look up domain age over RDAP, and cap the AI
+    # second opinions per day across all anonymous checks.
+    scam_fetch_urls: bool = True
+    scam_rdap_enabled: bool = True
+    scam_llm_daily_cap: int = 300
     send_spacing_s: int = 90  # minimum gap between two sends from one mailbox
     inactive_delete_days: int = 365  # DPDP retention: accounts unused this long are deleted...
     inactive_notice_days: int = 30  # ...after a notice this many days earlier

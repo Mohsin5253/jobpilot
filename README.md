@@ -38,6 +38,16 @@ and LinkedIn note, and tracks everything you've applied to. **Nothing is sent un
   ledger), each a separate switch with a record of when, how and which notice version; rights requests and a public
   grievance form with a 30-day reply date; an 18+ age gate; inactive accounts deleted after 12 months with notice;
   a breach-response runbook (`docs/breach-response.md`)
+- **Scam Shield** (`/scam-check`, `POST /api/scam-check`, no sign-in): paste a WhatsApp / Telegram / email offer, a
+  link or an offer letter (PDF, or an image via Tesseract OCR) and get a verdict (Likely safe / Suspicious / Likely
+  scam), a risk score, evidence per check (fees, UPI IDs, free-mail recruiters, lookalike and newly registered domains,
+  "selected without interview", implausible pay, urgency, OTP / ID requests, chat-only hiring, task scams, fake
+  government internships) in English, Hindi, Marathi and Hinglish, what to do (cybercrime.gov.in, 1930) and a share
+  card for WhatsApp. Nothing pasted is stored; "report this scam" keeps a redacted copy only with consent. Labelled set:
+  48 cases + 12 held-out (`evals/data/scam_*.jsonl`)
+- **Verifier v2**: the same checks on every posting at ingest, plus a 0-100 ghost-job score (age, reposts, last seen,
+  ATS open status, careers-page presence); every job carries a verification row, "Likely scam" postings never reach the
+  queue and the API refuses to approve or send them
 - **Gmail via Google sign-in**: send-only access (`gmail.send`), refresh token encrypted, sends spaced 90 s apart,
   an opt-out line on every application; app passwords remain for other providers
 - **Production basics**: per-user mailboxes (encrypted), Free / Pro plan limits and a daily AI budget per user,
@@ -256,10 +266,12 @@ Render (API, workers, Postgres) + Vercel (web). Step-by-step, with every environ
 | `GITHUB_TOKEN` | — | Raises GitHub's API limit for proof packs (60 → 5,000 requests / hour) |
 | `WHATSAPP_TOKEN` / `WHATSAPP_PHONE_NUMBER_ID` / `WHATSAPP_TEMPLATE` / `WHATSAPP_TEMPLATE_LANG` / `WHATSAPP_APP_SECRET` / `WHATSAPP_VERIFY_TOKEN` | — | WhatsApp Cloud API daily digest (off until set) |
 | `EXTENSION_ORIGIN_REGEX` | `chrome-extension://[a-p]{32}` | Origins allowed to call the API with an extension token |
-| `LANGFUSE_*` | — | Trace every agent step and LLM generation in Langfuse |
+| `LANGFUSE_*` | — | Trace every agent step and LLM call in Langfuse (timings, tokens, cost; never prompts or outputs) |
 | `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` | — | Gmail sending through Google sign-in (`gmail.send` only); see DEPLOY.md |
 | `SEND_SPACING_S` | 90 | Minimum seconds between two sends from one mailbox |
 | `INACTIVE_DELETE_DAYS` / `INACTIVE_NOTICE_DAYS` | 365 / 30 | Delete unused accounts after a year, with a notice a month before |
+| `SCAM_FETCH_URLS` / `SCAM_RDAP_ENABLED` | `true` | Scam Shield fetches pasted links (public hosts only) and looks up domain age over RDAP |
+| `SCAM_LLM_DAILY_CAP` | 300 | AI second opinions per day across all anonymous scam checks |
 | `USD_INR_RATE` | 88.0 | Rupees per US dollar, used to show AI cost (billed in USD) in ₹ on the landing page |
 
 Web (Vercel) variables, all optional except `API_URL`: `API_URL` (the API origin), `NEXT_PUBLIC_SITE_URL` (canonical

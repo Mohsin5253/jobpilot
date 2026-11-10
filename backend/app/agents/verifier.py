@@ -24,7 +24,8 @@ from sqlalchemy import select
 from app.agents.common import PipelineState, agent_step, bump_stats, ctx_of
 from app.db import session_scope
 from app.llm import LLMOutputError, LLMUnavailable, get_llm
-from app.models import Job
+from app.models import Job, Verification
+from app.services import scam_shield
 
 RECHECK_AFTER = timedelta(days=1)
 MAX_LLM_REVIEWS = 6
@@ -50,6 +51,57 @@ class Verdict:
     status: str = "verified"
     reasons: list[str] = field(default_factory=list)  # why it isn't verified (empty when verified)
     good: list[str] = field(default_factory=list)  # what checked out, shown on a verified job
+    shield: scam_shield.ShieldResult | None = None
+
+
+SHIELD_VERDICT = {"verified": "Likely safe", "caution": "Suspicious", "suspicious": "Likely scam"}
+
+
+def _posting_text(job: Job) -> str:
+    return f"{job.company}\n{job.title}\n{job.description or ''}\n{job.recruiter_email or ''}"
+
+
+def ghost_score(job: Job, now: datetime) -> int:
+    """0 (clearly open) to 100 (almost certainly a ghost job): posting age, reposts, when a source last listed it,
+    whether the company's ATS still shows it open, and whether it's on the company's own careers page."""
+    score = 0
+    if job.posted_at:
+        age = (now - job.posted_at).days
+        score += 30 if age > 60 else 20 if age > 30 else 0
+    score += 25 if job.repost_count >= 3 else 15 if job.repost_count >= 2 else 0
+    if job.last_seen_at and (now - job.last_seen_at).days > 3:
+        score += 20  # no source has listed it for days
+    hosts = {_host(a.get("url", "")) for a in (job.apply_links or [])} | {_host(job.url or "")}
+    on_ats = any(h.endswith(ATS_HOSTS) for h in hosts if h)
+    on_site = bool(job.company_domain) and any(h == job.company_domain or h.endswith("." + job.company_domain) for h in hosts if h)
+    score += 40 if job.link_status == "dead" else 15 if job.link_status == "unverified" and not on_ats else 0
+    if on_ats and job.link_status == "ok":
+        score -= 10  # the ATS still lists it as open
+    if not (on_ats or on_site):
+        score += 10  # not on any careers page we can see
+    if len(job.description or "") < 400:
+        score += 10
+    return max(0, min(100, score))
+
+
+async def apply_verdict(s, job: Job, now: datetime, v: "Verdict | None" = None) -> Verdict:
+    """Sets the job's verdict and records a verification row (with evidence: postings are public)."""
+    v = v or assess(job)
+    gs = ghost_score(job, now)
+    sh = v.shield
+    row = Verification(
+        id=uuid.uuid4(), opportunity_id=job.id, source="pipeline", input_hash=scam_shield.input_hash(_posting_text(job), job.url or ""),
+        verdict=SHIELD_VERDICT[v.status], score=max(sh.score if sh else 0, 70 if v.status == "suspicious" else 30 if v.status == "caution" else 0),
+        checks=[*([{"id": c.id, "label": c.label, "status": c.status, "evidence": c.evidence[:2]} for c in sh.checks] if sh else []),
+                *({"id": "verifier", "label": r, "status": "fail" if v.status == "suspicious" else "warn", "evidence": []} for r in v.reasons)],
+        ghost_score=gs,
+    )
+    s.add(row)
+    await s.flush()  # the row must exist before the job points at it
+    job.verification_id = row.id
+    job.ghost_score = gs
+    job.legit_status, job.legit_reasons, job.legit_checked_at = v.status, (v.reasons or v.good)[:5], now
+    return v
 
 
 def _host(url: str) -> str:
@@ -99,6 +151,17 @@ def assess(job: Job) -> Verdict:
         caution.append("Pay looks unusually high for an internship")
     if job.ghost_risk == "high":
         caution.append("Looks like a ghost job: " + "; ".join(job.ghost_reasons[:2]).lower())
+
+    # Scam Shield's checks (fees, UPI IDs, lookalike domains, task and fake-government scams, OTP requests...),
+    # the same ones students run on WhatsApp offers. A job description mentioning payments in general (a fintech
+    # role) isn't a demand for money, so a payment check only counts with an actual UPI ID.
+    v.shield = scam_shield.analyze(_posting_text(job), job.url or "", known_company_domain=job.company_domain)
+    for c in v.shield.checks:
+        if c.status == "fail" and not (c.id == "upi" and not any("@" in e for e in c.evidence)):
+            red.append(c.label)
+        elif c.status == "warn" and c.weight >= 20 and c.id not in ("free_mail", "chat_only"):  # the rules above already cover those
+            caution.append(c.label)
+    red, caution = list(dict.fromkeys(red)), [x for x in dict.fromkeys(caution) if x not in red]
 
     if red:
         v.status, v.reasons = "suspicious", red + caution
@@ -152,8 +215,7 @@ async def run_verifier(state: PipelineState) -> dict:
                     verdicts[j.id].reasons.insert(0, op.concern.strip().rstrip(".") or "Reads like a scam posting")
 
             for j in fresh:
-                v = verdicts[j.id]
-                j.legit_status, j.legit_reasons, j.legit_checked_at = v.status, (v.reasons or v.good)[:5], now
+                await apply_verdict(s, j, now, verdicts[j.id])
             counts = {"verified": 0, "caution": 0, "suspicious": 0}
             for j in jobs:
                 counts[j.legit_status or "verified"] += 1

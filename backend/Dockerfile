@@ -13,6 +13,9 @@ RUN --mount=type=cache,target=/root/.cache/uv uv sync --frozen --no-dev --no-ins
 RUN python -c "from fastembed import TextEmbedding; TextEmbedding('BAAI/bge-small-en-v1.5')"
 
 FROM base AS runtime
+# Tesseract OCR (English, Hindi, Marathi) lets Scam Shield read screenshots of offers.
+RUN apt-get update && apt-get install -y --no-install-recommends tesseract-ocr tesseract-ocr-hin tesseract-ocr-mar \
+    && rm -rf /var/lib/apt/lists/*
 RUN useradd --create-home --uid 10001 app
 COPY --from=deps /opt/venv /opt/venv
 COPY --from=deps /opt/models /opt/models

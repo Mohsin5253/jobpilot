@@ -114,14 +114,20 @@ export function Hero({ costPerRun }: { costPerRun: string | null }) {
             JobPilot finds real internships, blocks the scams, and sends only applications you approve, each one backed by proof a recruiter can check.
           </p>
           <div className="mt-8 flex flex-col gap-3 sm:flex-row">
-            <Link href="/register" className={buttonClass({ variant: "primary", size: "lg", className: "w-full sm:w-auto" })}>
-              Start free <ArrowRight />
+            <Link href="/scam-check" className={buttonClass({ variant: "primary", size: "lg", className: "w-full sm:w-auto" })}>
+              Check an offer for scams (free) <ArrowRight />
             </Link>
             <Button size="lg" className="w-full sm:w-auto" onClick={demo.start} loading={demo.loading}>
               {!demo.loading && <Play className="fill-current" />} Watch the crew work
             </Button>
           </div>
-          <p className="mt-3 text-[12.5px] text-text-3">The demo is a private copy with real jobs, deleted after 24 hours. No sign-up.</p>
+          <p className="mt-3 text-[12.5px] text-text-3">
+            No sign-up for either. Ready to apply?{" "}
+            <Link href="/register" className="text-cobalt-text hover:underline">
+              Start free
+            </Link>
+            .
+          </p>
           <ul className="mt-8 flex flex-wrap gap-x-5 gap-y-2 text-[13px] text-text-2">
             {["Nothing sent without your approval", "Never automates LinkedIn", costPerRun ? `${costPerRun} average AI cost per run` : "Exact ₹ cost on every run"].map((t) => (
               <li key={t} className="flex items-center gap-2">

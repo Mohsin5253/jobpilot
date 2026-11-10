@@ -148,15 +148,19 @@ export function Safety() {
               ]}
             />
           </div>
-          <div className="card border-dashed p-5 md:p-6">
+          <div className="card p-5 md:p-6">
             <div className="flex flex-wrap items-center gap-2">
               <ShieldAlert className="size-4 text-cobalt-text" />
               <h3 className="text-[17px] font-semibold tracking-[-0.015em]">Scam Shield</h3>
-              <Badge tone="outline">Coming next</Badge>
+              <Badge tone="success">Free</Badge>
             </div>
             <p className="mt-2 text-[14px] leading-relaxed text-text-2">
-              Got an offer on WhatsApp or Telegram? Paste it, a link or the offer letter and get a verdict with the evidence. Free, and no sign-in needed.
+              Got an offer on WhatsApp or Telegram? Paste it, a link or the offer letter and get a verdict with the evidence, in English, Hindi or Marathi. No
+              sign-in, and nothing you paste is stored.
             </p>
+            <Link href="/scam-check" className={buttonClass({ variant: "primary", className: "mt-3" })}>
+              Check an offer <ArrowRight />
+            </Link>
             <p className="mt-3 text-[13px] leading-relaxed text-text-2">
               Never pay to get an internship. If someone has asked you to, report it at{" "}
               <a href="https://cybercrime.gov.in" target="_blank" rel="noopener noreferrer" className="text-cobalt-text underline-offset-2 hover:underline">

@@ -9,6 +9,7 @@ import { Logo } from "@/components/logo";
 import { buttonClass } from "@/components/ui/button";
 
 const LINKS = [
+  { href: "/scam-check", label: "Scam check" },
   { href: "/#safety", label: "Safety" },
   { href: "/#crew", label: "Crew" },
   { href: "/#how", label: "How it works" },
@@ -85,7 +86,7 @@ export function SiteHeader() {
 }
 
 const FOOTER = [
-  { title: "Product", links: LINKS.slice(0, 5) },
+  { title: "Product", links: LINKS.slice(0, 6) },
   {
     title: "Account",
     links: [

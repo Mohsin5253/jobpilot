@@ -161,6 +161,7 @@ async def store_postings(postings: list[Posting], now: datetime) -> StoreResult:
             "entry_level": bool(p.extra.get("entry_level")),
             "ghost_risk": ghosts[i][0],
             "ghost_reasons": ghosts[i][1],
+            "repost_count": reposts.get(keys[i], 0),
         }
         for i, p in alive
     ]
@@ -184,6 +185,7 @@ async def store_postings(postings: list[Posting], now: datetime) -> StoreResult:
                 "entry_level": stmt.excluded.entry_level,
                 "ghost_risk": stmt.excluded.ghost_risk,
                 "ghost_reasons": stmt.excluded.ghost_reasons,
+                "repost_count": func.greatest(Job.repost_count, stmt.excluded.repost_count),
                 "last_seen_at": func.now(),
             },
         )
@@ -196,6 +198,12 @@ async def store_postings(postings: list[Posting], now: datetime) -> StoreResult:
             vectors = await get_embedder().embed([job_embedding_text(j.title, j.company, j.description) for j in to_embed])
             for j, v in zip(to_embed, vectors):
                 j.embedding = v
+        # Verifier v2 rules on every new posting, so each one carries a verification from the start. The agent
+        # re-checks (with the AI second opinion) when a posting reaches someone's run.
+        from app.agents.verifier import apply_verdict
+
+        for j in (await s.execute(select(Job).where(Job.id.in_(result.inserted_ids)))).scalars().all():
+            await apply_verdict(s, j, now)
     return result
 
 

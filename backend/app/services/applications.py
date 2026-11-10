@@ -30,6 +30,8 @@ async def send_application(draft_id: uuid.UUID, wait: bool = False) -> OutreachD
             await s.execute(select(JobMatch).where(JobMatch.id == draft.match_id).options(selectinload(JobMatch.tailored)))
         ).scalar_one()
         profile = (await s.execute(select(Profile).where(Profile.user_id == draft.user_id))).scalar_one()
+    if match.job.legit_status == "suspicious":  # defence in depth: the routes refuse these first
+        raise PermissionError("This posting was flagged as a likely scam and can't be sent")
     resume = ResumeData.model_validate(profile.resume or {})
     doc = resume_doc.build(resume, match)
     await send_as_user(

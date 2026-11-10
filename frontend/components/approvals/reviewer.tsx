@@ -1,6 +1,6 @@
 "use client";
 
-import { ArrowLeft, ArrowUpRight, Check, ChevronDown, ChevronUp, FileDown, Linkedin, Mail, MoreHorizontal, Pencil, RefreshCw, Send, ShieldCheck, X } from "lucide-react";
+import { ArrowLeft, ArrowUpRight, Check, ChevronDown, ChevronUp, FileDown, Linkedin, Mail, MoreHorizontal, Pencil, RefreshCw, Send, ShieldAlert, ShieldCheck, X } from "lucide-react";
 import Link from "next/link";
 import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 
@@ -43,6 +43,31 @@ const typing = (t: EventTarget | null) => {
   const el = t as HTMLElement | null;
   return !!el && (el.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(el.tagName));
 };
+
+/** Verifier v2 verdict, with its evidence on hover / focus. */
+function VerifyBadge({ draft }: { draft: DraftWithJob }) {
+  if (!draft.legit_status) return null;
+  const tone = draft.legit_status === "verified" ? "success" : draft.legit_status === "caution" ? "warning" : "danger";
+  const label = draft.legit_status === "verified" ? "Verified posting" : draft.legit_status === "caution" ? "Suspicious" : "Likely scam";
+  const reasons = draft.legit_reasons ?? [];
+  return (
+    <Tooltip
+      side="bottom"
+      label={
+        <span className="block max-w-72 text-left">
+          {reasons.length ? reasons.map((r) => <span key={r} className="block">· {r}</span>) : "Checked by Verifier"}
+          {draft.ghost_score != null && <span className="mt-1 block text-text-3">Ghost-job score {draft.ghost_score}/100</span>}
+        </span>
+      }
+    >
+      <button type="button" className="rounded-full focus-visible:outline-2" aria-label={`${label}: ${reasons.join("; ")}`}>
+        <Badge tone={tone}>
+          {draft.legit_status === "verified" ? <ShieldCheck /> : <ShieldAlert />} {label}
+        </Badge>
+      </button>
+    </Tooltip>
+  );
+}
 
 /** Referrals go to people who know the company: a plain LinkedIn people search, nothing automated. */
 function AlumniLink({ company }: { company: string }) {
@@ -223,6 +248,7 @@ export function Reviewer({ draft, index, total, onMove, onApprove, onReject, bus
             <h2 className="text-[15px] leading-snug font-semibold break-words md:text-[16px]">{draft.title}</h2>
             {draft.kind === "referral" && <Badge tone="accent">Referral request</Badge>}
             {edited && <Badge tone="warning">Edited</Badge>}
+            <VerifyBadge draft={draft} />
           </div>
           <div className="mt-0.5 flex flex-wrap gap-x-2 text-[13px] text-text-2">
             <span className="font-medium text-text">{draft.company}</span>
@@ -231,6 +257,18 @@ export function Reviewer({ draft, index, total, onMove, onApprove, onReject, bus
             </a>
             {draft.kind === "referral" && <AlumniLink company={draft.company} />}
           </div>
+          {(draft.legit_status === "caution" || draft.legit_status === "suspicious") && (
+            <div role="alert" className="mt-2 rounded-[var(--radius-control)] border border-[color-mix(in_oklab,var(--error)_35%,transparent)] bg-[color-mix(in_oklab,var(--error)_10%,transparent)] px-3 py-2 text-[12.5px]">
+              <div className="flex items-center gap-1.5 font-semibold text-[var(--error)]">
+                <ShieldAlert className="size-3.5" /> {draft.legit_status === "suspicious" ? "Likely scam: this can’t be approved" : "Suspicious: check before you approve"}
+              </div>
+              <ul className="mt-1 space-y-0.5 text-text-2">
+                {(draft.legit_reasons ?? []).map((r) => (
+                  <li key={r}>· {r}</li>
+                ))}
+              </ul>
+            </div>
+          )}
         </div>
         </div>
         <div className="ml-auto flex shrink-0 items-center gap-1">

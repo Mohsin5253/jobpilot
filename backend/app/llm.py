@@ -257,7 +257,8 @@ class LLM:
                     await asyncio.sleep(pause)
                     waited += pause
 
-        with observe(f"llm.{agent}", as_type="generation", model=model, input=prompt[:4000]) as gen:
+        # Traces carry timings, tokens and cost only: never the prompt (resumes, pasted messages) or the reply.
+        with observe(f"llm.{agent}", as_type="generation", model=model) as gen:
             for attempt in range(1, settings.llm_max_repairs + 2):
                 try:
                     reply = await send()
@@ -295,7 +296,6 @@ class LLM:
 
                 await self._record(ctx, agent, model, usage, started, attempt, True, None)
                 gen.update(
-                    output=reply.text[:4000],
                     usage_details={"input": usage["in"], "output": usage["out"]},
                     cost_details={"total": estimate_cost(model, usage["in"], usage["out"], usage["cache"])},
                 )

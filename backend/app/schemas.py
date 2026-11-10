@@ -365,6 +365,9 @@ class DraftWithJob(DraftOut):
     job_url: str
     job_source: str
     recruiter_email: str | None
+    legit_status: str | None = None  # verified | caution | suspicious (Verifier v2)
+    legit_reasons: list[str] = []
+    ghost_score: int | None = None
 
 
 # ---------- Runs ----------

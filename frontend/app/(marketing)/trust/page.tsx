@@ -91,7 +91,13 @@ export default async function TrustPage() {
       </nav>
 
       <Section id="checks" title="What we check">
-        <p>Before a posting reaches you, Verifier checks it. Postings with a red flag are blocked and never matched to anyone; others with a warning show the reason.</p>
+        <p>
+          Before a posting reaches you, Verifier checks it with the same rules as our free{" "}
+          <Link href="/scam-check" className="text-cobalt-text hover:underline">
+            Scam Shield
+          </Link>
+          . Postings with a red flag are blocked: they’re never matched to anyone and can’t be approved. Others with a warning show the reason.
+        </p>
         <List
           items={[
             "The employer is named, not “a leading MNC” or “our client”.",

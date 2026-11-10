@@ -147,6 +147,19 @@ async def eval_tailor(match_rows: list[dict]) -> dict:
     }
 
 
+def eval_scam_shield() -> dict:
+    """Scam Shield verdicts on the labelled set (tuned on) and the held-out set (written after tuning)."""
+    from app.services.scam_shield import analyze
+
+    expect = {"scam": "Likely scam", "suspicious": "Suspicious", "safe": "Likely safe"}
+    out = {}
+    for name in ("scam_samples", "scam_holdout"):
+        rows = [json.loads(line) for line in (ROOT / "data" / f"{name}.jsonl").read_text().splitlines() if line.strip()]
+        hits = sum(analyze(r["text"], r["url"]).verdict == expect[r["label"]] for r in rows)
+        out[name] = {"cases": len(rows), "accuracy": hits / len(rows)}
+    return out
+
+
 async def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--llm", action="store_true", help="use Claude for fit reviews and run the live Tailor eval (costs money)")
@@ -155,6 +168,7 @@ async def main() -> None:
     report: dict = {"at": datetime.now(UTC).isoformat()}
     report["matcher"] = await eval_matcher(args.llm)
     report["guard"] = eval_guard()
+    report["scam_shield"] = eval_scam_shield()
     if args.llm:
         report["tailor"] = await eval_tailor(report["matcher"]["rows"])
 
@@ -163,6 +177,8 @@ async def main() -> None:
     print(f"  Spearman rho {m['spearman']:.3f} · precision@5 {m['precision_at_5']:.2f} · bucket accuracy {m['bucket_accuracy']:.2f}")
     for r in m["rows"]:
         print(f"  {r['score']:5.1f}  label {r['label']}  {r['title']}")
+    for name, r in report["scam_shield"].items():
+        print(f"\nScam Shield ({name}) accuracy {r['accuracy']:.2f} on {r['cases']} cases")
     print(f"\nGuard    precision {g['precision']:.2f} · recall {g['recall']:.2f} · accuracy {g['accuracy']:.2f} on {g['cases']} cases")
     for miss in g["misses"]:
         print(f"  MISS ({miss['expect']}): {miss['rewritten']}  -> {miss['verdict']}")

@@ -159,6 +159,42 @@ class Job(Base):
     legit_status: Mapped[str | None] = mapped_column(String(12))
     legit_reasons: Mapped[list[str]] = mapped_column(JSONB, default=list, server_default="[]")
     legit_checked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    # Verifier v2: the latest verification row (checks with evidence), how often the role was reposted, and a
+    # 0-100 ghost-job score (age, reposts, last seen, whether the ATS still lists it, career-page presence).
+    verification_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("verifications.id", ondelete="SET NULL", use_alter=True))
+    repost_count: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
+    ghost_score: Mapped[int | None] = mapped_column(Integer)
+
+
+class Verification(Base):
+    """One Scam Shield / Verifier verdict. Public checks keep only each check's status (no quoted evidence) and a hash
+    of the input, so nothing a student pasted is stored; pipeline checks of public postings keep their evidence."""
+
+    __tablename__ = "verifications"
+
+    id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=uuid.uuid4)
+    opportunity_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("jobs.id", ondelete="CASCADE"), index=True)
+    source: Mapped[str] = mapped_column(String(20), default="public", server_default="public")  # public | pipeline
+    input_hash: Mapped[str] = mapped_column(String(64), index=True)
+    verdict: Mapped[str] = mapped_column(String(20))  # Likely safe | Suspicious | Likely scam
+    score: Mapped[int] = mapped_column(Integer)
+    checks: Mapped[list[dict[str, Any]]] = mapped_column(JSONB, default=list, server_default="[]")
+    ghost_score: Mapped[int | None] = mapped_column(Integer)
+    llm_category: Mapped[str | None] = mapped_column(String(30))
+    created_at: Mapped[datetime] = _now_col(index=True)
+
+
+class ScamReport(Base):
+    """Opt-in "report this scam": a redacted copy (no phone numbers, email users, IDs) for moderation and stats."""
+
+    __tablename__ = "scam_reports"
+
+    id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=uuid.uuid4)
+    verification_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("verifications.id", ondelete="CASCADE"))
+    redacted_text: Mapped[str] = mapped_column(Text)
+    reporter_user_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"))
+    status: Mapped[str] = mapped_column(String(20), default="new", server_default="new")  # new | confirmed | dismissed
+    created_at: Mapped[datetime] = _now_col()
 
 
 class JobMatch(Base):
