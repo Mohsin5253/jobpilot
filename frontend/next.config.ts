@@ -1,6 +1,8 @@
 import type { NextConfig } from "next";
 
-const API_URL = process.env.API_URL ?? "http://localhost:8000";
+// The API's origin only. A trailing "/" or "/api" (an easy mistake in the Vercel dashboard) would send
+// requests to //api/... or /api/api/..., which the API answers with 404, so both are dropped.
+const API_URL = (process.env.API_URL?.trim() || "http://localhost:8000").replace(/\/+$/, "").replace(/\/api$/, "");
 const PROD = process.env.NODE_ENV === "production";
 
 // Same-origin everything (the API is proxied under /api). 'unsafe-inline' covers the pre-paint theme
