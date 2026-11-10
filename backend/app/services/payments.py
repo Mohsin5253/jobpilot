@@ -41,7 +41,12 @@ async def _call(method: str, path: str, json: dict | None = None) -> dict:
     async with httpx.AsyncClient(timeout=20, auth=_auth()) as c:
         r = await c.request(method, f"{API}{path}", json=json)
     if r.status_code >= 300:
-        log.warning("razorpay.error", path=path.split("/")[1], status=r.status_code)
+        try:
+            err = (r.json().get("error") or {})
+        except ValueError:
+            err = {}
+        # Razorpay's error code, field and description name the problem; they carry no secrets or card data.
+        log.warning("razorpay.error", path=path.strip("/").replace("/", "."), status=r.status_code, code=err.get("code"), field=err.get("field"), reason=str(err.get("description", ""))[:200])
         raise httpx.HTTPStatusError("Razorpay refused the request", request=r.request, response=r)
     return r.json()
 
@@ -89,12 +94,12 @@ async def payment_link(s: AsyncSession, user: User, plan: str, amount: int, desc
     return link["short_url"]
 
 
-QR_TTL = timedelta(minutes=15)
+QR_TTL = timedelta(minutes=20)  # Razorpay allows 2 minutes to 2 hours
 QR_PLANS = {"week_pass": ("JobPilot Week Pass: 7 days of Pro", 7), "pro_month": ("JobPilot Pro: 1 month, no auto-renewal", 30)}
 
 
 async def qr_checkout(s: AsyncSession, user: User, plan: str) -> Payment:
-    """A single-use Razorpay UPI QR for a fixed amount: scan it with any UPI app. Closes after 15 minutes.
+    """A single-use Razorpay UPI QR for a fixed amount: scan it with any UPI app. Closes after 20 minutes.
     Pro bought this way is one month that doesn't renew (UPI AutoPay needs the subscription page instead)."""
     amount = settings.price_week_pass_inr if plan == "week_pass" else settings.price_pro_inr
     description, _ = QR_PLANS[plan]

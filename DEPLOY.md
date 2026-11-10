@@ -183,9 +183,9 @@ UPI details reach JobPilot. Until the keys are set, Settings shows "Request Pro"
    Have your accountant check the invoice format before going live.
 5. The "₹99 on first interview" outcome plan is off (`OUTCOME_PLAN_ENABLED=false`) until you decide to offer it.
 
-**Pay by UPI QR**: Settings → Plan also shows a single-use Razorpay UPI QR (15 minutes) for the Week Pass or one month of
-Pro without renewal; any UPI app can scan it. Razorpay's QR Codes feature may need enabling on your account
-(Payments → QR Codes) before the API can create codes.
+**Pay by UPI QR**: Settings → Plan also shows a single-use Razorpay UPI QR (20 minutes) for the Week Pass or one month of
+Pro without renewal; any UPI app can scan it. Creating `upi_qr` codes through the API is an on-demand
+Razorpay feature: ask Razorpay Support to enable "QR Codes API (upi_qr)", even if the dashboard already lets you make QR codes by hand.
 
 Plans change only on verified webhooks, each event applied once. Cancelling keeps Pro until the paid period ends.
 

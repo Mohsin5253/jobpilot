@@ -114,7 +114,7 @@ async def test_upi_qr_payment_for_week_pass_and_pro_month(authed, client, razorp
     )
     respx.get("https://rzp.io/i/qr1").mock(return_value=httpx.Response(200, content=b"\x89PNG fake"))
     r = (await authed.post("/api/payments/qr/week_pass")).json()
-    assert r["amount_inr"] == 49 and r["expires_in_s"] == 900
+    assert r["amount_inr"] == 49 and r["expires_in_s"] == 1200
     body = json.loads(create.calls.last.request.content)
     assert body["type"] == "upi_qr" and body["usage"] == "single_use" and body["fixed_amount"] and body["payment_amount"] == 4900
     img = await authed.get(r["image"])

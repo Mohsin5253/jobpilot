@@ -50,7 +50,10 @@ async def qr(plan: str, user: RealUserDep, session: SessionDep) -> dict:
     except pay.PaymentsOff as exc:
         raise HTTPException(409, str(exc)) from exc
     except httpx.HTTPError as exc:
-        raise HTTPException(502, "Razorpay couldn't create a QR code. Use the payment page instead, or try again.") from exc
+        detail = "Razorpay couldn't create a QR code. Use the payment page instead, or try again."
+        if isinstance(exc, httpx.HTTPStatusError) and exc.response.status_code == 400:
+            detail = "UPI QR payments aren't switched on for this Razorpay account yet. Use the payment page (Week Pass / Get Pro) instead."
+        raise HTTPException(502, detail) from exc
     await session.commit()
     return {"payment_id": str(p.id), "amount_inr": p.amount_inr, "image": f"/api/payments/qr/{p.id}/image", "expires_in_s": int(pay.QR_TTL.total_seconds())}
 
