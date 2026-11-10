@@ -1,0 +1,88 @@
+# Render Blueprint, free tier: one API instance that also runs the agents and the scheduler, and a free
+# Postgres (pgvector is available). The Next.js frontend deploys to Vercel (see DEPLOY.md).
+#
+# Free-tier limits: the API sleeps after 15 minutes without traffic (about a minute to wake on the next visit),
+# scheduled runs don't fire while it sleeps, and Render deletes free databases after 30 days. To go always-on,
+# switch both plans to paid in the dashboard, or use render.production.yaml for launch traffic.
+envVarGroups:
+  - name: jobpilot-shared
+    envVars:
+      - key: ENV
+        value: prod
+      - key: JWT_SECRET
+        generateValue: true
+      - key: ENCRYPTION_KEY # Fernet key for users' mail passwords: set it yourself (see DEPLOY.md) and never change it
+        sync: false
+      - key: COOKIE_SECURE
+        value: "true"
+      - key: APP_URL # https://your-domain (used in password-reset links)
+        sync: false
+      - key: CORS_ORIGINS # https://your-domain
+        sync: false
+      - key: ADMIN_EMAILS
+        sync: false
+      - key: GROQ_API_KEY
+        sync: false
+      - key: ADZUNA_APP_ID
+        sync: false
+      - key: ADZUNA_APP_KEY
+        sync: false
+      - key: JSEARCH_API_KEY
+        sync: false
+      - key: HUNTER_API_KEY
+        sync: false
+      - key: SENTRY_DSN
+        sync: false
+      - key: GITHUB_TOKEN
+        sync: false
+      - key: WHATSAPP_TOKEN
+        sync: false
+      - key: WHATSAPP_PHONE_NUMBER_ID
+        sync: false
+      - key: WHATSAPP_APP_SECRET
+        sync: false
+      - key: WHATSAPP_VERIFY_TOKEN
+        sync: false
+      - key: LANGFUSE_PUBLIC_KEY
+        sync: false
+      - key: LANGFUSE_SECRET_KEY
+        sync: false
+      # System mail (password resets, alerts) from your own domain, e.g. Resend / SES / Postmark SMTP.
+      # Applications are sent from each user's own mailbox, never from this address.
+      - key: SMTP_HOST
+        sync: false
+      - key: SMTP_USER
+        sync: false
+      - key: SMTP_PASSWORD
+        sync: false
+      - key: SMTP_FROM
+        sync: false
+
+databases:
+  - name: jobpilot-db
+    plan: free
+    region: singapore # closest Render region to India; the API must be in the same region
+    databaseName: jobpilot
+    user: jobpilot
+
+services:
+  - type: web
+    name: jobpilot-api
+    runtime: docker
+    rootDir: backend
+    plan: free
+    region: singapore
+    healthCheckPath: /ready
+    envVars:
+      - fromGroup: jobpilot-shared
+      - key: DATABASE_URL
+        fromDatabase: { name: jobpilot-db, property: connectionString }
+      # Free instances have no pre-deploy step, so migrations run on boot (one instance, so no race).
+      - key: RUN_MIGRATIONS
+        value: "true"
+      # No background workers on the free tier: the API process runs the agent queue and the scheduler.
+      - key: EMBEDDED_WORKER
+        value: "true"
+      # 512 MB of memory: one server process.
+      - key: WEB_CONCURRENCY
+        value: "1"

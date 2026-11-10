@@ -1,0 +1,28 @@
+{
+  "manifest_version": 3,
+  "name": "JobPilot Autofill",
+  "version": "1.0.0",
+  "description": "Fills Greenhouse, Lever and Ashby applications with your JobPilot details and tailored resume. You click Submit.",
+  "permissions": ["storage", "activeTab"],
+  "host_permissions": [
+    "https://boards.greenhouse.io/*",
+    "https://job-boards.greenhouse.io/*",
+    "https://jobs.lever.co/*",
+    "https://jobs.ashbyhq.com/*"
+  ],
+  "optional_host_permissions": ["http://localhost/*", "https://*/*"],
+  "background": { "service_worker": "background.js" },
+  "content_scripts": [
+    {
+      "matches": [
+        "https://boards.greenhouse.io/*",
+        "https://job-boards.greenhouse.io/*",
+        "https://jobs.lever.co/*",
+        "https://jobs.ashbyhq.com/*"
+      ],
+      "js": ["src/fields.js", "content.js"],
+      "run_at": "document_idle"
+    }
+  ],
+  "action": { "default_popup": "popup.html", "default_title": "JobPilot Autofill" }
+}

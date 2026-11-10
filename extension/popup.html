@@ -1,0 +1,41 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <style>
+      :root { color-scheme: dark; }
+      body { margin: 0; width: 320px; font: 13px/1.45 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; background: #0B0B0D; color: #F4EFE6; }
+      .wrap { padding: 16px; }
+      .brand { display: flex; align-items: center; gap: 8px; font-family: Georgia, serif; font-size: 18px; margin-bottom: 12px; }
+      .mark { width: 22px; height: 22px; transform: rotate(45deg); border-radius: 5px; background: linear-gradient(135deg, #E9D3A1, #B08A52); }
+      label { display: block; color: #B9B0A0; font-size: 12px; margin: 10px 0 4px; }
+      input { width: 100%; box-sizing: border-box; padding: 8px 10px; border-radius: 8px; border: 1px solid rgba(214,183,122,.24); background: #15130F; color: #F4EFE6; }
+      button { width: 100%; margin-top: 12px; padding: 9px; border: 0; border-radius: 9px; font-weight: 600; cursor: pointer; }
+      .primary { background: linear-gradient(135deg, #E9D3A1, #C9A464); color: #17130B; }
+      .ghost { background: transparent; color: #D6B77A; border: 1px solid rgba(214,183,122,.24); }
+      .status { margin-top: 12px; padding: 10px; border-radius: 8px; background: #15130F; border: 1px solid rgba(214,183,122,.12); color: #B9B0A0; }
+      .status b { color: #F4EFE6; }
+      .hidden { display: none; }
+      .note { color: #7E7668; font-size: 11.5px; margin-top: 10px; }
+    </style>
+  </head>
+  <body>
+    <div class="wrap">
+      <div class="brand"><span class="mark"></span> JobPilot Autofill</div>
+      <div id="main">
+        <div id="status" class="status">Open a Greenhouse, Lever or Ashby application page.</div>
+        <button id="fill" class="primary">Fill this application</button>
+        <button id="edit" class="ghost">Settings</button>
+        <p class="note">Fills your details and attaches the tailored resume. Sensitive questions are left to you, and it never clicks Submit.</p>
+      </div>
+      <form id="settings" class="hidden">
+        <label for="api">JobPilot API address</label>
+        <input id="api" placeholder="https://api.yourdomain.com" />
+        <label for="token">Extension token (JobPilot → Settings → Chrome extension)</label>
+        <input id="token" placeholder="jpx_…" type="password" autocomplete="off" />
+        <button class="primary" type="submit">Save</button>
+      </form>
+    </div>
+    <script src="popup.js"></script>
+  </body>
+</html>

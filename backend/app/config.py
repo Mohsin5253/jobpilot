@@ -1,0 +1,228 @@
+from functools import lru_cache
+from typing import Annotated, Literal
+
+from pydantic import field_validator, model_validator
+from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
+
+# USD per million tokens: (input, output). Cache reads are billed at 10% of input.
+MODEL_PRICING: dict[str, tuple[float, float]] = {
+    "openai/gpt-oss-20b": (0.075, 0.30),
+    "openai/gpt-oss-120b": (0.15, 0.60),
+    "qwen/qwen3.8-27b": (0.80, 4.00),
+    "claude-opus-5-5": (4.00, 20.00),
+    "claude-sonnet-5-5": (2.00, 10.00),
+    "claude-haiku-5-5": (0.10, 0.50),
+    "claude-fable-5-1": (10.00, 50.00),
+}
+
+# (fast model for scoring / parsing, smart model for writing) per provider
+PROVIDER_MODELS: dict[str, tuple[str, str]] = {
+    "groq": ("openai/gpt-oss-20b", "openai/gpt-oss-120b"),
+    "anthropic": ("claude-haiku-5-5", "claude-opus-5-5"),
+}
+
+
+DEFAULT_JWT_SECRET = "dev-secret-change-me-in-production-please"
+
+# Per-plan daily limits. Free is generous enough to land internships; Pro is for heavy applying.
+PLAN_LIMITS: dict[str, dict[str, float]] = {
+    "free": {"drafts_per_day": 10, "manual_runs_per_day": 3, "min_refresh_minutes": 15, "llm_usd_per_day": 0.05},
+    "pro": {"drafts_per_day": 50, "manual_runs_per_day": 20, "min_refresh_minutes": 1, "llm_usd_per_day": 0.50},
+}
+
+
+class Settings(BaseSettings):
+    model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
+
+    env: Literal["dev", "test", "prod"] = "dev"
+    log_level: str = "INFO"
+
+    database_url: str = "postgresql+psycopg://localhost/jobpilot"
+    # Per process. Budget: (API processes + workers) x (pool + overflow) must stay under Postgres max_connections.
+    db_pool_size: int = 5
+    db_max_overflow: int = 10
+
+    jwt_secret: str = DEFAULT_JWT_SECRET
+    jwt_ttl_hours: int = 24 * 7
+    cookie_secure: bool = False
+    cors_origins: Annotated[list[str], NoDecode] = ["http://localhost:3000"]  # comma-separated in env
+    app_url: str = "http://localhost:3000"  # public web origin, used in password-reset links
+    # Fernet key that encrypts users' mail passwords at rest. Generate one with
+    #   python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
+    # Dev / tests derive one from the JWT secret; prod refuses to start without a real one.
+    encryption_key: str | None = None
+    admin_emails: Annotated[list[str], NoDecode] = []  # comma-separated; these accounts can open /admin
+    sentry_dsn: str | None = None
+    rate_limits_enabled: bool = True
+    consent_version: str = "2026-11"  # bump when the privacy notice changes; users re-confirm
+    extension_origin_regex: str = r"chrome-extension://[a-p]{32}"  # the Chrome autofill extension calls the API directly
+
+    # Proof-of-skills pack (official public APIs). A token raises GitHub's limit from 60 to 5,000 requests / hour.
+    github_token: str | None = None
+    evidence_cache_hours: int = 24
+
+    # Quality gate: at most this many tailored applications a week (per-user preference, capped by plan).
+    default_weekly_application_cap: int = 10
+
+    # WhatsApp daily digest (official WhatsApp Cloud API). Off until all of these are set.
+    whatsapp_token: str | None = None
+    whatsapp_phone_number_id: str | None = None
+    whatsapp_template: str = "jobpilot_daily_digest"  # an approved template with 2 body params: name, summary
+    whatsapp_template_lang: str = "en"
+    whatsapp_app_secret: str | None = None  # verifies webhook signatures
+    whatsapp_verify_token: str | None = None  # webhook subscription handshake
+
+    # LLM: "auto" uses the provider when its API key is set, otherwise the deterministic offline agents.
+    llm_provider: Literal["groq", "anthropic"] = "groq"
+    llm_mode: Literal["auto", "on", "offline"] = "auto"
+    groq_api_key: str | None = None
+    anthropic_api_key: str | None = None
+    fast_model: str = ""  # scoring / parsing; empty = provider default (PROVIDER_MODELS)
+    smart_model: str = ""  # writing (tailor + outreach); empty = provider default
+    smart_fallbacks: bool = True  # Anthropic only: server-side refusal fallbacks on the smart model
+    llm_concurrency: int = 2  # Groq's free tier allows ~8k tokens/min on gpt-oss-120b
+    llm_rate_limit_wait_s: float = 90.0  # total time one call may spend waiting out 429s
+    llm_max_repairs: int = 2
+
+    embedding_backend: Literal["fastembed", "hash"] = "fastembed"
+    embedding_model: str = "BAAI/bge-small-en-v1.5"
+    embedding_dim: int = 384
+
+    hunter_api_key: str | None = None  # Hunter.io: senior people at a company, with public sources
+    website_contacts_enabled: bool = True  # read hiring addresses from companies' own careers/contact pages
+    contacts_cache_days: int = 30
+    # JSearch (Google for Jobs index: LinkedIn, Indeed, Glassdoor, Naukri, Wellfound, company sites...).
+    # Either an OpenWeb Ninja key or a RapidAPI key; the free plan is ~200 requests a month.
+    jsearch_api_key: str | None = None
+    jsearch_provider: Literal["rapidapi", "openwebninja"] = "rapidapi"
+    jsearch_monthly_requests: int = 200
+    verify_links: bool = True  # check that apply links are live before showing a job
+    adzuna_app_id: str | None = None
+    adzuna_app_key: str | None = None
+    adzuna_monthly_requests: int = 1000  # free developer keys; raise it if Adzuna gives you more
+    demo_source: bool = False  # bundled sample postings (fictional companies) for offline demos / tests
+    seed_company_boards: bool = True  # new accounts start with a curated list of real company boards
+    public_feeds_enabled: bool = True  # The Muse / Remotive / Jobicy (no key needed)
+    source_timeout_s: float = 20.0
+    source_cache_s: float = 90.0  # every user polling the same board within this window shares one fetch
+
+    # Pipeline knobs
+    llm_score_top_k: int = 25  # only the top-K by vector similarity get an LLM fit review
+    tailor_top_n: int = 5
+    researcher_enabled: bool = True  # master switch for the Researcher agent (off in tests: it calls live board APIs)
+    research_cooldown_hours: int = 20  # LLM company discovery at most this often per user
+    research_max_candidates: int = 40  # companies probed per discovery pass
+    near_miss_band: int = 20  # jobs this far below your min score trigger skill questions
+    max_questions_per_run: int = 5
+    follow_up_days: int = 7
+
+    # Shared ingestion: every board / feed / search is fetched once for all users who want it.
+    ingest_max_targets_per_tick: int = 120  # per worker per minute; more replicas = more throughput
+    ingest_concurrency: int = 16
+    fanout_min_semantic: float = 15.0  # a new job wakes a user's agents if it's at least this close to their resume (0-100)
+    scout_candidates: int = 200  # jobs from the shared index the Scout hands the Matcher per run
+
+    # Demo mode (one-click "Try the demo" on the landing page)
+    demo_enabled: bool = True
+    demo_ttl_hours: int = 24
+    demo_template_email: str = "demo@example.com"  # the showcase account every demo visitor gets a copy of
+
+    # Retention (daily sweep)
+    retain_llm_calls_days: int = 90
+    retain_notifications_days: int = 60
+    retain_unmatched_jobs_days: int = 60
+
+    # Worker
+    embedded_worker: bool = True  # run the queue consumer + scheduler inside the API process
+    worker_poll_seconds: float = 2.0
+    run_lock_timeout_minutes: int = 30
+
+    smtp_host: str | None = None
+    smtp_port: int = 587
+    smtp_user: str | None = None
+    smtp_password: str | None = None
+    smtp_from: str | None = None
+
+    langfuse_public_key: str | None = None
+    langfuse_secret_key: str | None = None
+    langfuse_host: str | None = None
+
+    @field_validator("database_url")
+    @classmethod
+    def _normalize_db_url(cls, v: str) -> str:
+        # Render / Railway / Heroku hand out postgres:// URLs; SQLAlchemy needs the driver spelled out.
+        for prefix in ("postgres://", "postgresql://"):
+            if v.startswith(prefix):
+                return "postgresql+psycopg://" + v[len(prefix) :]
+        return v
+
+    @field_validator("cors_origins", "admin_emails", mode="before")
+    @classmethod
+    def _split_origins(cls, v):
+        if isinstance(v, str) and not v.startswith("["):
+            return [o.strip() for o in v.split(",") if o.strip()]
+        return v
+
+    @model_validator(mode="after")
+    def _refuse_unsafe_prod(self):
+        """Fail at boot, not after a breach: production needs real secrets and secure cookies."""
+        if self.env != "prod":
+            return self
+        problems = []
+        if self.jwt_secret == DEFAULT_JWT_SECRET or len(self.jwt_secret) < 32:
+            problems.append("JWT_SECRET must be a random value of at least 32 characters")
+        if not self.cookie_secure:
+            problems.append("COOKIE_SECURE must be true (the site is served over HTTPS)")
+        if not self.encryption_key:
+            problems.append("ENCRYPTION_KEY must be set (encrypts users' mail passwords)")
+        if any("localhost" in o for o in self.cors_origins) or not self.cors_origins:
+            problems.append("CORS_ORIGINS must list your real web origin(s)")
+        if problems:
+            raise ValueError("Unsafe production config: " + "; ".join(problems))
+        return self
+
+    def limits(self, plan: str) -> dict[str, float]:
+        return PLAN_LIMITS.get(plan, PLAN_LIMITS["free"])
+
+    @property
+    def psycopg_conninfo(self) -> str:
+        """Plain libpq URL for psycopg (LangGraph checkpointer)."""
+        return self.database_url.replace("postgresql+psycopg://", "postgresql://", 1)
+
+    @property
+    def models(self) -> tuple[str, str]:
+        fast, smart = PROVIDER_MODELS[self.llm_provider]
+        return self.fast_model or fast, self.smart_model or smart
+
+    @property
+    def llm_enabled(self) -> bool:
+        if self.llm_mode == "offline":
+            return False
+        if self.llm_mode == "on":
+            return True
+        return bool(self.groq_api_key if self.llm_provider == "groq" else self.anthropic_api_key)
+
+    @property
+    def llm_label(self) -> str:
+        return self.llm_provider if self.llm_enabled else "offline"
+
+    @property
+    def smtp_enabled(self) -> bool:
+        # A login user without a password can't authenticate, so don't offer sending.
+        return bool(self.smtp_host and self.smtp_from and (not self.smtp_user or self.smtp_password))
+
+    @property
+    def whatsapp_enabled(self) -> bool:
+        return bool(self.whatsapp_token and self.whatsapp_phone_number_id and self.whatsapp_template)
+
+    @property
+    def langfuse_enabled(self) -> bool:
+        return bool(self.langfuse_public_key and self.langfuse_secret_key)
+
+
+@lru_cache
+def get_settings() -> Settings:
+    return Settings()
+
+
+settings = get_settings()

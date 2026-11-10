@@ -1,0 +1,92 @@
+[
+  {
+    "context": "Movie Recommender Python Pandas scikit-learn Flask\nServed recommendations through a Flask REST API with response times under 200 ms",
+    "rewritten": "Shipped a Flask REST API serving movie recommendations in under 200 ms",
+    "expect": "ok",
+    "why": "pure rephrase"
+  },
+  {
+    "context": "Movie Recommender Python Pandas scikit-learn Flask\nServed recommendations through a Flask REST API with response times under 200 ms",
+    "rewritten": "Shipped a Dockerized Flask REST API serving recommendations in under 200 ms",
+    "expect": "violation",
+    "why": "Docker is not in the resume"
+  },
+  {
+    "context": "Movie Recommender Python Pandas scikit-learn Flask\nServed recommendations through a Flask REST API with response times under 200 ms",
+    "rewritten": "Shipped a Flask REST API serving recommendations to 10,000 users in under 200 ms",
+    "expect": "violation",
+    "why": "invented user count"
+  },
+  {
+    "context": "Data Science Intern Finlytics Solutions\nBuilt a churn prediction model with scikit-learn and XGBoost that improved recall by 12% over the baseline",
+    "rewritten": "Improved churn-model recall by 12% over baseline using XGBoost and scikit-learn",
+    "expect": "ok",
+    "why": "reordered, same facts"
+  },
+  {
+    "context": "Data Science Intern Finlytics Solutions\nBuilt a churn prediction model with scikit-learn and XGBoost that improved recall by 12% over the baseline",
+    "rewritten": "Improved churn-model recall by 25% over baseline using XGBoost",
+    "expect": "violation",
+    "why": "metric changed"
+  },
+  {
+    "context": "Data Science Intern Finlytics Solutions\nBuilt a churn prediction model with scikit-learn and XGBoost that improved recall by 12% over the baseline",
+    "rewritten": "Built a PyTorch churn model that improved recall by 12%",
+    "expect": "violation",
+    "why": "PyTorch fabricated"
+  },
+  {
+    "context": "Data Science Intern Finlytics Solutions\nBuilt a churn prediction model with scikit-learn and XGBoost that improved recall by 12% over the baseline",
+    "rewritten": "Built a churn prediction model with Flask and XGBoost, lifting recall 12% over baseline",
+    "expect": "violation",
+    "why": "Flask is in the resume but not in this role (misattributed)"
+  },
+  {
+    "context": "Sales Forecasting Python Pandas statistics\nForecast weekly sales for a retail dataset using time series features and gradient boosting",
+    "rewritten": "Applied machine learning (gradient boosting on time series features) to forecast weekly retail sales",
+    "expect": "ok",
+    "why": "generic concept, no new tool"
+  },
+  {
+    "context": "Sales Forecasting Python Pandas statistics\nForecast weekly sales for a retail dataset using time series features and gradient boosting",
+    "rewritten": "Forecast weekly retail sales with LightGBM on time series features",
+    "expect": "violation",
+    "why": "LightGBM is a specific tool not in the resume"
+  },
+  {
+    "context": "Data Science Intern Finlytics Solutions\nWrote SQL queries on PostgreSQL to build features for 40k customer records",
+    "rewritten": "Engineered features for 40k customer records with SQL on PostgreSQL",
+    "expect": "ok",
+    "why": "rephrase keeps 40k"
+  },
+  {
+    "context": "Data Science Intern Finlytics Solutions\nWrote SQL queries on PostgreSQL to build features for 40k customer records",
+    "rewritten": "Engineered features for 40k customer records with SQL on Snowflake and Airflow",
+    "expect": "violation",
+    "why": "Snowflake + Airflow fabricated"
+  },
+  {
+    "context": "Data Science Intern Finlytics Solutions\nPresented weekly findings to the product team using Matplotlib dashboards in Jupyter",
+    "rewritten": "Communicated weekly insights to the product team through Matplotlib dashboards built in Jupyter",
+    "expect": "ok",
+    "why": "rephrase"
+  },
+  {
+    "context": "Data Science Intern Finlytics Solutions\nWrote SQL queries on PostgreSQL to build features for 40k customer records",
+    "rewritten": "Created SQL queries in PostgreSQL to generate features for 40,000 customer records.",
+    "expect": "ok",
+    "why": "40k written as 40,000 is the same number (live Tailor output)"
+  },
+  {
+    "context": "Data Science Intern Finlytics Solutions\nWrote SQL queries on PostgreSQL to build features for 40k customer records",
+    "rewritten": "Created SQL queries in PostgreSQL to generate features for 400,000 customer records.",
+    "expect": "violation",
+    "why": "40k inflated to 400,000"
+  },
+  {
+    "context": "Movie Recommender Python Pandas scikit-learn Flask\nBuilt a content-based movie recommender using TF-IDF and cosine similarity over 5,000 titles",
+    "rewritten": "Built a TF-IDF + cosine-similarity recommender covering 5k movie titles",
+    "expect": "ok",
+    "why": "5,000 written as 5k"
+  }
+]

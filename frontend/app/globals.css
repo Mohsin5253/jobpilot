@@ -1,0 +1,283 @@
+@import "tailwindcss";
+@import "../styles/tokens.css";
+
+@custom-variant dark (&:where(.dark, .dark *));
+
+/* Tokens -> Tailwind. Legacy names (fg, muted, subtle, accent, surface-2/3, success, warning, danger)
+   map onto the new system so every page follows the tokens. */
+@theme inline {
+  --color-bg: var(--bg);
+  --color-surface: var(--surface);
+  --color-surface-solid: var(--surface);
+  --color-elevated: var(--elevated);
+  --color-elevated-2: var(--elevated-2);
+  --color-surface-2: var(--elevated);
+  --color-surface-3: var(--elevated-2);
+  --color-border: var(--border);
+  --color-border-strong: var(--border-strong);
+  --color-text: var(--text);
+  --color-text-2: var(--text-2);
+  --color-text-3: var(--text-3);
+  --color-fg: var(--text);
+  --color-muted: var(--text-2);
+  --color-subtle: var(--text-3);
+  --color-cobalt: var(--cobalt);
+  --color-cobalt-hover: var(--cobalt-hover);
+  --color-cobalt-text: var(--cobalt-text);
+  --color-cobalt-subtle: var(--cobalt-subtle);
+  --color-on-cobalt: var(--on-cobalt);
+  --color-accent: var(--cobalt-text);
+  --color-accent-2: var(--cobalt);
+  --color-accent-bright: var(--cobalt-hover);
+  --color-accent-soft: var(--cobalt-subtle);
+  --color-on-accent: var(--on-cobalt);
+  --color-done: var(--done);
+  --color-running: var(--running);
+  --color-your-turn: var(--your-turn);
+  --color-error: var(--error);
+  --color-success: var(--done);
+  --color-warning: var(--your-turn);
+  --color-danger: var(--error);
+  --color-score-low: var(--score-low);
+  --color-score-mid: var(--score-mid);
+  --color-score-good: var(--score-good);
+
+  --font-sans: var(--font-geist-sans), ui-sans-serif, system-ui, sans-serif;
+  --font-mono: var(--font-geist-mono), ui-monospace, monospace;
+  --font-display: var(--font-geist-sans), ui-sans-serif, system-ui, sans-serif;
+
+  --radius-control: var(--radius-control);
+  --radius-card: var(--radius-card);
+  --radius-panel: var(--radius-panel);
+  --shadow-card: var(--shadow-2);
+  --ease-lux: var(--ease);
+
+  --animate-shimmer: shimmer 1.6s linear infinite;
+  --animate-pulse-soft: pulse-soft 2s ease-in-out infinite;
+  --animate-arrive: arrive 2.4s ease-out 1;
+  --animate-marquee: marquee 40s linear infinite;
+  --animate-sheen: sheen 1.1s var(--ease) 1;
+  --animate-spin-slow: spin 3s linear infinite;
+  --animate-ring-pulse: ring-pulse 2s ease-in-out infinite;
+  --animate-float: float 3s ease-in-out infinite;
+  --animate-bounce-once: bounce-once 600ms var(--ease) 1;
+
+  @keyframes shimmer {
+    from { background-position: -400px 0; }
+    to { background-position: 400px 0; }
+  }
+  @keyframes arrive {
+    0% { box-shadow: 0 0 0 0 color-mix(in oklab, var(--cobalt) 45%, transparent); }
+    100% { box-shadow: 0 0 0 10px transparent; }
+  }
+  @keyframes pulse-soft {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.45; }
+  }
+  @keyframes marquee {
+    from { transform: translateX(0); }
+    to { transform: translateX(-50%); }
+  }
+  @keyframes sheen {
+    from { transform: translateX(-120%) skewX(-18deg); }
+    to { transform: translateX(220%) skewX(-18deg); }
+  }
+  @keyframes ring-pulse {
+    0%, 100% { box-shadow: 0 0 0 2px var(--your-turn-fill), 0 0 0 0 color-mix(in oklab, var(--your-turn-fill) 45%, transparent); }
+    50% { box-shadow: 0 0 0 2px var(--your-turn-fill), 0 0 0 7px transparent; }
+  }
+  @keyframes float {
+    0%, 100% { transform: translateY(0); }
+    50% { transform: translateY(-3px); }
+  }
+  @keyframes fade-in {
+    from { opacity: 0; }
+    to { opacity: 1; }
+  }
+  @keyframes dialog-in {
+    from { opacity: 0; transform: translate(-50%, calc(-50% + 6px)) scale(0.98); }
+    to { opacity: 1; transform: translate(-50%, -50%) scale(1); }
+  }
+  @keyframes pop-in {
+    from { opacity: 0; transform: translateY(-4px) scale(0.98); }
+    to { opacity: 1; transform: none; }
+  }
+  @keyframes sheet-up {
+    from { transform: translateY(100%); }
+    to { transform: translateY(0); }
+  }
+  @keyframes sheet-left {
+    from { transform: translateX(100%); }
+    to { transform: translateX(0); }
+  }
+  @keyframes sheet-right {
+    from { transform: translateX(-100%); }
+    to { transform: translateX(0); }
+  }
+  @keyframes bounce-once {
+    0% { transform: scale(1); }
+    40% { transform: scale(1.08); }
+    100% { transform: scale(1); }
+  }
+}
+
+@property --sweep {
+  syntax: "<angle>";
+  inherits: false;
+  initial-value: 0deg;
+}
+@keyframes sweep {
+  to { --sweep: 360deg; }
+}
+
+@layer base {
+  * {
+    border-color: var(--border);
+  }
+  html {
+    color-scheme: light;
+  }
+  html.dark {
+    color-scheme: dark;
+  }
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-size: 14px;
+    line-height: 1.5;
+    font-feature-settings: "ss01", "cv11";
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+  ::selection {
+    background: var(--cobalt-subtle);
+    color: var(--text);
+  }
+  :focus-visible {
+    outline: 2px solid var(--cobalt);
+    outline-offset: 2px;
+    border-radius: 6px;
+  }
+  ::-webkit-scrollbar {
+    width: 10px;
+    height: 10px;
+  }
+  ::-webkit-scrollbar-thumb {
+    background: var(--elevated-2);
+    border-radius: 999px;
+    border: 3px solid transparent;
+    background-clip: content-box;
+  }
+  @media (prefers-reduced-motion: reduce) {
+    *, *::before, *::after {
+      animation-duration: 0.01ms !important;
+      animation-iteration-count: 1 !important;
+      transition-duration: 0.01ms !important;
+      scroll-behavior: auto !important;
+    }
+  }
+}
+
+@layer components {
+  /* Layered surface: 1px border + top inner highlight. Panels use .panel (16px radius). */
+  .card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-card);
+    box-shadow: var(--highlight);
+  }
+  .panel {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-panel);
+    box-shadow: var(--shadow-2);
+  }
+  .font-display {
+    font-family: var(--font-geist-sans), ui-sans-serif, system-ui, sans-serif;
+    font-weight: 600;
+    letter-spacing: -0.035em;
+  }
+  .num {
+    font-family: var(--font-geist-mono), ui-monospace, monospace;
+    font-variant-numeric: tabular-nums;
+  }
+  .eyebrow {
+    font-size: 11.5px;
+    font-weight: 500;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--text-3);
+  }
+  /* Legacy helpers, now cobalt: solid primary fill, and a quiet text treatment (no foil). */
+  .foil {
+    background: var(--cobalt);
+    color: var(--on-cobalt);
+  }
+  .gradient-text {
+    color: var(--text);
+  }
+  .hairline {
+    height: 1px;
+    background: var(--border);
+  }
+  .gradient-border {
+    position: relative;
+    border-color: color-mix(in oklab, var(--cobalt) 40%, transparent) !important;
+  }
+  .spotlight {
+    background: radial-gradient(600px 300px at 50% 0%, color-mix(in oklab, var(--cobalt) 14%, transparent), transparent 70%);
+  }
+  .grid-canvas {
+    background-image: linear-gradient(var(--grid-line) 1px, transparent 1px), linear-gradient(90deg, var(--grid-line) 1px, transparent 1px);
+    background-size: 32px 32px;
+  }
+  /* AgentAvatar "running": a cobalt light sweeping round the frame (a ring, not a fill). */
+  .sweep-ring {
+    padding: 2px;
+    background: conic-gradient(from var(--sweep, 0deg), transparent 0 62%, var(--cobalt) 82%, transparent 92%);
+    -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+    -webkit-mask-composite: xor;
+    mask: linear-gradient(#000 0 0) content-box exclude, linear-gradient(#000 0 0);
+    animation: sweep 3s linear infinite;
+  }
+  .skeleton {
+    background: linear-gradient(90deg, var(--elevated) 0, var(--elevated-2) 50%, var(--elevated) 100%);
+    background-size: 800px 100%;
+    animation: var(--animate-shimmer);
+    border-radius: var(--radius-control);
+  }
+  .prose-job {
+    white-space: pre-line;
+    line-height: 1.7;
+  }
+}
+
+/* Plain sonner toasts (agent toasts are custom and bring their own panel). */
+[data-sonner-toast][data-styled="true"] {
+  background: var(--surface);
+  color: var(--text);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-card);
+  box-shadow: var(--shadow-2);
+  font-family: var(--font-geist-sans);
+}
+[data-sonner-toast][data-styled="true"] [data-description] {
+  color: var(--text-2);
+}
+
+
+/* Feathers all four edges of the hero render so it melts into the graphite page. */
+.hero-feather {
+  mask-image: linear-gradient(90deg, transparent, #000 14%, #000 94%, transparent), linear-gradient(180deg, transparent, #000 10%, #000 76%, transparent);
+  mask-composite: intersect;
+  -webkit-mask-image: linear-gradient(90deg, transparent, #000 14%, #000 94%, transparent), linear-gradient(180deg, transparent, #000 10%, #000 76%, transparent);
+  -webkit-mask-composite: source-in;
+}
+
+/* The 3D stage melts into the hero at its sides and bottom. */
+.stage-feather {
+  mask-image: linear-gradient(90deg, transparent, #000 7%, #000 93%, transparent), linear-gradient(180deg, #000 74%, transparent 98%);
+  mask-composite: intersect;
+  -webkit-mask-image: linear-gradient(90deg, transparent, #000 7%, #000 93%, transparent), linear-gradient(180deg, #000 74%, transparent 98%);
+  -webkit-mask-composite: source-in;
+}

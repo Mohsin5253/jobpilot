@@ -1,0 +1,120 @@
+/* JobPilot design tokens: "Mission control, with a human crew".
+   Every colour, radius, shadow and duration in the app comes from here. Dark is the default theme
+   (the `dark` class on <html>); light is the same system on paper. */
+
+:root {
+  /* Surfaces */
+  --bg: #fbfbfa;
+  --surface: #ffffff;
+  --elevated: #f4f4f2;
+  --elevated-2: #ececea;
+  --border: #e7e7e4;
+  --border-strong: #d6d6d2;
+  --highlight: inset 0 1px 0 rgba(255, 255, 255, 0.9);
+
+  /* Text */
+  --text: #0e1012;
+  --text-2: #5b6168;
+  --text-3: #8a9097;
+
+  /* Brand: cobalt, at most ~10% of a screen. Text-on-light uses a deeper cobalt for contrast. */
+  --cobalt: #3d6bf0;
+  --cobalt-hover: #2f5be0;
+  --cobalt-text: #2f5be0;
+  --cobalt-subtle: rgba(76, 125, 255, 0.1);
+  --on-cobalt: #ffffff;
+
+  /* Status */
+  --done: #1f9d63;
+  --running: #3d6bf0;
+  --your-turn: #94600f;
+  /* Chart series (validated against the light surface): cobalt, then teal. Status colours are never series. */
+  --series-1: #3d6bf0;
+  --series-2: #0e9f8e;
+  --your-turn-fill: #f5b544;
+  --error: #d93c42;
+
+  /* Match score */
+  --score-low: #e11d48;
+  --score-mid: #b7791f;
+  --score-good: #1f9d63;
+
+  --shadow-1: 0 1px 2px rgba(14, 16, 18, 0.05);
+  --shadow-2: 0 1px 2px rgba(14, 16, 18, 0.05), 0 12px 32px -16px rgba(14, 16, 18, 0.18);
+  --glow-cobalt: radial-gradient(closest-side, rgba(76, 125, 255, 0.16), transparent);
+  --grid-line: rgba(14, 16, 18, 0.045);
+}
+
+.dark {
+  --bg: #0a0b0d;
+  --surface: #111316;
+  --elevated: #171a1f;
+  --elevated-2: #1d2026;
+  --border: rgba(255, 255, 255, 0.07);
+  --border-strong: rgba(255, 255, 255, 0.12);
+  --highlight: inset 0 1px 0 rgba(255, 255, 255, 0.04);
+
+  --text: #edeef0;
+  --text-2: #9ba1a9;
+  --text-3: #636973;
+
+  --cobalt: #4c7dff;
+  --cobalt-hover: #6a93ff;
+  --cobalt-text: #7c9dff;
+  --cobalt-subtle: rgba(76, 125, 255, 0.12);
+  --on-cobalt: #ffffff;
+
+  --done: #3dd68c;
+  --running: #4c7dff;
+  --your-turn: #f5b544;
+  /* Chart series, validated against the dark surface. */
+  --series-1: #4c7dff;
+  --series-2: #14a394;
+  --your-turn-fill: #f5b544;
+  --error: #f2555a;
+
+  --score-low: #fb7185;
+  --score-mid: #f5b544;
+  --score-good: #3dd68c;
+
+  --shadow-1: 0 1px 0 rgba(255, 255, 255, 0.03) inset;
+  --shadow-2: inset 0 1px 0 rgba(255, 255, 255, 0.04), 0 16px 40px -20px rgba(0, 0, 0, 0.8);
+  --glow-cobalt: radial-gradient(closest-side, rgba(76, 125, 255, 0.22), transparent);
+  --grid-line: rgba(255, 255, 255, 0.035);
+}
+
+:root {
+  /* Agent tints: ONLY avatar backdrops (10–14% opacity) and tiny identity accents. */
+  --tint-pilot: #4c7dff;
+  --tint-researcher: #2dd4bf;
+  --tint-scout: #38bdf8;
+  --tint-verifier: #a3e635;
+  --tint-matcher: #3dd68c;
+  --tint-interviewer: #a78bfa;
+  --tint-tailor: #f472b6;
+  --tint-outreach: #fb923c;
+  --tint-dispatch: #818cf8;
+  --tint-tracker: #22d3ee;
+  --tint-you: #4c7dff;
+
+  /* Shape */
+  --radius-control: 8px;
+  --radius-card: 12px;
+  --radius-panel: 16px;
+  --radius-avatar: 28%;
+
+  /* Motion */
+  --dur-fast: 150ms;
+  --dur-base: 220ms;
+  --dur-slow: 350ms;
+  --ease: cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+/* Legacy names still referenced by pages not yet redesigned; they follow the new tokens in both themes. */
+:root {
+  --accent: var(--cobalt);
+  --accent-2: var(--cobalt);
+  --accent-soft: var(--cobalt-subtle);
+  --on-accent: var(--on-cobalt);
+  --surface-3: var(--elevated-2);
+}

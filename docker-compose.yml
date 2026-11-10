@@ -1,0 +1,49 @@
+# Full stack locally:  docker compose up --build   ->  http://localhost:3000
+services:
+  db:
+    image: pgvector/pgvector:pg17
+    environment:
+      POSTGRES_USER: jobpilot
+      POSTGRES_PASSWORD: jobpilot
+      POSTGRES_DB: jobpilot
+    volumes: [pgdata:/var/lib/postgresql/data]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U jobpilot"]
+      interval: 5s
+      retries: 10
+    ports: ["5432"]
+
+  api:
+    build: ./backend
+    env_file: [{ path: ./backend/.env, required: false }]
+    environment:
+      DATABASE_URL: postgresql+psycopg://jobpilot:jobpilot@db:5432/jobpilot
+      EMBEDDED_WORKER: "false"
+      CORS_ORIGINS: http://localhost:3000
+      APP_URL: http://localhost:3000
+    depends_on:
+      db: { condition: service_healthy }
+    ports: ["8000:8000"]
+
+  worker:
+    build: ./backend
+    command: ["python", "-m", "app.worker"]
+    env_file: [{ path: ./backend/.env, required: false }]
+    environment:
+      DATABASE_URL: postgresql+psycopg://jobpilot:jobpilot@db:5432/jobpilot
+      WORKER_CONCURRENCY: "2"
+      RUN_MIGRATIONS: "false"
+    depends_on:
+      api: { condition: service_healthy }
+    deploy:
+      replicas: 2  # SKIP LOCKED claiming (runs and ingestion targets) makes replicas safe
+
+  web:
+    build:
+      context: ./frontend
+      args: { API_URL: http://api:8000 }
+    depends_on: [api]
+    ports: ["3000:3000"]
+
+volumes:
+  pgdata:

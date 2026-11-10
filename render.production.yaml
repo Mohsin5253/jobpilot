@@ -1,0 +1,99 @@
+# Render Blueprint for launch traffic: 2 API + 2 worker instances and a 1 GB Postgres (about $120/month).
+# To use it, replace render.yaml with this file (Render reads render.yaml). The free setup is render.yaml.
+# The Next.js frontend deploys to Vercel with API_URL set to the API's public URL (see DEPLOY.md).
+#
+# Scaling: add API instances for more web traffic and worker instances for more users. Workers split the
+# shared job ingestion and the agent queue between them (FOR UPDATE SKIP LOCKED), so both scale horizontally.
+envVarGroups:
+  - name: jobpilot-shared
+    envVars:
+      - key: ENV
+        value: prod
+      - key: JWT_SECRET
+        generateValue: true
+      - key: ENCRYPTION_KEY # Fernet key for users' mail passwords: set it yourself (see DEPLOY.md) and never change it
+        sync: false
+      - key: COOKIE_SECURE
+        value: "true"
+      - key: APP_URL # https://your-domain (used in password-reset links)
+        sync: false
+      - key: CORS_ORIGINS # https://your-domain
+        sync: false
+      - key: ADMIN_EMAILS
+        sync: false
+      - key: GROQ_API_KEY
+        sync: false
+      - key: ADZUNA_APP_ID
+        sync: false
+      - key: ADZUNA_APP_KEY
+        sync: false
+      - key: JSEARCH_API_KEY
+        sync: false
+      - key: HUNTER_API_KEY
+        sync: false
+      - key: SENTRY_DSN
+        sync: false
+      - key: GITHUB_TOKEN
+        sync: false
+      - key: WHATSAPP_TOKEN
+        sync: false
+      - key: WHATSAPP_PHONE_NUMBER_ID
+        sync: false
+      - key: WHATSAPP_APP_SECRET
+        sync: false
+      - key: WHATSAPP_VERIFY_TOKEN
+        sync: false
+      - key: LANGFUSE_PUBLIC_KEY
+        sync: false
+      - key: LANGFUSE_SECRET_KEY
+        sync: false
+      # System mail (password resets, alerts) from your own domain, e.g. Resend / SES / Postmark SMTP.
+      # Applications are sent from each user's own mailbox, never from this address.
+      - key: SMTP_HOST
+        sync: false
+      - key: SMTP_USER
+        sync: false
+      - key: SMTP_PASSWORD
+        sync: false
+      - key: SMTP_FROM
+        sync: false
+
+databases:
+  - name: jobpilot-db
+    plan: basic-1gb
+    databaseName: jobpilot
+    user: jobpilot
+
+services:
+  - type: web
+    name: jobpilot-api
+    runtime: docker
+    rootDir: backend
+    plan: standard
+    numInstances: 2
+    healthCheckPath: /ready
+    preDeployCommand: alembic upgrade head # once per deploy, before new instances take traffic
+    envVars:
+      - fromGroup: jobpilot-shared
+      - key: DATABASE_URL
+        fromDatabase: { name: jobpilot-db, property: connectionString }
+      - key: RUN_MIGRATIONS
+        value: "false"
+      - key: EMBEDDED_WORKER
+        value: "false"
+      - key: WEB_CONCURRENCY
+        value: "2"
+
+  - type: worker
+    name: jobpilot-worker
+    runtime: docker
+    rootDir: backend
+    plan: standard
+    numInstances: 2
+    dockerCommand: python -m app.worker
+    envVars:
+      - fromGroup: jobpilot-shared
+      - key: DATABASE_URL
+        fromDatabase: { name: jobpilot-db, property: connectionString }
+      - key: WORKER_CONCURRENCY
+        value: "4"

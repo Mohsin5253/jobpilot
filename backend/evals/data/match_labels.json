@@ -1,0 +1,26 @@
+{
+  "resume": "sample_resume.md",
+  "note": "My own judgment of fit for the sample resume: 3 = would apply today, 2 = stretch / partial fit, 1 = not a fit.",
+  "labels": {
+    "demo-001": 3,
+    "demo-002": 3,
+    "demo-003": 2,
+    "demo-004": 1,
+    "demo-005": 2,
+    "demo-006": 2,
+    "demo-007": 1,
+    "demo-008": 1,
+    "demo-009": 3,
+    "demo-010": 1,
+    "demo-011": 1,
+    "demo-012": 2,
+    "demo-013": 2,
+    "demo-014": 1,
+    "demo-015": 3,
+    "demo-016": 1,
+    "demo-017": 1,
+    "demo-018": 3,
+    "demo-019": 1,
+    "demo-020": 2
+  }
+}
