@@ -1,13 +1,14 @@
 "use client";
 
-import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useQueryClient } from "@tanstack/react-query";
 import { Copy, CreditCard, Download, Globe, KeyRound, Mail, MessageCircle, Puzzle, ShieldCheck, Trash2 } from "lucide-react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useState, type FormEvent } from "react";
 import { toast } from "sonner";
 
 import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
+import { Button, buttonClass } from "@/components/ui/button";
 import { Card, CardHeader } from "@/components/ui/card";
 import { Field, Input, Switch } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/misc";
@@ -22,7 +23,6 @@ import {
   useExtensionTokens,
   useMailAccount,
   useMe,
-  useProInterest,
   useQuota,
   useRevokeToken,
   useRights,
@@ -207,7 +207,6 @@ function Meter({ label, used, limit, format = (n: number) => String(n) }: { labe
 export function PlanCard() {
   const { data: me } = useMe();
   const { data: u } = useUsage();
-  const ask = useProInterest();
   if (!u) return <Skeleton className="h-48" />;
   return (
     <Card id="plan">
@@ -229,220 +228,26 @@ export function PlanCard() {
           New jobs wake your agents at most every {u.limits.min_refresh_minutes} minute{u.limits.min_refresh_minutes === 1 ? "" : "s"}. Past the AI budget, agents keep
           working with their built-in offline scoring and templates.
         </p>
-        {!me?.is_demo && <Billing plan={u.plan} requestPro={() => ask.mutate()} requesting={ask.isPending} requested={u.pro_requested} />}
-      </div>
-    </Card>
-  );
-}
-
-type PayConfig = { enabled: boolean; prices: Record<string, number>; plan: string; plan_expires_at: string | null; subscribed: boolean; outcome_plan: boolean; outcome_available: boolean };
-type PaidRow = { id: string; plan: string; amount_inr: number; paid_at: string | null; invoice_number: string | null };
-const PLAN_NAME: Record<string, string> = { pro_monthly: "Pro, 1 month", pro_month: "Pro, 1 month (UPI QR)", week_pass: "Week Pass", outcome: "Outcome plan" };
-
-type QrStart = { payment_id: string; amount_inr: number; image: string; expires_in_s: number };
-
-/** Scan-to-pay: a single-use Razorpay UPI QR for a fixed amount, shown right here. Any UPI app works. */
-function UpiQr({ prices, onPaid }: { prices: Record<string, number>; onPaid: () => void }) {
-  const [qr, setQr] = useState<(QrStart & { plan: string; until: number }) | null>(null);
-  const [busy, setBusy] = useState<string | null>(null);
-  const [left, setLeft] = useState(0);
-  useEffect(() => {
-    if (!qr) return;
-    const tick = setInterval(() => setLeft(Math.max(0, Math.round((qr.until - Date.now()) / 1000))), 1000);
-    const poll = setInterval(async () => {
-      try {
-        const st = await api.get<{ status: string }>(`/payments/qr/${qr.payment_id}/status`);
-        if (st.status === "paid") {
-          toast.success(qr.plan === "week_pass" ? "Paid. Week Pass is on: 7 days of Pro." : "Paid. Pro is on for a month.");
-          setQr(null);
-          onPaid();
-        }
-      } catch {
-        /* keep polling */
-      }
-    }, 3000);
-    return () => {
-      clearInterval(tick);
-      clearInterval(poll);
-    };
-  }, [qr, onPaid]);
-  const start = async (plan: string) => {
-    setBusy(plan);
-    try {
-      const r = await api.post<QrStart>(`/payments/qr/${plan}`);
-      setQr({ ...r, plan, until: Date.now() + r.expires_in_s * 1000 });
-      setLeft(r.expires_in_s);
-    } catch (e) {
-      toast.error(e instanceof Error ? e.message : "Couldn’t create the QR code");
-    } finally {
-      setBusy(null);
-    }
-  };
-  if (qr) {
-    const expired = left === 0;
-    return (
-      <div className="flex flex-col items-center gap-3 rounded-[var(--radius-card)] border border-border p-4 text-center">
-        <div className="text-[14px] font-semibold">
-          Scan to pay ₹{qr.amount_inr} · {qr.plan === "week_pass" ? "Week Pass" : "Pro, 1 month"}
-        </div>
-        {expired ? (
-          <p className="text-[13px] text-muted">This QR code expired. Make a new one.</p>
-        ) : (
-          // Served from our own API (same origin), so the page loads no third-party images.
-          // eslint-disable-next-line @next/next/no-img-element
-          <img src={qr.image} alt={`UPI QR code to pay ₹${qr.amount_inr}`} width={240} height={240} className="rounded-[var(--radius-control)] bg-white p-2" />
-        )}
-        <p className="text-[12.5px] text-muted">
-          Open GPay, PhonePe, Paytm or any UPI app and scan. {expired ? "" : `Waiting for payment… ${Math.floor(left / 60)}:${String(left % 60).padStart(2, "0")} left.`}
-        </p>
-        <div className="flex gap-2">
-          {expired && (
-            <Button size="sm" variant="primary" onClick={() => start(qr.plan)}>
-              New QR code
-            </Button>
-          )}
-          <Button size="sm" variant="ghost" onClick={() => setQr(null)}>
-            Close
-          </Button>
-        </div>
-      </div>
-    );
-  }
-  return (
-    <div className="flex flex-wrap items-center justify-between gap-3 rounded-[var(--radius-card)] border border-border px-4 py-3">
-      <div className="text-[13px]">
-        <b>Pay by UPI QR</b> · scan with any UPI app. One-time payment, nothing renews.
-      </div>
-      <div className="flex gap-2">
-        <Button size="sm" loading={busy === "week_pass"} onClick={() => start("week_pass")}>
-          Week Pass ₹{prices.week_pass}
-        </Button>
-        <Button size="sm" loading={busy === "pro_month"} onClick={() => start("pro_month")}>
-          Pro 1 month ₹{prices.pro_monthly}
-        </Button>
-      </div>
-    </div>
-  );
-}
-
-/** Pro by UPI / card on Razorpay's own pages, a Week Pass, cancel in two clicks, and invoices. */
-function Billing({ plan, requestPro, requesting, requested }: { plan: string; requestPro: () => void; requesting: boolean; requested: boolean }) {
-  const qc = useQueryClient();
-  const { data: cfg } = useQuery({ queryKey: ["pay-config"], queryFn: () => api.get<PayConfig>("/payments/config") });
-  const { data: paid } = useQuery({ queryKey: ["payments"], queryFn: () => api.get<PaidRow[]>("/payments") });
-  const [busy, setBusy] = useState<string | null>(null);
-  const [confirm, setConfirm] = useState(false);
-  useEffect(() => {
-    const p = new URLSearchParams(window.location.search).get("paid");
-    if (p) toast.success("Payment received. Your plan updates within a minute of Razorpay confirming it.");
-  }, []);
-  if (!cfg) return null;
-  const go = async (which: string) => {
-    setBusy(which);
-    try {
-      const { url } = await api.post<{ url: string }>(`/payments/checkout/${which}`);
-      window.location.assign(url);
-    } catch (e) {
-      toast.error(e instanceof Error ? e.message : "Couldn’t start the payment");
-      setBusy(null);
-    }
-  };
-  const cancel = async () => {
-    setBusy("cancel");
-    try {
-      await api.post("/payments/cancel");
-      toast.success("Pro cancelled. It stays on until the end of the period you paid for.");
-      qc.invalidateQueries({ queryKey: ["pay-config"] });
-    } catch (e) {
-      toast.error(e instanceof Error ? e.message : "Couldn’t cancel");
-    } finally {
-      setBusy(null);
-      setConfirm(false);
-    }
-  };
-  const until = cfg.plan_expires_at ? new Date(cfg.plan_expires_at).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" }) : null;
-  return (
-    <div className="space-y-3">
-      {plan === "pro" && until && (
-        <p className="text-[13px]">
-          Pro until <b>{until}</b>
-          {cfg.subscribed ? ", renews monthly." : ", then Free. Nothing renews."}
-        </p>
-      )}
-      {cfg.enabled ? (
-        <>
-          <UpiQr prices={cfg.prices} onPaid={() => qc.invalidateQueries()} />
-          {!cfg.subscribed && (
-            <div className="flex flex-wrap items-center justify-between gap-3 rounded-[var(--radius-card)] border border-accent/25 bg-accent-soft px-4 py-3">
-              <div className="text-[13px]">
-                <b>Pro ₹{cfg.prices.pro_monthly}/month</b> by UPI or card · or a <b>Week Pass ₹{cfg.prices.week_pass}</b> for 7 days, no renewal
-              </div>
-              <div className="flex gap-2">
-                <Button size="sm" variant="primary" loading={busy === "pro_monthly"} onClick={() => go("pro_monthly")}>
-                  Get Pro
-                </Button>
-                <Button size="sm" loading={busy === "week_pass"} onClick={() => go("week_pass")}>
-                  Week Pass
-                </Button>
-              </div>
-            </div>
-          )}
-          {cfg.subscribed &&
-            (confirm ? (
-              <div className="flex flex-wrap items-center gap-2 text-[13px]">
-                Cancel Pro? You keep it until {until ?? "the end of this period"}.
-                <Button size="sm" variant="danger" loading={busy === "cancel"} onClick={cancel}>
-                  Yes, cancel
-                </Button>
-                <Button size="sm" variant="ghost" onClick={() => setConfirm(false)}>
-                  Keep Pro
-                </Button>
-              </div>
-            ) : (
-              <Button size="sm" variant="ghost" onClick={() => setConfirm(true)}>
-                Cancel Pro
-              </Button>
-            ))}
-          {cfg.outcome_available && (
-            <div className="flex items-center justify-between gap-4 rounded-[var(--radius-card)] border border-border px-4 py-3">
-              <div className="text-[13px]">
-                <b>Outcome plan (experiment):</b> pay ₹{cfg.prices.outcome} only after your first interview. We ask, never charge automatically.
-              </div>
-              <Switch
-                checked={cfg.outcome_plan}
-                onChange={(v) => api.put("/payments/outcome-plan", { enabled: v }).then(() => qc.invalidateQueries({ queryKey: ["pay-config"] }))}
-                label="Outcome plan"
-              />
-            </div>
-          )}
-        </>
-      ) : (
-        plan === "free" && (
+        {!me?.is_demo && (
           <div className="flex flex-wrap items-center justify-between gap-3 rounded-[var(--radius-card)] border border-accent/25 bg-accent-soft px-4 py-3">
             <div className="text-[13px]">
-              <b>Pro</b> · deeper prep, a bigger AI budget and more. Free on request during the beta.
+              {u.plan === "pro" ? (
+                <>
+                  <b>You’re on Pro.</b> Plans, invoices and cancelling live on the plans page.
+                </>
+              ) : (
+                <>
+                  <b>Get Pro</b>: a Week Pass, Monthly, or a Year Pass. Pay by UPI QR, UPI, card or netbanking.
+                </>
+              )}
             </div>
-            <Button size="sm" variant="primary" onClick={requestPro} loading={requesting} disabled={requested}>
-              {requested ? "Requested" : "Request Pro"}
-            </Button>
+            <Link href={u.plan === "pro" ? "/billing" : "/billing?plan=pro"} className={buttonClass({ size: "sm", variant: "primary" })}>
+              {u.plan === "pro" ? "Plans & invoices" : "Get Pro"}
+            </Link>
           </div>
-        )
-      )}
-      {!!paid?.length && (
-        <ul className="divide-y divide-border rounded-[var(--radius-card)] border border-border text-[13px]">
-          {paid.map((p) => (
-            <li key={p.id} className="flex items-center justify-between gap-3 px-4 py-2.5">
-              <span>
-                {PLAN_NAME[p.plan] ?? p.plan} · ₹{p.amount_inr} · {p.paid_at ? new Date(p.paid_at).toLocaleDateString("en-IN") : ""}
-              </span>
-              <a href={`/api/payments/${p.id}/invoice`} target="_blank" rel="noreferrer" className="text-accent hover:underline">
-                Invoice {p.invoice_number}
-              </a>
-            </li>
-          ))}
-        </ul>
-      )}
-    </div>
+        )}
+      </div>
+    </Card>
   );
 }
 

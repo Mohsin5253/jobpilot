@@ -73,6 +73,7 @@ class Settings(BaseSettings):
     razorpay_pro_plan_id: str | None = None  # a ₹199/month plan created in the Razorpay dashboard
     price_pro_inr: int = 199
     price_week_pass_inr: int = 49
+    price_year_pass_inr: int = 1999  # Year Pass: 365 days of Pro, paid once, nothing renews
     price_outcome_inr: int = 99
     outcome_plan_enabled: bool = False  # experimental "₹99 on first interview": off until confirmed
     # Seller details printed on invoices. With a GSTIN, invoices show 18% GST (CGST+SGST within the state, IGST

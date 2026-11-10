@@ -144,3 +144,20 @@ async def test_admins_always_have_pro(authed):
     async with session_scope() as s:
         await s.execute(update(User).values(is_admin=True, plan="free"))
     assert (await authed.get("/api/auth/me")).json()["plan"] == "pro"
+
+
+@respx.mock
+async def test_year_pass_is_365_days_for_1999_and_never_renews(authed, client, razorpay):
+    import json as _json
+
+    link = respx.post(f"{pay.API}/payment_links").mock(return_value=httpx.Response(200, json={"id": "plink_y", "short_url": "https://rzp.io/i/year"}))
+    cfg = (await authed.get("/api/payments/config")).json()
+    assert cfg["prices"]["year_pass"] == 1999 and cfg["prices"]["week_pass"] == 49 and cfg["prices"]["pro_monthly"] == 199
+    assert (await authed.post("/api/payments/checkout/year_pass")).json()["url"] == "https://rzp.io/i/year"
+    assert _json.loads(link.calls.last.request.content)["amount"] == 199900
+    body, headers = _signed({"event": "payment_link.paid", "payload": {"payment_link": {"entity": {"id": "plink_y"}}, "payment": {"entity": {"id": "pay_y", "amount": 199900}}}})
+    assert (await client.post("/api/payments/webhook", content=body, headers=headers)).json()["result"] == "year_pass_paid"
+    async with session_scope() as s:
+        u = (await s.execute(select(User))).scalar_one()
+        assert u.plan == "pro" and timedelta(days=364) < u.plan_expires_at - datetime.now(UTC) <= timedelta(days=365)
+        assert u.razorpay_subscription_id is None  # a pass, not a subscription

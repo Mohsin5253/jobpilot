@@ -6,6 +6,7 @@ import Link from "next/link";
 import { useEffect, useState, type ReactNode } from "react";
 
 import { AgentAvatar, AgentHero } from "@/components/agents/agent-avatar";
+import { UpgradeBanner } from "@/components/billing";
 import { FlightPath } from "@/components/agents/flight-path";
 import { PilotConsole } from "@/components/agents/pilot-console";
 import { ActivityChart } from "@/components/charts";
@@ -224,6 +225,7 @@ export default function DashboardPage() {
 
   return (
     <div className="space-y-6 md:space-y-8">
+      <UpgradeBanner />
       {/* Greeting row */}
       <div className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
         <div className="min-w-0">

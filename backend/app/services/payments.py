@@ -95,13 +95,22 @@ async def payment_link(s: AsyncSession, user: User, plan: str, amount: int, desc
 
 
 QR_TTL = timedelta(minutes=20)  # Razorpay allows 2 minutes to 2 hours
-QR_PLANS = {"week_pass": ("JobPilot Week Pass: 7 days of Pro", 7), "pro_month": ("JobPilot Pro: 1 month, no auto-renewal", 30)}
+QR_PLANS = {
+    "week_pass": ("JobPilot Week Pass: 7 days of Pro", 7),
+    "pro_month": ("JobPilot Pro: 1 month, no auto-renewal", 30),
+    "year_pass": ("JobPilot Year Pass: 365 days of Pro", 365),
+}
+
+
+def pass_price(plan: str) -> int:
+    """₹ for the one-time passes (week, one month, year). Prices live in settings."""
+    return {"week_pass": settings.price_week_pass_inr, "pro_month": settings.price_pro_inr, "year_pass": settings.price_year_pass_inr}[plan]
 
 
 async def qr_checkout(s: AsyncSession, user: User, plan: str) -> Payment:
     """A single-use Razorpay UPI QR for a fixed amount: scan it with any UPI app. Closes after 20 minutes.
     Pro bought this way is one month that doesn't renew (UPI AutoPay needs the subscription page instead)."""
-    amount = settings.price_week_pass_inr if plan == "week_pass" else settings.price_pro_inr
+    amount = pass_price(plan)
     description, _ = QR_PLANS[plan]
     qr = await _call(
         "POST",
@@ -140,7 +149,7 @@ def invoice_for(p: Payment, user: User, number: str, now: datetime) -> dict:
     total = p.amount_inr * 100  # paise
     inv = {
         "number": number, "date": now.astimezone(IST).date().isoformat(), "seller": {"name": settings.seller_name, "address": settings.seller_address, "gstin": settings.seller_gstin},
-        "buyer": {"name": user.name, "email": user.email}, "description": {"pro_monthly": "JobPilot Pro, 1 month", "pro_month": "JobPilot Pro, 1 month (paid by UPI QR)", "week_pass": "JobPilot Week Pass, 7 days", "outcome": "JobPilot outcome plan (first interview)"}[p.plan],
+        "buyer": {"name": user.name, "email": user.email}, "description": {"pro_monthly": "JobPilot Pro, 1 month", "pro_month": "JobPilot Pro, 1 month (no renewal)", "week_pass": "JobPilot Week Pass, 7 days", "year_pass": "JobPilot Year Pass, 365 days", "outcome": "JobPilot outcome plan (first interview)"}[p.plan],
         "sac": "998431", "total_paise": total, "currency": "INR",
     }
     if settings.seller_gstin:
@@ -186,8 +195,8 @@ async def handle_webhook(event: dict, event_id: str) -> str:
                 return "unknown"
             await _mark_paid(s, p, pay.get("id"), now)
             user = await s.get(User, p.user_id) if p.user_id else None
-            if user and p.plan == "week_pass":
-                _grant(user, max(now, user.plan_expires_at or now) + timedelta(days=7))
+            if user and p.plan in QR_PLANS:  # every one-time pass: week, one month, year
+                _grant(user, max(now, user.plan_expires_at or now) + timedelta(days=QR_PLANS[p.plan][1]))
             return f"{p.plan}_paid"
         if name == "qr_code.credited":
             qr = payload.get("qr_code", {}).get("entity", {})

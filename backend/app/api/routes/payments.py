@@ -17,7 +17,10 @@ router = APIRouter(tags=["payments"])
 async def config(user: UserDep) -> dict:
     return {
         "enabled": settings.payments_enabled,
-        "prices": {"pro_monthly": settings.price_pro_inr, "week_pass": settings.price_week_pass_inr, **({"outcome": settings.price_outcome_inr} if settings.outcome_plan_enabled else {})},
+        "prices": {
+            "pro_monthly": settings.price_pro_inr, "week_pass": settings.price_week_pass_inr, "year_pass": settings.price_year_pass_inr,
+            **({"outcome": settings.price_outcome_inr} if settings.outcome_plan_enabled else {}),
+        },
         "plan": user.plan, "plan_expires_at": user.plan_expires_at.isoformat() if user.plan_expires_at else None,
         "subscribed": bool(user.razorpay_subscription_id), "outcome_plan": user.outcome_plan, "outcome_available": settings.outcome_plan_enabled,
     }
@@ -28,8 +31,8 @@ async def checkout(plan: str, user: RealUserDep, session: SessionDep) -> dict:
     try:
         if plan == "pro_monthly":
             url = await pay.start_pro(session, user)
-        elif plan == "week_pass":
-            url = await pay.payment_link(session, user, "week_pass", settings.price_week_pass_inr, "JobPilot Week Pass: 7 days of Pro")
+        elif plan in pay.QR_PLANS:  # one-time passes: week, one month, year (UPI, card, netbanking on Razorpay's page)
+            url = await pay.payment_link(session, user, plan, pay.pass_price(plan), pay.QR_PLANS[plan][0])
         else:
             raise HTTPException(404, "Unknown plan")
     except pay.PaymentsOff as exc:

@@ -72,8 +72,9 @@ and LinkedIn note, and tracks everything you've applied to. **Nothing is sent un
   scam block and daily quota as the web and are audited with channel `whatsapp`; webhook retries are idempotent; STOP
   opts out. English / हिन्दी / मराठी for WhatsApp messages and the app's main labels (Settings → Language; the Scam
   Shield page has its own switch)
-- **Payments (Razorpay)**: Pro ₹199/month (UPI AutoPay or card, a Subscription) and a ₹49 Week Pass (a Payment
-  Link) on Razorpay's hosted pages; webhooks verified (HMAC) and idempotent by event id; sequential GST-ready invoices
+- **Payments (Razorpay)**: Pro ₹199/month (UPI AutoPay or card, a Subscription), a ₹49 Week Pass and a ₹1,999 Year
+  Pass (one-time, by UPI QR or a Payment Link); a `/billing` page compares week vs month vs year, and Free accounts see
+  Get Pro / Week Pass buttons on the dashboard on Razorpay's hosted pages; webhooks verified (HMAC) and idempotent by event id; sequential GST-ready invoices
   (tax invoice with a GSTIN, receipt without); cancel in two clicks (Pro lasts to the end of the paid period); an
   hourly sweep lapses expired plans. Students can also pay by scanning a single-use UPI QR in Settings (Week Pass, or
 one month of Pro without renewal), confirmed by the `qr_code.credited` webhook with an amount check. An experimental "₹99 on first interview" plan asks (never charges) when an

@@ -19,6 +19,7 @@ const FREE_SENDS_DEFAULT = 5;
 const FREE_SENDS_MAX = 10;
 const PRO_INR = 199;
 const WEEK_PASS_INR = 49;
+const YEAR_PASS_INR = 1999;
 const CAMPUS_PILOT_COLLEGES = 3;
 
 export function Reveal({ children, delay = 0, className }: { children: ReactNode; delay?: number; className?: string }) {
@@ -538,7 +539,7 @@ export function Pricing() {
     {
       name: "Pro",
       price: `₹${PRO_INR}`,
-      note: "per month, UPI · free on request in the beta",
+      note: `per month (UPI AutoPay or card), or ₹${YEAR_PASS_INR.toLocaleString("en-IN")} for a Year Pass`,
       items: [
         { t: "Everything in Free" },
         { t: "Mock interviews for each job description", soon: true },
@@ -548,8 +549,8 @@ export function Pricing() {
         { t: "10× the AI budget" },
       ],
       cta: (
-        <Link href="/register" className={buttonClass({ variant: "primary", size: "lg", className: "w-full" })}>
-          Start free, request Pro
+        <Link href="/billing?plan=pro" className={buttonClass({ variant: "primary", size: "lg", className: "w-full" })}>
+          Get Pro
         </Link>
       ),
       highlight: true,
@@ -559,7 +560,11 @@ export function Pricing() {
       price: `₹${WEEK_PASS_INR}`,
       note: "one week of Pro, UPI · no renewal",
       items: [{ t: "Everything in Pro for 7 days" }, { t: "For a placement week or an application sprint" }, { t: "Pay once, nothing renews" }],
-      cta: <div className={buttonClass({ size: "lg", className: "pointer-events-none w-full opacity-60" })}>Opens with UPI payments</div>,
+      cta: (
+        <Link href="/billing?plan=week_pass" className={buttonClass({ size: "lg", className: "w-full" })}>
+          Get the Week Pass
+        </Link>
+      ),
     },
     {
       name: "Campus",
@@ -580,7 +585,7 @@ export function Pricing() {
   ];
   return (
     <Wrap id="pricing">
-      <SectionHead center eyebrow="Pricing" title="Free to start. Pay in rupees when you want more depth." sub="Pro is about better applications, not more of them. Payments open soon; until then Pro is free on request." />
+      <SectionHead center eyebrow="Pricing" title="Free to start. Pay in rupees when you want more depth." sub={`Pro is about better applications, not more of them. Pay by UPI QR, UPI, card or netbanking: ₹${WEEK_PASS_INR} a week, ₹${PRO_INR} a month, or ₹${YEAR_PASS_INR.toLocaleString("en-IN")} a year.`} />
       <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
         {plans.map((p, i) => (
           <Reveal key={p.name} delay={i * 0.05}>
