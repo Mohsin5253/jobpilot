@@ -81,7 +81,7 @@ function MiniFlightPath({ className }: { className?: string }) {
  * Hero: the crew group shot is the page's one large character moment. It's always shown on graphite,
  * in both themes, because that's what the renders are lit for.
  */
-export function Hero() {
+export function Hero({ costPerRun }: { costPerRun: string | null }) {
   const demo = useStartDemo();
   const parallax = useParallax();
   const [stage, setStage] = useState(false);
@@ -103,15 +103,15 @@ export function Hero() {
       <div aria-hidden className="pointer-events-none absolute inset-0 -z-10 bg-[radial-gradient(800px_480px_at_78%_40%,color-mix(in_oklab,var(--cobalt)_16%,transparent),transparent_70%)]" />
       <div className="mx-auto grid max-w-[1200px] items-center gap-8 px-4 pt-12 md:px-6 md:pt-16 lg:min-h-[min(720px,calc(100dvh-64px))] lg:grid-cols-[minmax(0,5fr)_minmax(0,7fr)] lg:gap-4 lg:py-12">
         <div className="relative z-10 max-w-[600px]">
-          <div className="eyebrow mb-5 text-cobalt-text">Internship agents for students</div>
-          <h1>
-            <span className="font-display block text-[clamp(48px,7vw,80px)] leading-[0.98]">Meet your crew.</span>
-            <span className="mt-4 block text-[clamp(22px,2.4vw,30px)] leading-[1.2] font-medium tracking-[-0.025em] text-text-2">
-              Ten AI agents hunt internships for you. <span className="text-text">You approve every send.</span>
-            </span>
+          <div className="eyebrow mb-5 flex items-center gap-2 text-cobalt-text">
+            <span className="rounded-full border border-[color-mix(in_oklab,var(--cobalt)_40%,transparent)] px-2 py-0.5 text-[11px]">Beta</span>
+            Internship agent for students in India
+          </div>
+          <h1 className="font-display text-[clamp(40px,5.6vw,68px)] leading-[1.02]">
+            Real internships. Zero scams. <span className="text-cobalt-text">Every application approved by you.</span>
           </h1>
-          <p className="mt-6 max-w-[520px] text-[16px] leading-relaxed text-text-2">
-            They find real openings, score the fit, tailor your resume and draft the outreach. Every step is traced, and nothing leaves until you say so.
+          <p className="mt-6 max-w-[540px] text-[17px] leading-relaxed text-text-2">
+            JobPilot finds real internships, blocks the scams, and sends only applications you approve, each one backed by proof a recruiter can check.
           </p>
           <div className="mt-8 flex flex-col gap-3 sm:flex-row">
             <Link href="/register" className={buttonClass({ variant: "primary", size: "lg", className: "w-full sm:w-auto" })}>
@@ -123,7 +123,7 @@ export function Hero() {
           </div>
           <p className="mt-3 text-[12.5px] text-text-3">The demo is a private copy with real jobs, deleted after 24 hours. No sign-up.</p>
           <ul className="mt-8 flex flex-wrap gap-x-5 gap-y-2 text-[13px] text-text-2">
-            {["Nothing sent without approval", "Full trace of every step", "Costs pennies per run"].map((t) => (
+            {["Nothing sent without your approval", "Never automates LinkedIn", costPerRun ? `${costPerRun} average AI cost per run` : "Exact ₹ cost on every run"].map((t) => (
               <li key={t} className="flex items-center gap-2">
                 <span aria-hidden className="size-1.5 rounded-full bg-cobalt" />
                 {t}

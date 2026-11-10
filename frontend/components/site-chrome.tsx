@@ -9,11 +9,12 @@ import { Logo } from "@/components/logo";
 import { buttonClass } from "@/components/ui/button";
 
 const LINKS = [
-  { href: "/#product", label: "Product" },
+  { href: "/#safety", label: "Safety" },
   { href: "/#crew", label: "Crew" },
   { href: "/#how", label: "How it works" },
   { href: "/#pricing", label: "Pricing" },
-  { href: "/#faq", label: "FAQ" },
+  { href: "/#campus", label: "Campus" },
+  { href: "/trust", label: "Trust" },
 ];
 
 /** Sticky marketing nav. Phones get a full-screen menu sheet. */
@@ -84,7 +85,7 @@ export function SiteHeader() {
 }
 
 const FOOTER = [
-  { title: "Product", links: LINKS.slice(0, 4) },
+  { title: "Product", links: LINKS.slice(0, 5) },
   {
     title: "Account",
     links: [
@@ -95,6 +96,7 @@ const FOOTER = [
   {
     title: "Legal",
     links: [
+      { href: "/trust", label: "Trust" },
       { href: "/privacy", label: "Privacy" },
       { href: "/terms", label: "Terms" },
     ],
@@ -110,7 +112,7 @@ export function SiteFooter() {
             <Logo size={24} />
             <span className="text-[16px] font-semibold tracking-[-0.02em]">JobPilot</span>
           </div>
-          <p className="mt-3 max-w-xs text-[13.5px] leading-relaxed text-text-2">Ten AI agents hunt internships for you. Nothing goes out until you say so.</p>
+          <p className="mt-3 max-w-xs text-[13.5px] leading-relaxed text-text-2">Real internships. Zero scams. Every application approved by you.</p>
         </div>
         {FOOTER.map((col) => (
           <nav key={col.title} aria-label={col.title}>
@@ -129,7 +131,7 @@ export function SiteFooter() {
       </div>
       <div className="border-t border-border">
         <div className="mx-auto flex max-w-[1200px] flex-wrap justify-between gap-2 px-4 py-5 text-[12.5px] text-text-3 md:px-6">
-          <span>© {new Date().getFullYear()} JobPilot</span>
+          <span>© {new Date().getFullYear()} JobPilot · Beta</span>
           <span>Never automates LinkedIn · Real, public contacts only</span>
         </div>
       </div>

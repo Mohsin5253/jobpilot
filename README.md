@@ -38,6 +38,10 @@ and LinkedIn note, and tracks everything you've applied to. **Nothing is sent un
 - **Production basics**: per-user mailboxes (encrypted), Free / Pro plan limits and a daily AI budget per user,
   rate limiting shared across replicas, revocable sessions, password reset, data export and deletion (DPDP / GDPR),
   a public landing page with a one-click demo, an admin dashboard, Sentry, CSP / HSTS and a retention sweep
+- **Honest landing page and `/trust`**: live beta counters from `GET /api/public/stats` (postings verified, scams
+  blocked, applications approved, average ₹ AI cost per run from run traces; demo accounts excluded, cached 5 minutes,
+  no made-up stories), and a `/trust` page listing what we check, what we never do, the data we store, DPDP rights,
+  the grievance contact and subprocessors
 
 > Company applicant-tracking systems (Greenhouse, Lever, Ashby) don't offer a public "submit application" API, so the
 > final submit happens on the company's site. JobPilot gets you there with everything prepared and records it.
@@ -248,6 +252,11 @@ Render (API, workers, Postgres) + Vercel (web). Step-by-step, with every environ
 | `WHATSAPP_TOKEN` / `WHATSAPP_PHONE_NUMBER_ID` / `WHATSAPP_TEMPLATE` / `WHATSAPP_TEMPLATE_LANG` / `WHATSAPP_APP_SECRET` / `WHATSAPP_VERIFY_TOKEN` | — | WhatsApp Cloud API daily digest (off until set) |
 | `EXTENSION_ORIGIN_REGEX` | `chrome-extension://[a-p]{32}` | Origins allowed to call the API with an extension token |
 | `LANGFUSE_*` | — | Trace every agent step and LLM generation in Langfuse |
+| `USD_INR_RATE` | 88.0 | Rupees per US dollar, used to show AI cost (billed in USD) in ₹ on the landing page |
+
+Web (Vercel) variables, all optional except `API_URL`: `API_URL` (the API origin), `NEXT_PUBLIC_SITE_URL` (canonical
+origin for a custom domain; defaults to Vercel's production domain), `NEXT_PUBLIC_CONTACT_EMAIL`,
+`NEXT_PUBLIC_GRIEVANCE_OFFICER` and `NEXT_PUBLIC_GRIEVANCE_EMAIL` (shown on `/trust`, `/privacy` and `/terms`).
 
 Per-user search preferences (keywords, locations, internships-only, minimum fit score, Greenhouse/Lever boards,
 daily run hour) live in **Settings**.
@@ -260,7 +269,7 @@ daily run hour) live in **Settings**.
 backend/
   app/
     agents/       supervisor graph, researcher, scout, verifier, matcher, interviewer, tailor, guard, outreach, approval/dispatch, tracker
-    api/routes/   auth, account (mail, usage, export/delete), admin, profile, matches, drafts, runs, stats, events (SSE)
+    api/routes/   auth, account (mail, usage, export/delete), admin, profile, matches, drafts, runs, stats, public (landing counters), events (SSE)
     sources/      Greenhouse, Lever, Ashby, JSearch, Adzuna, The Muse, Remotive, Jobicy, demo feed; authenticity checks
     services/     ingest (shared fetching + fan-out), job_store, run queue, events, mailer, ratelimit, usage, demo, retention
     llm.py        Groq / Claude wrapper: strict structured output, repair, cost accounting
@@ -272,7 +281,7 @@ backend/
   tests/          pytest suite
 extension/        Chrome MV3 autofill extension (Greenhouse, Lever, Ashby) + field-mapping tests
 frontend/
-  app/(marketing)/ landing page, privacy, terms
+  app/(marketing)/ landing page, trust, privacy, terms
   app/p/[slug]/    public proof-of-skills page
   app/(app)/      dashboard, jobs, jobs/[id], approvals, skills, tracker, insights, campus, college, proof, runs, settings, admin
   app/(auth)/     login, register, forgot-password, reset-password

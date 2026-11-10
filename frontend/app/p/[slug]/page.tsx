@@ -4,9 +4,8 @@ import { notFound } from "next/navigation";
 
 import { Logo } from "@/components/logo";
 import { ProofView } from "@/components/proof-card";
+import { API_URL } from "@/lib/server-api";
 import type { PublicProof } from "@/lib/types";
-
-const API_URL = process.env.API_URL ?? "http://localhost:8000";
 
 async function load(slug: string): Promise<PublicProof | null> {
   const res = await fetch(`${API_URL}/api/public/proof/${encodeURIComponent(slug)}`, { next: { revalidate: 300 } });

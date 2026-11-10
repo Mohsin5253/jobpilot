@@ -11,7 +11,7 @@ export const CREW_STORY: { key: AgentKey; job: string; sample: string }[] = [
   { key: "verifier", job: "Checks every new job is real: the employer, the apply link, the recruiter and any request for money.", sample: "48 checked · 46 verified · 1 needs care · 1 blocked (training fee)" },
   { key: "matcher", job: "Scores every job against your resume and explains the fit.", sample: "86/100 · Strong: Python, scikit-learn · Missing: Docker" },
   { key: "interviewer", job: "Asks about skills you might have when a job is a near miss.", sample: "“Have you used Docker? It would unlock 3 jobs you nearly match.”" },
-  { key: "tailor", job: "Rewrites your bullets for each job. A guard blocks anything you haven’t done.", sample: "Built a churn model → Developed a churn model that raised recall by 12%" },
+  { key: "tailor", job: "Rewrites your bullets for each job. A guard blocks anything you haven’t done.", sample: "4 bullets rewritten · 1 reverted: “Docker” isn’t on your resume" },
   { key: "outreach", job: "Drafts a short email and a referral request to real, public contacts.", sample: "To the hiring lead · 5 lines · referral note ready" },
   { key: "dispatch", job: "Sends only what you approve, from your own mailbox.", sample: "Sent from you@college.edu · tailored resume attached" },
   { key: "tracker", job: "Tracks every application and reminds you to follow up.", sample: "Applied 7 days ago · follow-up ready to review" },

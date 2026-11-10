@@ -65,6 +65,25 @@ mail passwords can't be decrypted with a new key (they would have to reconnect).
 2. Environment variable `API_URL=https://<api>.onrender.com`. Rewrites are resolved at build time, so redeploy after
    changing it.
 3. Add your domain, and make sure `APP_URL` / `CORS_ORIGINS` on Render match it exactly.
+4. Optional web variables: `NEXT_PUBLIC_CONTACT_EMAIL`, `NEXT_PUBLIC_GRIEVANCE_OFFICER` and `NEXT_PUBLIC_GRIEVANCE_EMAIL`
+   (a real, monitored inbox: shown on `/trust`, `/privacy` and `/terms`). They're baked in at build time, so redeploy
+   after changing them.
+
+## Custom domain
+
+The web app is the only public origin (the API is reached through the `/api` rewrite), so moving to your own domain
+touches Vercel and two Render variables. Nothing in the code names a domain.
+
+1. Vercel → Project → **Settings → Domains** → add `jobpilot.example` (and `www.` if you want it), set the DNS records
+   Vercel shows, and make the new domain **primary**. Redirect the `*.vercel.app` address to it.
+2. Render → `jobpilot-shared` group: `APP_URL=https://jobpilot.example` and
+   `CORS_ORIGINS=https://jobpilot.example,https://<project>.vercel.app` (keep the old origin listed until the switch
+   is done; it's comma-separated). The API redeploys.
+3. Canonical URLs, `robots.txt` and `sitemap.xml` follow Vercel's production domain automatically. To pin them, set
+   `NEXT_PUBLIC_SITE_URL=https://jobpilot.example` on Vercel and redeploy.
+4. Session cookies belong to the origin, so users sign in once more on the new domain. Password-reset links use
+   `APP_URL`, so old links in inboxes keep pointing at the old address until they expire.
+5. Unchanged: the WhatsApp webhook and the Chrome extension talk to the API's own address, not the web domain.
 
 ## 5. First-run checklist
 

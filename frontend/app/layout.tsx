@@ -3,12 +3,15 @@ import { GeistSans } from "geist/font/sans";
 import type { Metadata, Viewport } from "next";
 
 import { Providers } from "@/components/providers";
+import { SITE_URL } from "@/lib/site";
 
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: { default: "JobPilot", template: "%s · JobPilot" },
-  description: "A team of AI agents that finds internships, scores fit, tailors your resume and drafts outreach — with you approving every send.",
+  metadataBase: new URL(SITE_URL),
+  title: { default: "JobPilot: real internships, zero scams", template: "%s · JobPilot" },
+  description: "JobPilot finds real internships, blocks the scams, and sends only applications you approve, each one backed by proof a recruiter can check.",
+  openGraph: { type: "website", siteName: "JobPilot" },
 };
 
 export const viewport: Viewport = {

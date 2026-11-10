@@ -54,6 +54,8 @@ class Settings(BaseSettings):
     admin_emails: Annotated[list[str], NoDecode] = []  # comma-separated; these accounts can open /admin
     sentry_dsn: str | None = None
     rate_limits_enabled: bool = True
+    # Rupees per US dollar, for showing AI cost (billed in USD) in ₹ on the landing page. Not a price.
+    usd_inr_rate: float = 88.0
     consent_version: str = "2026-11"  # bump when the privacy notice changes; users re-confirm
     extension_origin_regex: str = r"chrome-extension://[a-p]{32}"  # the Chrome autofill extension calls the API directly
 

@@ -9,7 +9,7 @@ from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.responses import JSONResponse
 from sqlalchemy import text
 
-from app.api.routes import account, admin, auth, campus, consent, drafts, events, evidence, extension, insights, matches, notifications, profile, questions, runs, stats, whatsapp
+from app.api.routes import account, admin, auth, campus, consent, drafts, events, evidence, extension, insights, matches, notifications, profile, public, questions, runs, stats, whatsapp
 from app.services.events import hub
 from app.config import settings
 from app.db import engine
@@ -78,7 +78,7 @@ async def request_context(request: Request, call_next):
     return response
 
 
-for r in (auth.router, account.router, admin.router, consent.router, extension.router, evidence.router, insights.router, campus.router, whatsapp.router, profile.router, matches.router, drafts.router, questions.router, notifications.router, runs.router, stats.router, events.router):
+for r in (auth.router, account.router, admin.router, consent.router, extension.router, evidence.router, insights.router, campus.router, whatsapp.router, profile.router, matches.router, drafts.router, questions.router, notifications.router, runs.router, stats.router, events.router, public.router):
     app.include_router(r, prefix="/api")
 
 
