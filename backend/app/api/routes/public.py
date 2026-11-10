@@ -85,6 +85,27 @@ async def public_stats(session: SessionDep, response: Response) -> PublicStats:
     return _cache[1]
 
 
+@router.get("/public/transparency")
+async def transparency(session: SessionDep, response: Response) -> dict:
+    """The monthly transparency report: aggregate counts only, from transparency_daily."""
+    from app.models import TransparencyDaily
+
+    rows = (await session.execute(select(TransparencyDaily).order_by(TransparencyDaily.date.desc()).limit(400))).scalars().all()
+    months: dict[str, dict] = {}
+    for r in rows:
+        m = months.setdefault(r.date.strftime("%Y-%m"), {"month": r.date.strftime("%Y-%m"), "postings_verified": 0, "scams_flagged": 0, "sends_approved": 0, "scam_checks": 0, "_costs": []})
+        for k in ("postings_verified", "scams_flagged", "sends_approved", "scam_checks"):
+            m[k] += getattr(r, k)
+        if r.avg_cost_inr is not None:
+            m["_costs"].append(r.avg_cost_inr)
+    out = []
+    for m in months.values():
+        costs = m.pop("_costs")
+        out.append({**m, "avg_cost_inr": round(sum(costs) / len(costs), 2) if costs else None})
+    response.headers["cache-control"] = "public, max-age=3600"
+    return {"months": out, "days": [{"date": r.date.isoformat(), "postings_verified": r.postings_verified, "scams_flagged": r.scams_flagged, "sends_approved": r.sends_approved, "scam_checks": r.scam_checks, "avg_cost_inr": r.avg_cost_inr} for r in rows[:31]]}
+
+
 def reset_cache() -> None:
     global _cache
     _cache = None

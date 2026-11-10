@@ -405,6 +405,46 @@ class GapProject(Base):
     verified_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
 
+class Alumnus(Base):
+    """An alumnus the college added with their consent to be asked for referrals (rows without consent aren't stored)."""
+
+    __tablename__ = "alumni"
+
+    id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=uuid.uuid4)
+    org_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("organizations.id", ondelete="CASCADE"), index=True)
+    name: Mapped[str] = mapped_column(String(200))
+    company: Mapped[str] = mapped_column(String(200))
+    company_key: Mapped[str] = mapped_column(String(200), index=True)
+    role: Mapped[str] = mapped_column(String(200), default="", server_default="")
+    batch: Mapped[int | None] = mapped_column(Integer)
+    contact: Mapped[str] = mapped_column(String(320), default="", server_default="")
+    created_at: Mapped[datetime] = _now_col()
+
+
+class AuditEvent(Base):
+    """Audit log for sensitive reads and actions (e.g. a placement officer viewing student-level data)."""
+
+    __tablename__ = "audit_events"
+
+    id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=uuid.uuid4)
+    actor_user_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"), index=True)
+    action: Mapped[str] = mapped_column(String(30))
+    subject: Mapped[str] = mapped_column(String(80), default="", server_default="")
+    detail: Mapped[dict[str, Any]] = mapped_column(JSONB, default=dict, server_default="{}")
+    created_at: Mapped[datetime] = _now_col(index=True)
+
+
+class TransparencyDaily(Base):
+    __tablename__ = "transparency_daily"
+
+    date: Mapped[date] = mapped_column(Date, primary_key=True)
+    postings_verified: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
+    scams_flagged: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
+    sends_approved: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
+    scam_checks: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
+    avg_cost_inr: Mapped[float | None] = mapped_column(Float)
+
+
 class Quota(Base):
     """Approved sends per user per day (IST), against the cap in force that day."""
 

@@ -4,12 +4,14 @@ import uuid
 from datetime import UTC, datetime, timedelta
 from typing import Annotated, Literal
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 from pydantic import BaseModel, Field
 from sqlalchemy import delete, func, or_, select
 
 from app.api.deps import RealUserDep, SessionDep, UserDep
 from app.models import CampusDrive, DriveStatus, Job, JobMatch, Organization, OrgMember, Profile, User
+from app.models import AuditEvent
+from app.services.campus_v2 import notify_eligible, officer_scope, parse_circular
 from app.services.campus import _dt, eligibility, prep_for, upcoming
 from app.services.consent import grant, has, withdraw
 from app.services.outcomes import insights, rejection_gaps
@@ -243,11 +245,19 @@ async def college_dashboard(member: OfficerDep, session: SessionDep) -> dict:
         regs = (await session.execute(select(DriveStatus.status, func.count()).where(DriveStatus.drive_id == d.id).group_by(DriveStatus.status))).all()
         eligible = sum(1 for _, p in students if eligibility(d, p.academics or {})[0])
         drive_rows.append({**_drive_out(d, None, {}, True), "eligible_students": eligible, "statuses": dict(regs)})
+    # Individual rows are read in an officer scope: Postgres row-level security returns only students who share.
     per_student = []
-    for u, p in students:
-        if u.id not in sharing:
+    async with officer_scope(org.id) as scoped:
+        visible = (
+            await scoped.execute(select(Profile).join(OrgMember, OrgMember.user_id == Profile.user_id).where(OrgMember.org_id == org.id, OrgMember.role == "student"))
+        ).scalars().all()
+        scoped_matches = (await scoped.execute(select(JobMatch).where(JobMatch.user_id.in_([p.user_id for p in visible]), JobMatch.applied_at.is_not(None)))).unique().scalars().all() if visible else []
+    users_by_id = {u.id: u for u, _ in students}
+    for p in visible:
+        u = users_by_id.get(p.user_id)
+        if u is None or u.id not in sharing:  # belt and braces: the app checks too
             continue
-        mine = [m for m in matches if m.user_id == u.id]
+        mine = [m for m in scoped_matches if m.user_id == u.id]
         per_student.append(
             {
                 "name": u.name or u.email.split("@")[0],
@@ -261,6 +271,9 @@ async def college_dashboard(member: OfficerDep, session: SessionDep) -> dict:
                 "last_active": u.last_seen_at.isoformat() if u.last_seen_at else None,
             }
         )
+    # Audit: every officer view of student-level data (who, which college, how many rows; no student details).
+    session.add(AuditEvent(actor_user_id=member.user_id, action="tpo_view", subject=str(org.id), detail={"rows": len(per_student)}))
+    await session.commit()
     return {
         "college": {"name": org.name, "invite_code": org.invite_code},
         "students": len(students),
@@ -279,8 +292,70 @@ async def college_dashboard(member: OfficerDep, session: SessionDep) -> dict:
 async def post_drive(body: DriveIn, member: OfficerDep, session: SessionDep) -> dict:
     d = CampusDrive(org_id=member.org_id, **{**body.model_dump(mode="json"), "register_by": body.register_by})
     session.add(d)
+    await session.flush()
+    notified = await notify_eligible(session, d)
     await session.commit()
-    return _drive_out(d, None, {}, True)
+    return {**_drive_out(d, None, {}, True), "notified": notified}
+
+
+class CircularIn(BaseModel):
+    text: str = Field(default="", max_length=20000)
+
+
+@router.post("/college/drives/parse")
+async def parse_drive(member: OfficerDep, request: Request) -> dict:
+    """A circular (pasted WhatsApp text, or a PDF) as a drive to review before posting."""
+    if request.headers.get("content-type", "").startswith("multipart/form-data"):
+        form = await request.form()
+        text_in = str(form.get("text") or "")
+        f = form.get("file")
+        if f is not None and hasattr(f, "read"):
+            from app.resume_parser import extract_text
+
+            text_in += "\n" + extract_text(f.filename or "c.pdf", await f.read(5 * 1024 * 1024))
+    else:
+        text_in = CircularIn.model_validate(await request.json()).text
+    if not text_in.strip():
+        raise HTTPException(422, "Paste the circular or upload the PDF")
+    return parse_circular(text_in)
+
+
+class AlumniIn(BaseModel):
+    csv: str = Field(max_length=200_000)
+
+
+@router.post("/college/alumni")
+async def upload_alumni(body: AlumniIn, member: OfficerDep, session: SessionDep) -> dict:
+    """CSV with name,company,role,batch,contact,consent. Only rows with consent = yes are stored."""
+    import csv
+    import io
+
+    from app.api.routes.ledger import company_key
+    from app.models import Alumnus
+
+    added = skipped = 0
+    for row in csv.DictReader(io.StringIO(body.csv)):
+        r = {k.strip().lower(): (v or "").strip() for k, v in row.items() if k}
+        if r.get("consent", "").lower() not in ("yes", "y", "true", "1") or not r.get("name") or not r.get("company"):
+            skipped += 1
+            continue
+        session.add(Alumnus(org_id=member.org_id, name=r["name"][:200], company=r["company"][:200], company_key=company_key(r["company"]), role=r.get("role", "")[:200], batch=int(r["batch"]) if r.get("batch", "").isdigit() else None, contact=r.get("contact", "")[:320]))
+        added += 1
+    await session.commit()
+    return {"added": added, "skipped_without_consent": skipped}
+
+
+@router.get("/campus/alumni")
+async def alumni_at(company: str, user: UserDep, session: SessionDep) -> list[dict]:
+    """Consenting alumni of your college at a company, for a referral request."""
+    from app.api.routes.ledger import company_key
+    from app.models import Alumnus
+
+    member, _ = await _membership(session, user.id)
+    if member is None:
+        return []
+    rows = (await session.execute(select(Alumnus).where(Alumnus.org_id == member.org_id, Alumnus.company_key == company_key(company)).limit(20))).scalars()
+    return [{"name": a.name, "company": a.company, "role": a.role, "batch": a.batch, "contact": a.contact} for a in rows]
 
 
 @router.delete("/college/drives/{drive_id}", status_code=status.HTTP_204_NO_CONTENT)

@@ -98,6 +98,7 @@ const FOOTER = [
     title: "Legal",
     links: [
       { href: "/trust", label: "Trust" },
+      { href: "/transparency", label: "Transparency" },
       { href: "/privacy", label: "Privacy" },
       { href: "/terms", label: "Terms" },
     ],

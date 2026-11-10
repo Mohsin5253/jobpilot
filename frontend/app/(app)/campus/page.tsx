@@ -2,6 +2,8 @@
 
 import { CalendarClock, Check, ChevronDown, GraduationCap, Plus, Trash2, X } from "lucide-react";
 import Image from "next/image";
+
+import { AlumniLookup } from "@/components/campus-v2";
 import Link from "next/link";
 import { useState, type FormEvent } from "react";
 
@@ -233,6 +235,7 @@ export default function CampusPage() {
           )}
         </div>
       </div>
+      {data.college && <AlumniLookup />}
     </div>
   );
 }

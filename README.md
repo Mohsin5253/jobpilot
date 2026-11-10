@@ -87,6 +87,14 @@ and LinkedIn note, and tracks everything you've applied to. **Nothing is sent un
 - **Gap-to-proof**: a 48-hour mini-project spec for near-miss gaps; a submitted repo is checked on GitHub's public API
   (owned by the verified account, pushed in the last 7 days, uses the skill) and the match is re-scored with before →
   after recorded in a run trace
+- **Campus v2 (tier-2/3 colleges)**: a drive-circular parser (pasted WhatsApp text or PDF → company, role, CTC /
+  stipend, CGPA / % / branches / backlogs / batch, deadline, rounds; 20 labelled circulars at 100% field accuracy after
+  tuning, 5 held-out at 98%) that notifies eligible consenting students when the drive is posted; consent enforced by
+  Postgres row-level security (a restrictive policy on profiles, job_matches and drive_statuses inside an officer
+  context: only students with an active `college_share` consent are visible, withdrawal applies immediately); an
+  audit event for every officer data view; alumni referrals only from alumni who consented
+- **Transparency report** (`/transparency`): monthly totals from a daily `transparency_daily` rollup (postings
+  verified, scams blocked, scam checks, applications approved, average ₹ AI cost per run)
 - **Gmail via Google sign-in**: send-only access (`gmail.send`), refresh token encrypted, sends spaced 90 s apart,
   an opt-out line on every application; app passwords remain for other providers
 - **Production basics**: per-user mailboxes (encrypted), Free / Pro plan limits and a daily AI budget per user,
@@ -343,7 +351,7 @@ backend/
   tests/          pytest suite
 extension/        Chrome MV3 autofill extension (Greenhouse, Lever, Ashby) + field-mapping tests
 frontend/
-  app/(marketing)/ landing page, trust, privacy, terms
+  app/(marketing)/ landing page, scam-check, trust, transparency, privacy, terms
   app/p/[slug]/    public proof-of-skills page
   app/(app)/      dashboard, jobs, jobs/[id], approvals, skills, tracker, insights, campus, college, proof, runs, settings, admin
   app/(auth)/     login, register, forgot-password, reset-password

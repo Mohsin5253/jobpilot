@@ -184,12 +184,17 @@ export default async function TrustPage() {
             "What the agents make for you: matches, tailored resumes, drafts and your application tracker.",
             "Your mailbox connection, if you add one: for Gmail, a Google token that can only send email; for other providers, an app password. Either is encrypted with a key kept outside the database, and used only to send what you approve, at least 90 seconds apart.",
             "Your consents: each purpose you agreed to, when, and which version of the notice you saw.",
+            "If you join your college’s workspace: placement officers see only totals unless you choose to share. That choice is enforced by the database itself, and every officer view is logged.",
             "Run traces and AI usage records: which agent ran, how long it took, tokens and cost.",
             "Proof Link opens: the time and browser family only (for example “chrome-mobile”), counted on our server. No IP addresses, cookies or tracking pixels.",
           ]}
         />
         <p>
-          We keep your data while your account is open. AI usage records are deleted after 90 days and notifications after 60. Demo accounts are deleted after 24 hours. Accounts nobody has used for 12 months are deleted, after an email notice 30 days before. When you delete your
+          Monthly totals of what JobPilot did are public on the{" "}
+          <Link href="/transparency" className="text-cobalt-text hover:underline">
+            transparency report
+          </Link>
+          . We keep your data while your account is open. AI usage records are deleted after 90 days and notifications after 60. Demo accounts are deleted after 24 hours. Accounts nobody has used for 12 months are deleted, after an email notice 30 days before. When you delete your
           account, everything in it is deleted. More detail is in the{" "}
           <Link href="/privacy" className="text-cobalt-text hover:underline">
             privacy policy

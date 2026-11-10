@@ -4,6 +4,7 @@ import { Building2, Copy, Plus } from "lucide-react";
 import { useState } from "react";
 import { toast } from "sonner";
 
+import { AlumniUpload, CircularImport } from "@/components/campus-v2";
 import { DriveForm } from "@/components/drive-form";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -54,6 +55,11 @@ export default function CollegePage() {
           <DriveForm loading={add.isPending} onCancel={() => setAdding(false)} onSubmit={(b) => add.mutate(b, { onSuccess: () => setAdding(false) })} />
         </Card>
       )}
+
+      <div className="grid gap-6 xl:grid-cols-2 [&>*]:min-w-0">
+        <CircularImport />
+        <AlumniUpload />
+      </div>
 
       <div className="grid gap-6 xl:grid-cols-[1.4fr_1fr] [&>*]:min-w-0">
         <Card>

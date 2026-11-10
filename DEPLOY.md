@@ -215,6 +215,15 @@ Changing the key later makes earlier links fail verification, so set it once.
 - **Consent notice**: change the text in `backend/app/services/consent.py` and bump `CONSENT_VERSION`.
 - **Breach**: follow [docs/breach-response.md](docs/breach-response.md) (72-hour report to the Data Protection Board).
 
+## Campus data and row-level security
+
+Officer views of individual students run inside an "officer context" where Postgres row-level security hides every
+student without an active `college_share` consent. Migration 0019 enables and forces RLS on `profiles`,
+`job_matches` and `drive_statuses`, and creates a read-only `jobpilot_officer` role when the database user may create
+roles. Where it can't, FORCE still applies the policy to the app's own (non-superuser) role, which is the case on
+Render. If a later migration adds a table that officer queries read, also `GRANT SELECT` on it to `jobpilot_officer`.
+Every officer view writes an `audit_events` row (`tpo_view`).
+
 ## Backups and data requests
 
 Render Postgres takes daily backups (point-in-time recovery on paid plans). Users export or delete their own data in
