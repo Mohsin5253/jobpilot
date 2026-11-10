@@ -9,7 +9,7 @@ from sqlalchemy import select, update
 
 from app.api.routes.ledger import market_check
 from app.db import session_scope
-from app.models import AgentRun, Consent, Job, JobMatch, Profile, StipendReport, User
+from app.models import AgentRun, Job, JobMatch, Profile, StipendReport, User
 
 JD = (
     "We are hiring a Data Analyst Intern. Requirements: Experience writing SQL queries on large datasets. "
