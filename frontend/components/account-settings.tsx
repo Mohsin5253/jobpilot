@@ -237,7 +237,93 @@ export function PlanCard() {
 
 type PayConfig = { enabled: boolean; prices: Record<string, number>; plan: string; plan_expires_at: string | null; subscribed: boolean; outcome_plan: boolean; outcome_available: boolean };
 type PaidRow = { id: string; plan: string; amount_inr: number; paid_at: string | null; invoice_number: string | null };
-const PLAN_NAME: Record<string, string> = { pro_monthly: "Pro, 1 month", week_pass: "Week Pass", outcome: "Outcome plan" };
+const PLAN_NAME: Record<string, string> = { pro_monthly: "Pro, 1 month", pro_month: "Pro, 1 month (UPI QR)", week_pass: "Week Pass", outcome: "Outcome plan" };
+
+type QrStart = { payment_id: string; amount_inr: number; image: string; expires_in_s: number };
+
+/** Scan-to-pay: a single-use Razorpay UPI QR for a fixed amount, shown right here. Any UPI app works. */
+function UpiQr({ prices, onPaid }: { prices: Record<string, number>; onPaid: () => void }) {
+  const [qr, setQr] = useState<(QrStart & { plan: string; until: number }) | null>(null);
+  const [busy, setBusy] = useState<string | null>(null);
+  const [left, setLeft] = useState(0);
+  useEffect(() => {
+    if (!qr) return;
+    const tick = setInterval(() => setLeft(Math.max(0, Math.round((qr.until - Date.now()) / 1000))), 1000);
+    const poll = setInterval(async () => {
+      try {
+        const st = await api.get<{ status: string }>(`/payments/qr/${qr.payment_id}/status`);
+        if (st.status === "paid") {
+          toast.success(qr.plan === "week_pass" ? "Paid. Week Pass is on: 7 days of Pro." : "Paid. Pro is on for a month.");
+          setQr(null);
+          onPaid();
+        }
+      } catch {
+        /* keep polling */
+      }
+    }, 3000);
+    return () => {
+      clearInterval(tick);
+      clearInterval(poll);
+    };
+  }, [qr, onPaid]);
+  const start = async (plan: string) => {
+    setBusy(plan);
+    try {
+      const r = await api.post<QrStart>(`/payments/qr/${plan}`);
+      setQr({ ...r, plan, until: Date.now() + r.expires_in_s * 1000 });
+      setLeft(r.expires_in_s);
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Couldn’t create the QR code");
+    } finally {
+      setBusy(null);
+    }
+  };
+  if (qr) {
+    const expired = left === 0;
+    return (
+      <div className="flex flex-col items-center gap-3 rounded-[var(--radius-card)] border border-border p-4 text-center">
+        <div className="text-[14px] font-semibold">
+          Scan to pay ₹{qr.amount_inr} · {qr.plan === "week_pass" ? "Week Pass" : "Pro, 1 month"}
+        </div>
+        {expired ? (
+          <p className="text-[13px] text-muted">This QR code expired. Make a new one.</p>
+        ) : (
+          // Served from our own API (same origin), so the page loads no third-party images.
+          // eslint-disable-next-line @next/next/no-img-element
+          <img src={qr.image} alt={`UPI QR code to pay ₹${qr.amount_inr}`} width={240} height={240} className="rounded-[var(--radius-control)] bg-white p-2" />
+        )}
+        <p className="text-[12.5px] text-muted">
+          Open GPay, PhonePe, Paytm or any UPI app and scan. {expired ? "" : `Waiting for payment… ${Math.floor(left / 60)}:${String(left % 60).padStart(2, "0")} left.`}
+        </p>
+        <div className="flex gap-2">
+          {expired && (
+            <Button size="sm" variant="primary" onClick={() => start(qr.plan)}>
+              New QR code
+            </Button>
+          )}
+          <Button size="sm" variant="ghost" onClick={() => setQr(null)}>
+            Close
+          </Button>
+        </div>
+      </div>
+    );
+  }
+  return (
+    <div className="flex flex-wrap items-center justify-between gap-3 rounded-[var(--radius-card)] border border-border px-4 py-3">
+      <div className="text-[13px]">
+        <b>Pay by UPI QR</b> · scan with any UPI app. One-time payment, nothing renews.
+      </div>
+      <div className="flex gap-2">
+        <Button size="sm" loading={busy === "week_pass"} onClick={() => start("week_pass")}>
+          Week Pass ₹{prices.week_pass}
+        </Button>
+        <Button size="sm" loading={busy === "pro_month"} onClick={() => start("pro_month")}>
+          Pro 1 month ₹{prices.pro_monthly}
+        </Button>
+      </div>
+    </div>
+  );
+}
 
 /** Pro by UPI / card on Razorpay's own pages, a Week Pass, cancel in two clicks, and invoices. */
 function Billing({ plan, requestPro, requesting, requested }: { plan: string; requestPro: () => void; requesting: boolean; requested: boolean }) {
@@ -285,6 +371,7 @@ function Billing({ plan, requestPro, requesting, requested }: { plan: string; re
       )}
       {cfg.enabled ? (
         <>
+          <UpiQr prices={cfg.prices} onPaid={() => qc.invalidateQueries()} />
           {!cfg.subscribed && (
             <div className="flex flex-wrap items-center justify-between gap-3 rounded-[var(--radius-card)] border border-accent/25 bg-accent-soft px-4 py-3">
               <div className="text-[13px]">

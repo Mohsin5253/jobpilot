@@ -75,7 +75,8 @@ and LinkedIn note, and tracks everything you've applied to. **Nothing is sent un
 - **Payments (Razorpay)**: Pro ₹199/month (UPI AutoPay or card, a Subscription) and a ₹49 Week Pass (a Payment
   Link) on Razorpay's hosted pages; webhooks verified (HMAC) and idempotent by event id; sequential GST-ready invoices
   (tax invoice with a GSTIN, receipt without); cancel in two clicks (Pro lasts to the end of the paid period); an
-  hourly sweep lapses expired plans. An experimental "₹99 on first interview" plan asks (never charges) when an
+  hourly sweep lapses expired plans. Students can also pay by scanning a single-use UPI QR in Settings (Week Pass, or
+one month of Pro without renewal), confirmed by the `qr_code.credited` webhook with an amount check. An experimental "₹99 on first interview" plan asks (never charges) when an
   interview is recorded with evidence; off until `OUTCOME_PLAN_ENABLED=true`
 - **Stipend & PPO ledger**: students report stipend, duration, mode, PPO and paid-on-time under the `ledger` consent,
   verified by a college-email code or an offer letter that's stored encrypted only until a moderator checks it (then

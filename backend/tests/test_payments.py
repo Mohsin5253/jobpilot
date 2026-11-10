@@ -101,3 +101,39 @@ async def test_outcome_plan_asks_only_on_first_interview_with_evidence(authed, r
     async with session_scope() as s:
         assert (await s.execute(select(Payment).where(Payment.plan == "outcome"))).scalar_one().status == "created"  # asked, never charged
         assert (await s.execute(select(Notification).where(Notification.kind == "payment"))).scalar_one()
+
+
+@respx.mock
+async def test_upi_qr_payment_for_week_pass_and_pro_month(authed, client, razorpay):
+    create = respx.post(f"{pay.API}/payments/qr_codes").mock(
+        side_effect=[
+            httpx.Response(200, json={"id": "qr_1", "image_url": "https://rzp.io/i/qr1"}),
+            httpx.Response(200, json={"id": "qr_2", "image_url": "https://rzp.io/i/qr2"}),
+        ]
+    )
+    respx.get("https://rzp.io/i/qr1").mock(return_value=httpx.Response(200, content=b"\x89PNG fake"))
+    r = (await authed.post("/api/payments/qr/week_pass")).json()
+    assert r["amount_inr"] == 49 and r["expires_in_s"] == 900
+    body = json.loads(create.calls.last.request.content)
+    assert body["type"] == "upi_qr" and body["usage"] == "single_use" and body["fixed_amount"] and body["payment_amount"] == 4900
+    img = await authed.get(r["image"])
+    assert img.status_code == 200 and img.headers["content-type"] == "image/png"
+    assert (await authed.get(f"/api/payments/qr/{r['payment_id']}/status")).json()["status"] == "created"
+    assert (await authed.get(f"/api/payments/{r['payment_id']}/invoice")).status_code == 404  # not paid yet
+
+    # A credit for the wrong amount is ignored.
+    bad, h = _signed({"event": "qr_code.credited", "payload": {"qr_code": {"entity": {"id": "qr_1"}}, "payment": {"entity": {"id": "pay_x", "amount": 100}}}})
+    assert (await client.post("/api/payments/webhook", content=bad, headers=h)).json()["result"] == "amount_mismatch"
+    ok, h = _signed({"event": "qr_code.credited", "payload": {"qr_code": {"entity": {"id": "qr_1"}}, "payment": {"entity": {"id": "pay_q1", "amount": 4900}}}})
+    assert (await client.post("/api/payments/webhook", content=ok, headers=h)).json()["result"] == "week_pass_paid"
+    st = (await authed.get(f"/api/payments/qr/{r['payment_id']}/status")).json()
+    assert st["status"] == "paid" and st["plan"] == "pro"
+
+    r2 = (await authed.post("/api/payments/qr/pro_month")).json()
+    assert r2["amount_inr"] == 199
+    ok2, h2 = _signed({"event": "qr_code.credited", "payload": {"qr_code": {"entity": {"id": "qr_2"}}, "payment": {"entity": {"id": "pay_q2", "amount": 19900}}}})
+    assert (await client.post("/api/payments/webhook", content=ok2, headers=h2)).json()["result"] == "pro_month_paid"
+    async with session_scope() as s:
+        u = (await s.execute(select(User))).scalar_one()
+        assert timedelta(days=36) < u.plan_expires_at - datetime.now(UTC) <= timedelta(days=37)  # 7 + 30 days, stacked
+    assert (await authed.post("/api/payments/qr/lifetime")).status_code == 404

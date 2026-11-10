@@ -2,7 +2,7 @@
 
 import httpx
 from fastapi import APIRouter, HTTPException, Request
-from fastapi.responses import HTMLResponse
+from fastapi.responses import HTMLResponse, Response
 from sqlalchemy import select
 
 from app.api.deps import RealUserDep, SessionDep, UserDep
@@ -38,6 +38,41 @@ async def checkout(plan: str, user: RealUserDep, session: SessionDep) -> dict:
         raise HTTPException(502, "Razorpay didn't respond. Try again in a minute.") from exc
     await session.commit()
     return {"url": url}
+
+
+@router.post("/payments/qr/{plan}")
+async def qr(plan: str, user: RealUserDep, session: SessionDep) -> dict:
+    """Pay by scanning a UPI QR (GPay, PhonePe, Paytm, any UPI app). Week Pass, or one month of Pro without renewal."""
+    if plan not in pay.QR_PLANS:
+        raise HTTPException(404, "Unknown plan")
+    try:
+        p = await pay.qr_checkout(session, user, plan)
+    except pay.PaymentsOff as exc:
+        raise HTTPException(409, str(exc)) from exc
+    except httpx.HTTPError as exc:
+        raise HTTPException(502, "Razorpay couldn't create a QR code. Use the payment page instead, or try again.") from exc
+    await session.commit()
+    return {"payment_id": str(p.id), "amount_inr": p.amount_inr, "image": f"/api/payments/qr/{p.id}/image", "expires_in_s": int(pay.QR_TTL.total_seconds())}
+
+
+@router.get("/payments/qr/{payment_id}/image")
+async def qr_image(payment_id: str, user: UserDep, session: SessionDep) -> Response:
+    p = await session.get(Payment, payment_id)
+    if p is None or p.user_id != user.id or not (p.invoice or {}).get("qr_image_url"):
+        raise HTTPException(404, "No such QR code")
+    try:
+        data = await pay.qr_image(p.invoice["qr_image_url"])
+    except (httpx.HTTPError, pay.PaymentsOff) as exc:
+        raise HTTPException(502, "Couldn't load the QR code") from exc
+    return Response(data, media_type="image/png", headers={"cache-control": "private, max-age=900"})
+
+
+@router.get("/payments/qr/{payment_id}/status")
+async def qr_status(payment_id: str, user: UserDep, session: SessionDep) -> dict:
+    p = await session.get(Payment, payment_id)
+    if p is None or p.user_id != user.id:
+        raise HTTPException(404, "No such payment")
+    return {"status": p.status, "plan": user.plan, "plan_expires_at": user.plan_expires_at.isoformat() if user.plan_expires_at else None}
 
 
 @router.post("/payments/cancel")
@@ -76,7 +111,7 @@ async def my_payments(user: UserDep, session: SessionDep) -> list[dict]:
 async def invoice(payment_id: str, user: UserDep, session: SessionDep) -> HTMLResponse:
     """A printable invoice (save as PDF from the browser)."""
     p = await session.get(Payment, payment_id)
-    if p is None or p.user_id != user.id or not p.invoice:
+    if p is None or p.user_id != user.id or p.status != "paid" or not p.invoice:
         raise HTTPException(404, "No such invoice")
     inv = p.invoice
     rupees = lambda paise: f"₹{paise / 100:,.2f}"  # noqa: E731

@@ -78,6 +78,39 @@ async def payment_link(s: AsyncSession, user: User, plan: str, amount: int, desc
     return link["short_url"]
 
 
+QR_TTL = timedelta(minutes=15)
+QR_PLANS = {"week_pass": ("JobPilot Week Pass: 7 days of Pro", 7), "pro_month": ("JobPilot Pro: 1 month, no auto-renewal", 30)}
+
+
+async def qr_checkout(s: AsyncSession, user: User, plan: str) -> Payment:
+    """A single-use Razorpay UPI QR for a fixed amount: scan it with any UPI app. Closes after 15 minutes.
+    Pro bought this way is one month that doesn't renew (UPI AutoPay needs the subscription page instead)."""
+    amount = settings.price_week_pass_inr if plan == "week_pass" else settings.price_pro_inr
+    description, _ = QR_PLANS[plan]
+    qr = await _call(
+        "POST",
+        "/payments/qr_codes",
+        {
+            "type": "upi_qr", "name": "JobPilot", "usage": "single_use", "fixed_amount": True, "payment_amount": amount * 100,
+            "description": description, "close_by": int((datetime.now(UTC) + QR_TTL).timestamp()), "notes": {"user_id": str(user.id), "plan": plan},
+        },
+    )
+    p = Payment(user_id=user.id, plan=plan, amount_inr=amount, razorpay_ref=qr["id"], invoice={"qr_image_url": qr["image_url"]})
+    s.add(p)
+    await s.flush()
+    return p
+
+
+async def qr_image(url: str) -> bytes:
+    """The QR picture, fetched server-side so the page needn't load images from another origin."""
+    if not url.startswith("https://"):
+        raise PaymentsOff("No QR image")
+    async with httpx.AsyncClient(timeout=15, follow_redirects=True) as c:
+        r = await c.get(url)
+    r.raise_for_status()
+    return r.content
+
+
 async def cancel_pro(s: AsyncSession, user: User) -> None:
     """Cancels at the end of the paid period: Pro stays until plan_expires_at, then lapses to Free."""
     if user.razorpay_subscription_id:
@@ -91,7 +124,7 @@ def invoice_for(p: Payment, user: User, number: str, now: datetime) -> dict:
     total = p.amount_inr * 100  # paise
     inv = {
         "number": number, "date": now.astimezone(IST).date().isoformat(), "seller": {"name": settings.seller_name, "address": settings.seller_address, "gstin": settings.seller_gstin},
-        "buyer": {"name": user.name, "email": user.email}, "description": {"pro_monthly": "JobPilot Pro, 1 month", "week_pass": "JobPilot Week Pass, 7 days", "outcome": "JobPilot outcome plan (first interview)"}[p.plan],
+        "buyer": {"name": user.name, "email": user.email}, "description": {"pro_monthly": "JobPilot Pro, 1 month", "pro_month": "JobPilot Pro, 1 month (paid by UPI QR)", "week_pass": "JobPilot Week Pass, 7 days", "outcome": "JobPilot outcome plan (first interview)"}[p.plan],
         "sac": "998431", "total_paise": total, "currency": "INR",
     }
     if settings.seller_gstin:
@@ -139,6 +172,20 @@ async def handle_webhook(event: dict, event_id: str) -> str:
             user = await s.get(User, p.user_id) if p.user_id else None
             if user and p.plan == "week_pass":
                 _grant(user, max(now, user.plan_expires_at or now) + timedelta(days=7))
+            return f"{p.plan}_paid"
+        if name == "qr_code.credited":
+            qr = payload.get("qr_code", {}).get("entity", {})
+            pay = payload.get("payment", {}).get("entity", {})
+            p = (await s.execute(select(Payment).where(Payment.razorpay_ref == qr.get("id")))).scalar_one_or_none()
+            if p is None:
+                return "unknown"
+            if pay.get("amount") is not None and int(pay["amount"]) != p.amount_inr * 100:
+                log.warning("razorpay.qr_amount_mismatch")
+                return "amount_mismatch"
+            await _mark_paid(s, p, pay.get("id"), now)
+            user = await s.get(User, p.user_id) if p.user_id else None
+            if user and p.plan in QR_PLANS:
+                _grant(user, max(now, user.plan_expires_at or now) + timedelta(days=QR_PLANS[p.plan][1]))
             return f"{p.plan}_paid"
         if name in ("subscription.activated", "subscription.charged"):
             sub = payload.get("subscription", {}).get("entity", {})

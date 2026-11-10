@@ -174,7 +174,7 @@ UPI details reach JobPilot. Until the keys are set, Settings shows "Request Pro"
 
 1. Razorpay Dashboard → **Subscriptions → Plans** → create a monthly plan of ₹199. Note its `plan_...` id.
 2. **Settings → API keys**: generate a key pair. **Settings → Webhooks**: URL `https://<api>/api/payments/webhook`,
-   a secret, and the events `payment_link.paid`, `subscription.activated`, `subscription.charged`,
+   a secret, and the events `payment_link.paid`, `qr_code.credited`, `subscription.activated`, `subscription.charged`,
    `subscription.cancelled`, `subscription.halted`, `subscription.completed`, `payment.failed`.
 3. Set `RAZORPAY_KEY_ID`, `RAZORPAY_KEY_SECRET`, `RAZORPAY_WEBHOOK_SECRET` and `RAZORPAY_PRO_PLAN_ID` on Render.
    Start with test-mode keys and pay with Razorpay's test UPI/cards, then switch to live keys.
@@ -182,6 +182,10 @@ UPI details reach JobPilot. Until the keys are set, Settings shows "Request Pro"
    With a GSTIN invoices are tax invoices with 18% GST inside the price (CGST + SGST); without one they're receipts.
    Have your accountant check the invoice format before going live.
 5. The "₹99 on first interview" outcome plan is off (`OUTCOME_PLAN_ENABLED=false`) until you decide to offer it.
+
+**Pay by UPI QR**: Settings → Plan also shows a single-use Razorpay UPI QR (15 minutes) for the Week Pass or one month of
+Pro without renewal; any UPI app can scan it. Razorpay's QR Codes feature may need enabling on your account
+(Payments → QR Codes) before the API can create codes.
 
 Plans change only on verified webhooks, each event applied once. Cancelling keeps Pro until the paid period ends.
 
