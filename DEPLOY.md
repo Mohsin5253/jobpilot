@@ -104,7 +104,9 @@ Students connect Gmail by signing in with Google instead of pasting an app passw
    origin, privacy policy `https://<web>/privacy`, terms `https://<web>/terms`. Scopes: `openid`, `.../auth/userinfo.email`,
    `.../auth/gmail.send`. While the app is in *Testing*, add your testers' Gmail addresses (up to 100).
 3. **Credentials → Create credentials → OAuth client ID** → Web application. Authorized redirect URI:
-   `https://<your web origin>/api/mail/google/callback` (it must match `APP_URL` exactly, through the Vercel proxy).
+   `https://<your web origin>/api/mail/google/callback` (it must match `APP_URL` exactly, through the Vercel proxy), and
+   `https://<your web origin>/api/auth/google/callback` for "Sign in with Google" on the login and register pages
+   (scopes `openid email profile` only; add `.../auth/userinfo.profile` to the consent screen).
 4. Set `GOOGLE_CLIENT_ID` and `GOOGLE_CLIENT_SECRET` in the Render `jobpilot-shared` group. Settings → Your email then
    shows **Connect Gmail with Google**; app passwords stay available for other providers.
 5. Before going beyond 100 test users, submit the app for **verification**. `gmail.send` is a *sensitive* scope, not a

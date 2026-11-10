@@ -95,6 +95,9 @@ and LinkedIn note, and tracks everything you've applied to. **Nothing is sent un
   audit event for every officer data view; alumni referrals only from alumni who consented
 - **Transparency report** (`/transparency`): monthly totals from a daily `transparency_daily` rollup (postings
   verified, scams blocked, scam checks, applications approved, average ₹ AI cost per run)
+- **Sign in with Google** on the login and register pages (`openid email profile` only, no Gmail access): state bound
+  to the browser, signing up still requires the 18+ and privacy-notice confirmations, and an existing account with the
+  same verified email is linked
 - **Gmail via Google sign-in**: send-only access (`gmail.send`), refresh token encrypted, sends spaced 90 s apart,
   an opt-out line on every application; app passwords remain for other providers
 - **Production basics**: per-user mailboxes (encrypted), Free / Pro plan limits and a daily AI budget per user,

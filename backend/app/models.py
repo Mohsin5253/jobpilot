@@ -80,6 +80,7 @@ class User(Base):
     daily_send_cap: Mapped[int] = mapped_column(Integer, default=5, server_default="5")  # quality quota, up to the plan max
     inbound_token: Mapped[str | None] = mapped_column(String(24), unique=True)  # alerts+<token>@INBOUND_EMAIL_DOMAIN
     language: Mapped[str] = mapped_column(String(5), default="en", server_default="en")  # en | hi | mr
+    google_sub: Mapped[str | None] = mapped_column(String(64), unique=True)  # "Sign in with Google" account id
     plan_expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))  # paid Pro / Week Pass end
     razorpay_subscription_id: Mapped[str | None] = mapped_column(String(40))
     outcome_plan: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false")  # opted into "₹99 on first interview"
