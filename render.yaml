@@ -40,6 +40,17 @@ envVarGroups:
         sync: false
       - key: GOOGLE_CLIENT_SECRET
         sync: false
+      # Razorpay payments (optional, see DEPLOY.md).
+      - key: RAZORPAY_KEY_ID
+        sync: false
+      - key: RAZORPAY_KEY_SECRET
+        sync: false
+      - key: RAZORPAY_WEBHOOK_SECRET
+        sync: false
+      - key: RAZORPAY_PRO_PLAN_ID
+        sync: false
+      - key: SELLER_GSTIN
+        sync: false
       # Forwarded job-alert emails (optional, see DEPLOY.md).
       - key: INBOUND_EMAIL_DOMAIN
         sync: false

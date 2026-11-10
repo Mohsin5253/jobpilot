@@ -165,6 +165,24 @@ replicas is safe, with no Redis needed.
 - **JWT_SECRET**: changing it signs everyone out (harmless).
 - **ENCRYPTION_KEY**: don't, unless it leaked. Users then reconnect their mail in Settings.
 
+## Payments with Razorpay (optional)
+
+Pro (₹199/month by UPI AutoPay or card) and the Week Pass (₹49, 7 days) run on Razorpay's hosted pages, so no card or
+UPI details reach JobPilot. Until the keys are set, Settings shows "Request Pro" and admins switch Pro on by hand.
+
+1. Razorpay Dashboard → **Subscriptions → Plans** → create a monthly plan of ₹199. Note its `plan_...` id.
+2. **Settings → API keys**: generate a key pair. **Settings → Webhooks**: URL `https://<api>/api/payments/webhook`,
+   a secret, and the events `payment_link.paid`, `subscription.activated`, `subscription.charged`,
+   `subscription.cancelled`, `subscription.halted`, `subscription.completed`, `payment.failed`.
+3. Set `RAZORPAY_KEY_ID`, `RAZORPAY_KEY_SECRET`, `RAZORPAY_WEBHOOK_SECRET` and `RAZORPAY_PRO_PLAN_ID` on Render.
+   Start with test-mode keys and pay with Razorpay's test UPI/cards, then switch to live keys.
+4. Invoices: set `SELLER_NAME`, `SELLER_ADDRESS` and, once GST-registered, `SELLER_GSTIN` and `SELLER_STATE_CODE`.
+   With a GSTIN invoices are tax invoices with 18% GST inside the price (CGST + SGST); without one they're receipts.
+   Have your accountant check the invoice format before going live.
+5. The "₹99 on first interview" outcome plan is off (`OUTCOME_PLAN_ENABLED=false`) until you decide to offer it.
+
+Plans change only on verified webhooks, each event applied once. Cancelling keeps Pro until the paid period ends.
+
 ## Forwarded job-alert emails (optional)
 
 Students forward Internshala, Unstop or Naukri alert emails to `alerts+<token>@<INBOUND_EMAIL_DOMAIN>`; JobPilot keeps

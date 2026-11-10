@@ -79,6 +79,9 @@ class User(Base):
     daily_send_cap: Mapped[int] = mapped_column(Integer, default=5, server_default="5")  # quality quota, up to the plan max
     inbound_token: Mapped[str | None] = mapped_column(String(24), unique=True)  # alerts+<token>@INBOUND_EMAIL_DOMAIN
     language: Mapped[str] = mapped_column(String(5), default="en", server_default="en")  # en | hi | mr
+    plan_expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))  # paid Pro / Week Pass end
+    razorpay_subscription_id: Mapped[str | None] = mapped_column(String(40))
+    outcome_plan: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false")  # opted into "₹99 on first interview"
 
     profile: Mapped["Profile | None"] = relationship(back_populates="user", uselist=False)
 
@@ -316,6 +319,32 @@ class WhatsAppEvent(Base):
     __tablename__ = "whatsapp_events"
 
     id: Mapped[str] = mapped_column(String(128), primary_key=True)
+    received_at: Mapped[datetime] = _now_col()
+
+
+class Payment(Base):
+    """One payment or subscription charge, with its GST-ready invoice once paid."""
+
+    __tablename__ = "payments"
+
+    id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=uuid.uuid4)
+    user_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"), index=True)
+    plan: Mapped[str] = mapped_column(String(20))  # pro_monthly | week_pass | outcome
+    amount_inr: Mapped[int] = mapped_column(Integer)
+    razorpay_id: Mapped[str | None] = mapped_column(String(60), unique=True)
+    razorpay_ref: Mapped[str | None] = mapped_column(String(60), index=True)
+    status: Mapped[str] = mapped_column(String(20), default="created", server_default="created")
+    invoice_number: Mapped[str | None] = mapped_column(String(30), unique=True)
+    invoice: Mapped[dict[str, Any] | None] = mapped_column(JSONB)
+    created_at: Mapped[datetime] = _now_col()
+    paid_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+class PaymentEvent(Base):
+    __tablename__ = "payment_events"
+
+    id: Mapped[str] = mapped_column(String(80), primary_key=True)
+    event: Mapped[str] = mapped_column(String(60))
     received_at: Mapped[datetime] = _now_col()
 
 

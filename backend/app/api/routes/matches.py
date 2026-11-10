@@ -165,7 +165,17 @@ async def update_match(match_id: uuid.UUID, body: MatchUpdate, user: UserDep, se
     if body.user_rating is not None:
         m.user_rating = body.user_rating
     if body.outcome is not None:
+        first_interview = body.outcome == "interview" and m.outcome != "interview"
         record_outcome(m, body.outcome, body.rejection_reason)
+        if first_interview and (body.interview_evidence or "").strip():
+            from app.services.payments import outcome_interview
+
+            try:
+                await outcome_interview(session, user, m.job.company)
+            except Exception as exc:  # a payment link failing must never block recording the interview
+                from app.logging import log
+
+                log.warning("outcome_plan.link_failed", error=type(exc).__name__)
     elif body.rejection_reason is not None:
         m.rejection_reason = body.rejection_reason
     if body.ppo_status is not None:

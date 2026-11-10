@@ -78,6 +78,7 @@ const SUBPROCESSORS: [string, string, string][] = [
   ["Our transactional email provider", "Password resets and match alerts", "Depends on the provider"],
   ["Sentry", "Error monitoring, configured not to receive personal data", "United States"],
   ["Google (Gmail API)", "Only if you connect Gmail: sends the applications you approve. Send-only access; we can’t read your mail", "Global"],
+  ["Razorpay", "Only if you buy Pro or a Week Pass: takes the payment on its own pages. We never see your card or UPI details", "India"],
   ["Meta (WhatsApp Cloud API)", "Only if you turn on the WhatsApp digest: your number and the digest text", "Global"],
 ];
 

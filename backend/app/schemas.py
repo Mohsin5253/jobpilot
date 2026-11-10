@@ -347,6 +347,8 @@ class MatchUpdate(BaseModel):
     outcome: Outcome | None = None
     rejection_reason: str | None = Field(default=None, max_length=300)
     ppo_status: Literal["none", "eligible", "offered", "converted"] | None = None
+    # Evidence for an interview (e.g. "calendar invite from hr@acme.com on 12 Nov"): needed for the outcome plan.
+    interview_evidence: str | None = Field(default=None, max_length=500)
 
 
 class DraftEdit(BaseModel):

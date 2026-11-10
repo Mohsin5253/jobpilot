@@ -66,6 +66,21 @@ class Settings(BaseSettings):
     # Quality gate: at most this many tailored applications a week (per-user preference, capped by plan).
     default_weekly_application_cap: int = 10
 
+    # Razorpay (UPI, cards). Payments stay off until the keys are set; Pro can still be switched on by hand in /admin.
+    razorpay_key_id: str | None = None
+    razorpay_key_secret: str | None = None
+    razorpay_webhook_secret: str | None = None
+    razorpay_pro_plan_id: str | None = None  # a ₹199/month plan created in the Razorpay dashboard
+    price_pro_inr: int = 199
+    price_week_pass_inr: int = 49
+    price_outcome_inr: int = 99
+    outcome_plan_enabled: bool = False  # experimental "₹99 on first interview": off until confirmed
+    # Seller details printed on invoices. With a GSTIN, invoices show 18% GST (CGST+SGST within the state, IGST
+    # otherwise); without one they're receipts that say no GST was charged.
+    seller_name: str = "JobPilot"
+    seller_address: str = ""
+    seller_gstin: str | None = None
+    seller_state_code: str = "27"  # GST state code (27 = Maharashtra)
     # Ed25519 seed (32 bytes, base64url) that signs Proof Links. Optional: derived from ENCRYPTION_KEY when unset.
     proof_signing_key: str | None = None
     # Gmail sending through Google OAuth (scope gmail.send only). Off until both are set; the redirect URI to register
@@ -236,6 +251,10 @@ class Settings(BaseSettings):
     def smtp_enabled(self) -> bool:
         # A login user without a password can't authenticate, so don't offer sending.
         return bool(self.smtp_host and self.smtp_from and (not self.smtp_user or self.smtp_password))
+
+    @property
+    def payments_enabled(self) -> bool:
+        return bool(self.razorpay_key_id and self.razorpay_key_secret and self.razorpay_webhook_secret)
 
     @property
     def google_mail_enabled(self) -> bool:
