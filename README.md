@@ -61,6 +61,12 @@ and LinkedIn note, and tracks everything you've applied to. **Nothing is sent un
   sent that week and the claim-provenance badge. The payload is Ed25519-signed; recruiters check it at
   `/api/v1/verify/{token}` (public key at `/api/v1/verify/public-key`). Tampered tokens fail, students can revoke a
   link, and opens are logged server-side (no pixels), shown in the Tracker and notified once
+- **India sources, no ToS-violating scraping**: a `sources` registry with per-source ToS notes and rate limits
+  (LinkedIn, Internshala, Naukri, Unstop, Indeed, Glassdoor, Wellfound listed as never used); a careers-page watcher
+  that reads only schema.org JobPosting JSON-LD, obeys robots.txt and makes at most one request a minute per domain;
+  community internship lists on GitHub (SimplifyJobs JSON); government portals as deep links; job-board alert
+  emails forwarded to a private inbound address and pasted links, kept as links the student opens. Dedupe by company,
+  normalised title and location (the same role on several boards becomes one job with several apply links)
 - **Gmail via Google sign-in**: send-only access (`gmail.send`), refresh token encrypted, sends spaced 90 s apart,
   an opt-out line on every application; app passwords remain for other providers
 - **Production basics**: per-user mailboxes (encrypted), Free / Pro plan limits and a daily AI budget per user,
@@ -286,6 +292,8 @@ Render (API, workers, Postgres) + Vercel (web). Step-by-step, with every environ
 | `SCAM_FETCH_URLS` / `SCAM_RDAP_ENABLED` | `true` | Scam Shield fetches pasted links (public hosts only) and looks up domain age over RDAP |
 | `SCAM_LLM_DAILY_CAP` | 300 | AI second opinions per day across all anonymous scam checks |
 | `PROOF_SIGNING_KEY` | derived from `ENCRYPTION_KEY` | Ed25519 seed (32 bytes, base64url) that signs Proof Links |
+| `GITHUB_LISTINGS_URLS` | SimplifyJobs Summer 2026 | Comma-separated public internship-list JSON URLs (empty turns it off) |
+| `INBOUND_EMAIL_DOMAIN` / `INBOUND_EMAIL_SECRET` | — | Forwarded job-alert emails (see DEPLOY.md) |
 | `USD_INR_RATE` | 88.0 | Rupees per US dollar, used to show AI cost (billed in USD) in ₹ on the landing page |
 
 Web (Vercel) variables, all optional except `API_URL`: `API_URL` (the API origin), `NEXT_PUBLIC_SITE_URL` (canonical

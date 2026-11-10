@@ -82,6 +82,7 @@ export interface Preferences {
   greenhouse_boards: string[];
   lever_boards: string[];
   ashby_boards: string[];
+  career_pages?: string[];
   public_job_feeds: boolean;
   adzuna_country: string;
   daily_run_hour_utc: number;

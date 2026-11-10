@@ -98,7 +98,8 @@ class Preferences(BaseModel):
     greenhouse_boards: list[str] = Field(default_factory=_boards(DEFAULT_GREENHOUSE))
     lever_boards: list[str] = Field(default_factory=_boards(DEFAULT_LEVER))
     ashby_boards: list[str] = Field(default_factory=_boards(DEFAULT_ASHBY))
-    public_job_feeds: bool = True  # The Muse, Remotive, Jobicy
+    public_job_feeds: bool = True  # The Muse, Remotive, Jobicy, GitHub internship lists
+    career_pages: list[str] = Field(default_factory=list, max_length=20)  # company careers pages to watch (JSON-LD only)
     adzuna_country: str = "in"
     daily_run_hour_utc: int = Field(default=3, ge=0, le=23)
     daily_runs_enabled: bool = True

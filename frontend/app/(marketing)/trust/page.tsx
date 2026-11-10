@@ -8,6 +8,17 @@ import { API_URL } from "@/lib/server-api";
 
 type NoticeItem = { purpose: string; description: string; data: string; why: string; retention: string; withdraw: string };
 
+type SourceRow = { id: string; kind: string; tos_notes: string; rate_limit_per_min: number; enabled: boolean };
+
+async function getSources(): Promise<SourceRow[] | null> {
+  try {
+    const r = await fetch(`${API_URL}/api/sources/registry`, { next: { revalidate: 3600 }, signal: AbortSignal.timeout(4000) });
+    return r.ok ? r.json() : null;
+  } catch {
+    return null;
+  }
+}
+
 async function getNotice(): Promise<{ version: string; purposes: NoticeItem[] } | null> {
   try {
     const r = await fetch(`${API_URL}/api/consents/notice`, { next: { revalidate: 3600 }, signal: AbortSignal.timeout(4000) });
@@ -50,6 +61,7 @@ const List = ({ items }: { items: ReactNode[] }) => (
 const TOC = [
   ["checks", "What we check"],
   ["never", "What we never do"],
+  ["sources", "Where jobs come from"],
   ["data", "Data we store"],
   ["consent", "Consent notice"],
   ["rights", "Your rights"],
@@ -72,7 +84,7 @@ const SUBPROCESSORS: [string, string, string][] = [
 export const revalidate = 3600;
 
 export default async function TrustPage() {
-  const notice = await getNotice();
+  const [notice, sources] = await Promise.all([getNotice(), getSources()]);
   return (
     <article className="mx-auto max-w-3xl px-4 py-16 sm:px-6">
       <div className="eyebrow mb-3">Trust</div>
@@ -128,6 +140,39 @@ export default async function TrustPage() {
             "Sell your data, or use your resume to train AI models.",
           ]}
         />
+      </Section>
+
+      <Section id="sources" title="Where jobs come from">
+        <p>Every source, its terms and how often we ask it. Job boards that forbid automation are listed too, as never used.</p>
+        {sources ? (
+          <div className="card overflow-hidden">
+            <table className="w-full text-left text-[13.5px]">
+              <caption className="sr-only">Job sources</caption>
+              <thead className="border-b border-border bg-elevated text-[12.5px] text-text-3">
+                <tr>
+                  <th scope="col" className="px-4 py-2.5 font-medium">Source</th>
+                  <th scope="col" className="px-4 py-2.5 font-medium">Terms and limits</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-border">
+                {sources.map((r) => (
+                  <tr key={r.id} className="align-top">
+                    <th scope="row" className="px-4 py-3 font-medium text-text">
+                      {r.id.replace(/_/g, " ")}
+                      <span className="mt-0.5 block text-[12px] font-normal text-text-3">{r.enabled ? r.kind.replace(/_/g, " ") : "never used"}</span>
+                    </th>
+                    <td className="px-4 py-3">
+                      {r.tos_notes}
+                      {r.enabled && r.rate_limit_per_min > 0 && <span className="block text-[12px] text-text-3">Up to {r.rate_limit_per_min} request(s) a minute</span>}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        ) : (
+          <p>Company career boards (Greenhouse, Lever, Ashby), company careers pages, public job APIs and links you add yourself.</p>
+        )}
       </Section>
 
       <Section id="data" title="Data we store">

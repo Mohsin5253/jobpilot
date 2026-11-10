@@ -77,6 +77,7 @@ class User(Base):
     adult_confirmed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))  # age gate: said they're 18+
     inactivity_notice_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))  # warned before the 12-month deletion
     daily_send_cap: Mapped[int] = mapped_column(Integer, default=5, server_default="5")  # quality quota, up to the plan max
+    inbound_token: Mapped[str | None] = mapped_column(String(24), unique=True)  # alerts+<token>@INBOUND_EMAIL_DOMAIN
 
     profile: Mapped["Profile | None"] = relationship(back_populates="user", uselist=False)
 
@@ -474,6 +475,20 @@ class CompanyContact(Base):
     sources: Mapped[list[dict[str, Any]]] = mapped_column(JSONB, default=list)  # [{uri, last_seen_on}]
     linkedin: Mapped[str | None] = mapped_column(String(300))
     fetched_at: Mapped[datetime] = _now_col()
+
+
+class SourceRegistry(Base):
+    """Every place jobs can come from, with its terms-of-service notes and rate limit. `enabled=false` rows
+    document what we never automate (LinkedIn, Internshala, Naukri, Unstop, ...). Admins can switch a source off."""
+
+    __tablename__ = "sources"
+
+    id: Mapped[str] = mapped_column(String(40), primary_key=True)
+    kind: Mapped[str] = mapped_column(String(30))  # ats_api | career_page | github_repo | public_api | licensed_api | deep_link | user_forwarded | user_pasted | blocked
+    base_url: Mapped[str] = mapped_column(String(300), default="", server_default="")
+    tos_notes: Mapped[str] = mapped_column(Text, default="", server_default="")
+    rate_limit_per_min: Mapped[int] = mapped_column(Integer, default=1, server_default="1")
+    enabled: Mapped[bool] = mapped_column(Boolean, default=True, server_default="true")
 
 
 class SourceTarget(Base):

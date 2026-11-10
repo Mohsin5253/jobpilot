@@ -1,5 +1,6 @@
 "use client";
 
+import { useQuery } from "@tanstack/react-query";
 import { ArrowUpRight, LayoutGrid, List, Search, SlidersHorizontal } from "lucide-react";
 import Link from "next/link";
 import { useEffect, useState, type ReactNode } from "react";
@@ -10,6 +11,7 @@ import { RunButton } from "@/components/shell";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Input, Switch } from "@/components/ui/input";
+import { api } from "@/lib/api";
 import { EmptyState, PageHeader, Segmented, Skeleton } from "@/components/ui/misc";
 import { Sheet, SheetContent } from "@/components/ui/sheet";
 import { StatusDot } from "@/components/ui/status-dot";
@@ -163,6 +165,7 @@ export default function JobsPage() {
         </aside>
 
         <div className="min-w-0 space-y-4">
+          <GovPortals />
           <div className="flex flex-wrap items-center gap-2">
             <div className="relative min-w-0 flex-1 basis-56">
               <Search className="pointer-events-none absolute top-1/2 left-3 size-4 -translate-y-1/2 text-text-3" aria-hidden />
@@ -242,5 +245,28 @@ export default function JobsPage() {
         </SheetContent>
       </Sheet>
     </div>
+  );
+}
+
+
+/** Official government internship portals: linked, never fetched. */
+function GovPortals() {
+  const { data } = useQuery({ queryKey: ["gov-portals"], queryFn: () => api.get<{ name: string; url: string; note: string }[]>("/sources/gov-portals"), staleTime: 3600_000 });
+  if (!data?.length) return null;
+  return (
+    <details className="card px-4 py-3 text-[13px] [&_summary::-webkit-details-marker]:hidden">
+      <summary className="cursor-pointer list-none font-medium">Government internships: apply on the official portals</summary>
+      <ul className="mt-2 space-y-1.5">
+        {data.map((g) => (
+          <li key={g.url}>
+            <a href={g.url} target="_blank" rel="noopener noreferrer" className="text-cobalt-text hover:underline">
+              {g.name}
+            </a>{" "}
+            <span className="text-text-3">· {g.note}</span>
+          </li>
+        ))}
+      </ul>
+      <p className="mt-2 text-[12px] text-text-3">Government schemes never charge a fee. Anyone asking for one is a scammer.</p>
+    </details>
   );
 }

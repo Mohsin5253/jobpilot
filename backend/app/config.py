@@ -120,6 +120,11 @@ class Settings(BaseSettings):
     demo_source: bool = False  # bundled sample postings (fictional companies) for offline demos / tests
     seed_company_boards: bool = True  # new accounts start with a curated list of real company boards
     public_feeds_enabled: bool = True  # The Muse / Remotive / Jobicy (no key needed)
+    # Community internship lists on GitHub (public JSON). Comma-separated; empty turns the source off.
+    github_listings_urls: Annotated[list[str], NoDecode] = ["https://raw.githubusercontent.com/SimplifyJobs/Summer2026-Internships/dev/.github/scripts/listings.json"]
+    # Forwarded job-alert emails: an inbound-mail provider posts them to /api/inbound/email?secret=...
+    inbound_email_domain: str | None = None  # e.g. alerts.yourdomain.in -> alerts+<token>@alerts.yourdomain.in
+    inbound_email_secret: str | None = None
     source_timeout_s: float = 20.0
     source_cache_s: float = 90.0  # every user polling the same board within this window shares one fetch
 
@@ -173,7 +178,7 @@ class Settings(BaseSettings):
                 return "postgresql+psycopg://" + v[len(prefix) :]
         return v
 
-    @field_validator("cors_origins", "admin_emails", mode="before")
+    @field_validator("cors_origins", "admin_emails", "github_listings_urls", mode="before")
     @classmethod
     def _split_origins(cls, v):
         if isinstance(v, str) and not v.startswith("["):

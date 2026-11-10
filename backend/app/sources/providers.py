@@ -559,8 +559,12 @@ class DemoSource:
         ]
 
 
+from app.sources.india import CareerPageSource, GitHubListingsSource  # noqa: E402
+
 ALL_SOURCES = [
     JSearchSource(),
+    CareerPageSource(),
+    GitHubListingsSource(),
     GreenhouseSource(),
     LeverSource(),
     AshbySource(),

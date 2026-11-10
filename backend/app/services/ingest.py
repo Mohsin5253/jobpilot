@@ -37,7 +37,7 @@ from app.sources.base import USER_AGENT, Posting, is_relevant
 from app.sources.providers import ALL_SOURCES
 
 SOURCES = {s.name: s for s in ALL_SOURCES}
-BOARD_FIELDS = {"greenhouse": "greenhouse_boards", "lever": "lever_boards", "ashby": "ashby_boards"}
+BOARD_FIELDS = {"greenhouse": "greenhouse_boards", "lever": "lever_boards", "ashby": "ashby_boards", "career_page": "career_pages"}
 FEED = "feed"  # the single target of a public feed
 BUDGET = "*"  # a quota source's budget clock
 LEASE = timedelta(minutes=5)  # a crashed worker's claimed targets come back after this
@@ -59,7 +59,8 @@ def wanted_targets(prefs: Preferences, skills: list[str] | None) -> list[tuple[s
         if not src.enabled(prefs):
             continue
         if src.name in BOARD_FIELDS:
-            out += [(src.name, t.strip().lower()) for t in getattr(prefs, BOARD_FIELDS[src.name]) if t.strip()]
+            # Board tokens are case-insensitive; career-page URLs keep their case (paths can be case-sensitive).
+            out += [(src.name, t.strip() if src.name == "career_page" else t.strip().lower()) for t in getattr(prefs, BOARD_FIELDS[src.name]) if t.strip()]
         elif hasattr(src, "queries"):
             out += [(src.name, q) for q in src.queries(prefs, skills)]
         else:
@@ -214,8 +215,25 @@ class IngestResult:
     dead: int = 0
 
 
+_disabled: tuple[float, set[str]] = (0.0, set())
+
+
+async def disabled_sources() -> set[str]:
+    """Sources an admin switched off in the registry (cached for a minute)."""
+    global _disabled
+    if _disabled[0] < time.monotonic():
+        from app.models import SourceRegistry
+
+        async with session_scope() as s:
+            rows = (await s.execute(select(SourceRegistry.id).where(SourceRegistry.enabled.is_(False)))).scalars().all()
+        _disabled = (time.monotonic() + 60, set(rows))
+    return _disabled[1]
+
+
 async def _fetch_one(client: httpx.AsyncClient, c: Claimed, now: datetime) -> tuple[list[Posting], int, int]:
     src = SOURCES[c.source]
+    if c.source in await disabled_sources():
+        return [], 0, 0
     prefs = Preferences.model_validate(c.fetch_prefs or {})
     if c.source in BOARD_FIELDS:
         prefs = prefs.model_copy(update={BOARD_FIELDS[c.source]: [c.target]})

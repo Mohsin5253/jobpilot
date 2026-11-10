@@ -155,6 +155,17 @@ replicas is safe, with no Redis needed.
 - **JWT_SECRET**: changing it signs everyone out (harmless).
 - **ENCRYPTION_KEY**: don't, unless it leaked. Users then reconnect their mail in Settings.
 
+## Forwarded job-alert emails (optional)
+
+Students forward Internshala, Unstop or Naukri alert emails to `alerts+<token>@<INBOUND_EMAIL_DOMAIN>`; JobPilot keeps
+the job links (it never opens those sites). Any inbound-mail service that POSTs the message as JSON or form data works
+(Postmark Inbound, SendGrid Inbound Parse, Mailgun Routes, Cloudflare Email Workers):
+
+1. Point the domain's MX records at the provider and route `alerts+*@` to
+   `https://<api>/api/inbound/email?secret=<INBOUND_EMAIL_SECRET>`.
+2. Set `INBOUND_EMAIL_DOMAIN` and a random `INBOUND_EMAIL_SECRET` in the Render group. Settings then shows each student
+   their address.
+
 ## Proof Link signing key (optional)
 
 Proof Links are signed with Ed25519. Without `PROOF_SIGNING_KEY` the key is derived from `ENCRYPTION_KEY`, which is

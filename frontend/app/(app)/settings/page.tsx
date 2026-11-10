@@ -3,7 +3,9 @@
 import { Building2, CalendarClock, FileText, GraduationCap, Search, Sparkles, Telescope } from "lucide-react";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Suspense, useEffect, useState } from "react";
+import { toast } from "sonner";
 
 import { ConsentCard, DataCard, QuotaCard, RightsCard, ExtensionCard, MailCard, PlanCard, SecurityCard, WhatsAppCard } from "@/components/account-settings";
 import { ResumeDropzone } from "@/components/resume-dropzone";
@@ -14,6 +16,7 @@ import { Card, CardHeader } from "@/components/ui/card";
 import { Field, Input, Switch } from "@/components/ui/input";
 import { PageHeader, Skeleton } from "@/components/ui/misc";
 import { TagInput } from "@/components/ui/tag-input";
+import { api } from "@/lib/api";
 import { isActive, useConfig, useOverview, useProfile, useResearch, useResearchNow, useSaveProfile } from "@/lib/queries";
 import { ago } from "@/lib/utils";
 import type { Preferences } from "@/lib/types";
@@ -262,10 +265,14 @@ function PreferencesCard() {
           <Field label="Ashby boards" hint={<>jobs.ashbyhq.com/<b>company</b></>}>
             <TagInput value={prefs.ashby_boards} onChange={(v) => set("ashby_boards", v)} placeholder="company" />
           </Field>
+          <Field label="Company careers pages" hint="We read only the job data a page publishes for search engines, follow its robots.txt, and check at most hourly.">
+            <TagInput value={prefs.career_pages ?? []} onChange={(v) => set("career_pages", v)} placeholder="https://company.com/careers" />
+          </Field>
+          <AddLink />
           <div className="flex items-center justify-between rounded-[var(--radius-card)] border border-border px-4 py-3">
             <div>
               <div className="text-[13.5px] font-medium">Public job feeds</div>
-              <div className="text-[12px] text-subtle">The Muse, Remotive and Jobicy — no key needed, credited with links back</div>
+              <div className="text-[12px] text-subtle">The Muse, Remotive, Jobicy and community internship lists on GitHub — no key needed, credited with links back</div>
             </div>
             <Switch checked={prefs.public_job_feeds} onChange={(v) => set("public_job_feeds", v)} label="Public job feeds" />
           </div>
@@ -339,6 +346,48 @@ export default function SettingsPage() {
         </div>
         <PreferencesCard />
       </div>
+    </div>
+  );
+}
+
+
+/** Paste any job link; and forward job-board alert emails to a private address. Job boards are never opened by us. */
+function AddLink() {
+  const [url, setUrl] = useState("");
+  const [busy, setBusy] = useState(false);
+  const { data: inbound } = useQuery({ queryKey: ["inbound-address"], queryFn: () => api.get<{ available: boolean; address: string | null }>("/sources/inbound-address") });
+  const qc = useQueryClient();
+  const add = async () => {
+    setBusy(true);
+    try {
+      const r = await api.post<{ detail: string }>("/sources/link", { url });
+      toast.success(r.detail);
+      setUrl("");
+      qc.invalidateQueries();
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Couldn’t add that link");
+    } finally {
+      setBusy(false);
+    }
+  };
+  return (
+    <div className="space-y-3 rounded-[var(--radius-card)] border border-border px-4 py-3">
+      <div className="text-[13.5px] font-medium">Add a job or careers link</div>
+      <div className="flex gap-2">
+        <Input value={url} onChange={(e) => setUrl(e.target.value)} placeholder="Paste a job, board or careers page link" inputMode="url" className="flex-1" />
+        <Button onClick={add} loading={busy} disabled={url.trim().length < 8}>
+          Add
+        </Button>
+      </div>
+      <p className="text-[12px] text-subtle">
+        Greenhouse, Lever and Ashby links add the company’s board. LinkedIn, Internshala, Naukri and Unstop links are saved as links you open yourself: JobPilot never
+        logs in to or automates those sites.
+      </p>
+      {inbound?.available && inbound.address && (
+        <p className="text-[12.5px] text-muted">
+          Forward your Internshala, Unstop or Naukri alert emails to <b className="font-mono text-fg">{inbound.address}</b> and the links land in your matches.
+        </p>
+      )}
     </div>
   );
 }
