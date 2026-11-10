@@ -58,9 +58,20 @@ async def start_pro(s: AsyncSession, user: User) -> str:
     if not settings.razorpay_pro_plan_id:
         raise PaymentsOff("The Pro plan isn't configured yet")
     sub = await _call("POST", "/subscriptions", {"plan_id": settings.razorpay_pro_plan_id, "total_count": 120, "customer_notify": 1, "notes": {"user_id": str(user.id)}})
+    # The student isn't "subscribed" until Razorpay confirms the mandate (subscription.activated / .charged).
     s.add(Payment(user_id=user.id, plan="pro_monthly", amount_inr=settings.price_pro_inr, razorpay_ref=sub["id"]))
-    user.razorpay_subscription_id = sub["id"]
     return sub["short_url"]
+
+
+async def _subscriber(s: AsyncSession, sub_id: str | None) -> User | None:
+    """The student a subscription belongs to: from an activated one, or from the checkout that created it."""
+    if not sub_id:
+        return None
+    user = (await s.execute(select(User).where(User.razorpay_subscription_id == sub_id))).scalar_one_or_none()
+    if user is None:
+        uid = (await s.execute(select(Payment.user_id).where(Payment.razorpay_ref == sub_id, Payment.plan == "pro_monthly").limit(1))).scalar_one_or_none()
+        user = await s.get(User, uid) if uid else None
+    return user
 
 
 async def payment_link(s: AsyncSession, user: User, plan: str, amount: int, description: str) -> str:
@@ -190,9 +201,10 @@ async def handle_webhook(event: dict, event_id: str) -> str:
         if name in ("subscription.activated", "subscription.charged"):
             sub = payload.get("subscription", {}).get("entity", {})
             pay = payload.get("payment", {}).get("entity", {})
-            user = (await s.execute(select(User).where(User.razorpay_subscription_id == sub.get("id")))).scalar_one_or_none()
+            user = await _subscriber(s, sub.get("id"))
             if user is None:
                 return "unknown"
+            user.razorpay_subscription_id = sub["id"]
             end = datetime.fromtimestamp(sub["current_end"], UTC) if sub.get("current_end") else now + timedelta(days=31)
             _grant(user, end)
             if name == "subscription.charged" and pay.get("id"):
@@ -205,8 +217,8 @@ async def handle_webhook(event: dict, event_id: str) -> str:
             return "pro_active"
         if name in ("subscription.cancelled", "subscription.halted", "subscription.completed"):
             sub = payload.get("subscription", {}).get("entity", {})
-            user = (await s.execute(select(User).where(User.razorpay_subscription_id == sub.get("id")))).scalar_one_or_none()
-            if user:
+            user = await _subscriber(s, sub.get("id"))
+            if user and user.razorpay_subscription_id == sub.get("id"):
                 user.razorpay_subscription_id = None  # Pro lasts until plan_expires_at
             return "pro_ending"
         if name == "payment.failed":

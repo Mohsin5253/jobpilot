@@ -69,6 +69,7 @@ async def test_pro_subscription_cancel_in_two_clicks_and_expiry(authed, client, 
     respx.post(f"{pay.API}/subscriptions").mock(return_value=httpx.Response(200, json={"id": "sub_1", "short_url": "https://rzp.io/i/sub"}))
     cancel = respx.post(f"{pay.API}/subscriptions/sub_1/cancel").mock(return_value=httpx.Response(200, json={"id": "sub_1"}))
     assert (await authed.post("/api/payments/checkout/pro_monthly")).json()["url"] == "https://rzp.io/i/sub"
+    assert (await authed.get("/api/payments/config")).json()["subscribed"] is False  # not until Razorpay confirms
     end = int((datetime.now(UTC) + timedelta(days=30)).timestamp())
     body, headers = _signed({"event": "subscription.charged", "payload": {"subscription": {"entity": {"id": "sub_1", "current_end": end}}, "payment": {"entity": {"id": "pay_s1"}}}})
     assert (await client.post("/api/payments/webhook", content=body, headers=headers)).json()["result"] == "pro_active"
@@ -137,3 +138,9 @@ async def test_upi_qr_payment_for_week_pass_and_pro_month(authed, client, razorp
         u = (await s.execute(select(User))).scalar_one()
         assert timedelta(days=36) < u.plan_expires_at - datetime.now(UTC) <= timedelta(days=37)  # 7 + 30 days, stacked
     assert (await authed.post("/api/payments/qr/lifetime")).status_code == 404
+
+
+async def test_admins_always_have_pro(authed):
+    async with session_scope() as s:
+        await s.execute(update(User).values(is_admin=True, plan="free"))
+    assert (await authed.get("/api/auth/me")).json()["plan"] == "pro"

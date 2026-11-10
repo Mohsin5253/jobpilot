@@ -182,10 +182,13 @@ async def test_admin_metrics_and_plan_switch(authed, client, monkeypatch):
     monkeypatch.setattr(settings, "admin_emails", ["aarav@example.com"])
     m = (await authed.get("/api/admin/metrics")).json()
     assert m["users"]["total"] == 1 and "sources" in m and "llm" in m
-    await authed.post("/api/account/pro-interest")
-    assert (await authed.get("/api/admin/metrics")).json()["pro_requests"][0]["email"] == "aarav@example.com"
-    r = await authed.post("/api/admin/plan", json={"email": "aarav@example.com", "plan": "pro"})
-    assert r.json()["plan"] == "pro" and (await authed.get("/api/usage")).json()["limits"]["drafts_per_day"] == 50
+    assert (await authed.get("/api/usage")).json()["limits"]["drafts_per_day"] == 50  # admins always have Pro
+    reg = await client.post("/api/auth/register", json={"consent": True, "adult": True, "email": "neha@example.com", "password": "password123"})
+    neha = {"authorization": f"Bearer {reg.json()['access_token']}"}
+    await client.post("/api/account/pro-interest", headers=neha)
+    assert (await authed.get("/api/admin/metrics")).json()["pro_requests"][0]["email"] == "neha@example.com"
+    r = await authed.post("/api/admin/plan", json={"email": "neha@example.com", "plan": "pro"})
+    assert r.json()["plan"] == "pro" and (await client.get("/api/usage", headers=neha)).json()["limits"]["drafts_per_day"] == 50
 
 
 def test_production_refuses_unsafe_defaults():

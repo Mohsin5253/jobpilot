@@ -22,6 +22,12 @@ async def current_user(request: Request, session: SessionDep) -> User:
     # A changed password or "sign out everywhere" bumps token_version, which ends every older session.
     if user is None or decoded[1] != user.token_version or (user.expires_at and user.expires_at < now):
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Not authenticated", headers={"WWW-Authenticate": "Bearer"})
+    # Admins always have Pro (they run the service and test every feature).
+    from app.config import settings
+
+    if user.plan != "pro" and (user.is_admin or user.email.lower() in {e.lower() for e in settings.admin_emails}):
+        user.plan = "pro"
+        await session.commit()
     # Active users drive what the shared ingester fetches; recorded at most hourly to keep reads read-only.
     if not user.last_seen_at or now - user.last_seen_at > timedelta(hours=1):
         user.last_seen_at = now
