@@ -56,6 +56,11 @@ and LinkedIn note, and tracks everything you've applied to. **Nothing is sent un
   server-side and reset at midnight IST; a 0-100 send-worthiness score (fit, verification, ghost score,
   completeness) on every draft; an audit event for every approve / reject / send with its channel; a Monday report
   "we skipped N weak or risky matches for you" by email and WhatsApp
+- **Signed Proof Links**: every approved application (with a published proof page) gets `/p/{slug}/{token}`: verified
+  GitHub ownership, Codeforces rating, projects, certificates, "Human-approved by the student on …", applications
+  sent that week and the claim-provenance badge. The payload is Ed25519-signed; recruiters check it at
+  `/api/v1/verify/{token}` (public key at `/api/v1/verify/public-key`). Tampered tokens fail, students can revoke a
+  link, and opens are logged server-side (no pixels), shown in the Tracker and notified once
 - **Gmail via Google sign-in**: send-only access (`gmail.send`), refresh token encrypted, sends spaced 90 s apart,
   an opt-out line on every application; app passwords remain for other providers
 - **Production basics**: per-user mailboxes (encrypted), Free / Pro plan limits and a daily AI budget per user,
@@ -280,6 +285,7 @@ Render (API, workers, Postgres) + Vercel (web). Step-by-step, with every environ
 | `INACTIVE_DELETE_DAYS` / `INACTIVE_NOTICE_DAYS` | 365 / 30 | Delete unused accounts after a year, with a notice a month before |
 | `SCAM_FETCH_URLS` / `SCAM_RDAP_ENABLED` | `true` | Scam Shield fetches pasted links (public hosts only) and looks up domain age over RDAP |
 | `SCAM_LLM_DAILY_CAP` | 300 | AI second opinions per day across all anonymous scam checks |
+| `PROOF_SIGNING_KEY` | derived from `ENCRYPTION_KEY` | Ed25519 seed (32 bytes, base64url) that signs Proof Links |
 | `USD_INR_RATE` | 88.0 | Rupees per US dollar, used to show AI cost (billed in USD) in ₹ on the landing page |
 
 Web (Vercel) variables, all optional except `API_URL`: `API_URL` (the API origin), `NEXT_PUBLIC_SITE_URL` (canonical

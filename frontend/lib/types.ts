@@ -155,6 +155,8 @@ export interface Match {
   pending_draft: boolean;
   approved_draft: boolean;
   sent_draft: boolean;
+  proof_views?: number;
+  proof_last_viewed_at?: string | null;
 }
 
 export type Outcome = "none" | "no_reply" | "replied" | "interview" | "offer" | "rejected";
@@ -441,3 +443,5 @@ export interface RightsState { self_service: Record<string, string>; sla_days: n
 export interface WhatsAppState { available: boolean; number: string | null; hour: number; enabled: boolean; last_sent_at: string | null }
 
 export interface ExtensionToken { id: string; name: string; prefix: string; created_at: string; last_used_at: string | null }
+
+export interface MyProofLink { id: string; url: string; company: string; role: string; approved_at: string; views: number; last_viewed_at: string | null; revoked_at: string | null }

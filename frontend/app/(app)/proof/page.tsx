@@ -10,6 +10,8 @@ import { Card, CardHeader } from "@/components/ui/card";
 import { Field, Input, Switch } from "@/components/ui/input";
 import { EmptyState, PageHeader, Skeleton } from "@/components/ui/misc";
 import {
+  useProofLinks,
+  useRevokeProofLink,
   useAddEvidenceItem,
   useEvidence,
   useLinkCodeforces,
@@ -52,6 +54,8 @@ export default function ProofPage() {
         title="Your proof pack"
         description="Recruiters now see about 244 applications per role (Greenhouse, 2026). Evidence they can click stands out, and it’s linked in every application JobPilot drafts for you."
       />
+
+      <ProofLinksCard />
 
       <div className="grid gap-6 xl:grid-cols-[1fr_1.15fr] [&>*]:min-w-0">
         <div className="space-y-6">
@@ -190,5 +194,42 @@ export default function ProofPage() {
         </div>
       </div>
     </div>
+  );
+}
+
+
+/** One signed link per approved application: who opened it, and a way to withdraw it. */
+function ProofLinksCard() {
+  const { data } = useProofLinks();
+  const revoke = useRevokeProofLink();
+  if (!data?.length) return null;
+  return (
+    <Card>
+      <CardHeader icon={<Link2 className="size-4" />} title="Proof Links in your applications" description="Each approved application carries its own signed link. Opens are counted on our server; no tracking pixels." />
+      <ul className="divide-y divide-border">
+        {data.map((l) => (
+          <li key={l.id} className="flex flex-wrap items-center justify-between gap-3 px-5 py-3">
+            <div className="min-w-0">
+              <div className="truncate text-[13.5px] font-medium">
+                {l.company} · {l.role}
+              </div>
+              <div className="text-[12px] text-subtle">
+                {l.revoked_at ? "Revoked" : l.views ? `Opened ${l.views}× · last ${new Date(l.last_viewed_at ?? "").toLocaleDateString("en-IN")}` : "Not opened yet"}
+              </div>
+            </div>
+            {!l.revoked_at && (
+              <div className="flex gap-2">
+                <Button size="sm" variant="ghost" onClick={() => navigator.clipboard.writeText(l.url).then(() => toast.success("Link copied"))}>
+                  <Copy /> Copy
+                </Button>
+                <Button size="sm" variant="danger" onClick={() => revoke.mutate(l.id)}>
+                  Revoke
+                </Button>
+              </div>
+            )}
+          </li>
+        ))}
+      </ul>
+    </Card>
   );
 }

@@ -66,6 +66,8 @@ class Settings(BaseSettings):
     # Quality gate: at most this many tailored applications a week (per-user preference, capped by plan).
     default_weekly_application_cap: int = 10
 
+    # Ed25519 seed (32 bytes, base64url) that signs Proof Links. Optional: derived from ENCRYPTION_KEY when unset.
+    proof_signing_key: str | None = None
     # Gmail sending through Google OAuth (scope gmail.send only). Off until both are set; the redirect URI to register
     # in Google Cloud is {APP_URL}/api/mail/google/callback.
     google_client_id: str | None = None

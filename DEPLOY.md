@@ -155,6 +155,17 @@ replicas is safe, with no Redis needed.
 - **JWT_SECRET**: changing it signs everyone out (harmless).
 - **ENCRYPTION_KEY**: don't, unless it leaked. Users then reconnect their mail in Settings.
 
+## Proof Link signing key (optional)
+
+Proof Links are signed with Ed25519. Without `PROOF_SIGNING_KEY` the key is derived from `ENCRYPTION_KEY`, which is
+already stable, so links keep verifying across deploys. To use a dedicated key, generate one and set it on Render:
+
+```bash
+python3 -c "import os,base64; print(base64.urlsafe_b64encode(os.urandom(32)).decode().rstrip('='))"
+```
+
+Changing the key later makes earlier links fail verification, so set it once.
+
 ## Privacy operations (DPDP)
 
 - **Rights requests and grievances** arrive in `/admin` → Privacy requests, with the 30-day reply date. Answering one

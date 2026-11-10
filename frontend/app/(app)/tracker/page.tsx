@@ -1,7 +1,7 @@
 "use client";
 
 import { DndContext, DragOverlay, KeyboardSensor, PointerSensor, useDraggable, useDroppable, useSensor, useSensors, type DragEndEvent } from "@dnd-kit/core";
-import { ArrowRightLeft, BellRing, GripVertical, KanbanSquare, Table2 } from "lucide-react";
+import { ArrowRightLeft, BellRing, GripVertical, KanbanSquare, Table2, Eye } from "lucide-react";
 import { motion, useReducedMotion } from "motion/react";
 import Link from "next/link";
 import { useMemo, useState } from "react";
@@ -105,6 +105,11 @@ function CardBody({ m, dragging }: { m: Match; dragging?: boolean }) {
           {m.sent_draft && <AgentAvatar agent="dispatch" size={20} decorative />}
           <span className="truncate">{m.applied_at ? `${m.sent_draft ? "Sent" : "Applied"} ${ago(m.applied_at)}` : `Found ${ago(m.created_at)}`}</span>
         </span>
+        {!!m.proof_views && (
+          <span className="inline-flex shrink-0 items-center gap-1 text-done" title={m.proof_last_viewed_at ? `Last opened ${ago(m.proof_last_viewed_at)}` : undefined}>
+            <Eye className="size-3" /> Opened {m.proof_views}×
+          </span>
+        )}
         {due && (
           <span className="inline-flex shrink-0 items-center gap-1 font-medium text-your-turn">
             <BellRing className="size-3" /> Follow up

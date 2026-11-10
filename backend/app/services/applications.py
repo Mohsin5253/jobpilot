@@ -1,5 +1,6 @@
 """Sending an approved application email, with the tailored resume attached."""
 
+import re
 import uuid
 from datetime import UTC, datetime
 
@@ -7,9 +8,9 @@ from sqlalchemy import select
 from sqlalchemy.orm import selectinload
 
 from app.db import session_scope
-from app.models import ApprovalEvent, DraftStatus, JobMatch, OutreachDraft, Profile
+from app.models import ApprovalEvent, DraftStatus, JobMatch, OutreachDraft, Profile, ProofLink
 from app.schemas import ResumeData
-from app.services import resume_doc
+from app.services import proof_links, resume_doc
 from app.services.mailer import send_as_user
 
 
@@ -30,6 +31,13 @@ async def send_application(draft_id: uuid.UUID, wait: bool = False, channel: str
             await s.execute(select(JobMatch).where(JobMatch.id == draft.match_id).options(selectinload(JobMatch.tailored)))
         ).scalar_one()
         profile = (await s.execute(select(Profile).where(Profile.user_id == draft.user_id))).scalar_one()
+    async with session_scope() as s:
+        link = (await s.execute(select(ProofLink).where(ProofLink.application_id == draft_id, ProofLink.revoked_at.is_(None)))).scalar_one_or_none()
+    body = draft.email_body
+    if link:
+        signed = proof_links.url_for(link)
+        generic = f"/p/{link.slug}"
+        body = re.sub(re.escape(generic) + r"(?![/\w-])", f"/p/{link.slug}/{link.token}", body) if generic in body else f"{body.rstrip()}\n\nProof of my work (verified): {signed}"
     if match.job.legit_status == "suspicious":  # defence in depth: the routes refuse these first
         raise PermissionError("This posting was flagged as a likely scam and can't be sent")
     resume = ResumeData.model_validate(profile.resume or {})
@@ -38,7 +46,7 @@ async def send_application(draft_id: uuid.UUID, wait: bool = False, channel: str
         draft.user_id,
         draft.to_email or match.job.recruiter_email or "",
         draft.subject,
-        with_opt_out(draft.email_body),
+        with_opt_out(body),
         wait=wait,
         reply_to=resume.email or None,
         attachments=[(resume_doc.filename(doc, "pdf"), resume_doc.render_pdf(doc), "application/pdf")],

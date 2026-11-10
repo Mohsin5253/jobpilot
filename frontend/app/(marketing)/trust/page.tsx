@@ -139,6 +139,7 @@ export default async function TrustPage() {
             "Your mailbox connection, if you add one: for Gmail, a Google token that can only send email; for other providers, an app password. Either is encrypted with a key kept outside the database, and used only to send what you approve, at least 90 seconds apart.",
             "Your consents: each purpose you agreed to, when, and which version of the notice you saw.",
             "Run traces and AI usage records: which agent ran, how long it took, tokens and cost.",
+            "Proof Link opens: the time and browser family only (for example “chrome-mobile”), counted on our server. No IP addresses, cookies or tracking pixels.",
           ]}
         />
         <p>

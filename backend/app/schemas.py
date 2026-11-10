@@ -321,6 +321,8 @@ class MatchOut(BaseModel):
     pending_draft: bool = False
     approved_draft: bool = False
     sent_draft: bool = False
+    proof_views: int = 0  # opens of this application's signed Proof Link
+    proof_last_viewed_at: datetime | None = None
 
 
 class MatchDetail(MatchOut):

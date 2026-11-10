@@ -134,7 +134,7 @@ def public_view(evidence: dict, resume_name: str, headline: str) -> dict:
     return {
         "name": resume_name,
         "headline": headline,
-        "github": {k: gh[k] for k in ("username", "url", "public_repos", "stars", "active_repos_90d", "languages", "top_repos", "since")} | {"verified": bool(gh.get("verified"))} if gh else None,
+        "github": {k: gh.get(k) for k in ("username", "url", "public_repos", "stars", "active_repos_90d", "languages", "top_repos", "since")} | {"verified": bool(gh.get("verified"))} if gh else None,
         "codeforces": evidence.get("codeforces"),
         "items": [i for i in evidence.get("items", []) if i.get("live") is not False],
         "skills": evidenced_skills(evidence),

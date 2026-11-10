@@ -122,6 +122,10 @@ async def approve(session, user: User, d: OutreachDraft, m: JobMatch, j: Job, ch
     d.status, d.decided_at, d.approval_channel = DraftStatus.approved, datetime.now(UTC), channel
     apply_stage(m, Stage.applied)
     await quota.record(session, d.id, user.id, "approve", channel, request)
+    await session.flush()
+    from app.services.proof_links import create_for
+
+    await create_for(session, user, d, m, j)  # the signed Proof Link for this application (if the proof page is published)
     await _maybe_resume(session, d)
 
 

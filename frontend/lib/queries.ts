@@ -31,6 +31,7 @@ import type {
   Campus,
   CollegeDashboard,
   ConsentState,
+  MyProofLink,
   QuotaState,
   RightsRequest,
   RightsState,
@@ -470,6 +471,9 @@ export const useCollege = () => useQuery({ queryKey: ["college"], queryFn: () =>
 export const useConsents = () => useQuery({ queryKey: ["consents"], queryFn: () => api.get<ConsentState>("/consents") });
 export const useSetConsent = () =>
   useAct((b: { purpose: string; granted: boolean }) => api.put<ConsentState>(`/consents/${b.purpose}`, { granted: b.granted }), ["consents", "evidence", "whatsapp", "campus"]);
+
+export const useProofLinks = () => useQuery({ queryKey: ["proof-links"], queryFn: () => api.get<MyProofLink[]>("/proof-links") });
+export const useRevokeProofLink = () => useAct((id: string) => api.post<MyProofLink>(`/proof-links/${id}/revoke`), ["proof-links", "matches"], "Link revoked. It no longer opens.");
 
 export const useQuota = () => useQuery({ queryKey: ["quota"], queryFn: () => api.get<QuotaState>("/quota") });
 export const useSetQuota = () => useAct((b: { cap: number }) => api.put<QuotaState>("/quota", b), ["quota"], (q) => `Up to ${q.cap} approved sends a day`);

@@ -8,7 +8,7 @@ from sqlalchemy.orm import selectinload
 
 from app.api.deps import SessionDep, UserDep
 from app.config import settings
-from app.models import CompanyContact, DraftStatus, Job, JobMatch, OutreachDraft, Profile, Stage, TailoredResume
+from app.models import CompanyContact, DraftStatus, Job, JobMatch, OutreachDraft, Profile, ProofLink, Stage, TailoredResume
 from app.llm import CallContext
 from app.schemas import BulletDecision, ContactOut, ContactsOut, DraftOut, JobOut, MatchDetail, MatchOut, MatchPage, MatchUpdate, ResumeData, RunOut, TailoredOut
 from app.services.contacts import find_contacts, rank
@@ -20,7 +20,7 @@ router = APIRouter(prefix="/matches", tags=["matches"])
 ACTIVE_STAGES = (Stage.applied, Stage.interview, Stage.offer)
 
 
-DRAFT_FLAGS = ("has_tailored", "pending_draft", "approved_draft", "sent_draft")
+DRAFT_FLAGS = ("has_tailored", "pending_draft", "approved_draft", "sent_draft", "proof_views", "proof_last_viewed_at")
 
 
 def to_out(m: JobMatch, has_tailored: bool = False, pending_draft: bool = False, approved_draft: bool = False, sent_draft: bool = False) -> MatchOut:
@@ -94,7 +94,23 @@ async def list_matches(
         "posted": Job.posted_at.desc().nulls_last(),
     }[sort]
     rows = (await session.execute(base.order_by(order, JobMatch.id).limit(limit).offset(offset))).all()
-    return MatchPage(items=[to_out(m, ht, pd, ad, sd) for m, ht, pd, ad, sd in rows], total=total)
+    items = [to_out(m, ht, pd, ad, sd) for m, ht, pd, ad, sd in rows]
+    # Tracker: how often each application's Proof Link was opened (server-side view log).
+    opens = {
+        mid: (views, last)
+        for mid, views, last in (
+            await session.execute(
+                select(OutreachDraft.match_id, func.sum(ProofLink.views_count), func.max(ProofLink.last_viewed_at))
+                .join(ProofLink, ProofLink.application_id == OutreachDraft.id)
+                .where(OutreachDraft.match_id.in_([i.id for i in items]))
+                .group_by(OutreachDraft.match_id)
+            )
+        ).all()
+    }
+    for i in items:
+        if i.id in opens:
+            i.proof_views, i.proof_last_viewed_at = int(opens[i.id][0] or 0), opens[i.id][1]
+    return MatchPage(items=items, total=total)
 
 
 @router.get("/{match_id}", response_model=MatchDetail)

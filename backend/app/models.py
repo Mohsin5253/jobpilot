@@ -280,6 +280,34 @@ class OutreachDraft(Base):
     contact: Mapped["CompanyContact | None"] = relationship(lazy="joined")
 
 
+class ProofLink(Base):
+    """A signed, per-application proof page (/p/{slug}/{token}). The payload is Ed25519-signed so a recruiter can
+    confirm it at /api/v1/verify/{token}; the student can revoke it; views are logged server-side, never by pixels."""
+
+    __tablename__ = "proof_links"
+
+    id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=uuid.uuid4)
+    user_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    application_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("outreach_drafts.id", ondelete="CASCADE"), unique=True)
+    slug: Mapped[str] = mapped_column(String(40))
+    token: Mapped[str] = mapped_column(String(64), unique=True)
+    payload: Mapped[dict[str, Any]] = mapped_column(JSONB)
+    signature: Mapped[str] = mapped_column(String(128))
+    revoked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    views_count: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
+    last_viewed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    created_at: Mapped[datetime] = _now_col()
+
+
+class ProofLinkView(Base):
+    __tablename__ = "proof_link_views"
+
+    id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=uuid.uuid4)
+    proof_link_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("proof_links.id", ondelete="CASCADE"), index=True)
+    viewed_at: Mapped[datetime] = _now_col()
+    ua_family: Mapped[str] = mapped_column(String(30), default="other", server_default="other")  # chrome | safari | ... | bot
+
+
 class Quota(Base):
     """Approved sends per user per day (IST), against the cap in force that day."""
 
