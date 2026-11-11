@@ -217,22 +217,26 @@ async def run_researcher(state: PipelineState) -> dict:
             boards = await cached_board_roles(client, slugs)
         hits = [h for h in (evaluate(boards.get(slug), prefs) for slug in slugs) if h]
 
-        # Persist: new boards into preferences, the research log and the checked set into profile.research.
-        lists = {"greenhouse": list(prefs.greenhouse_boards), "lever": list(prefs.lever_boards), "ashby": list(prefs.ashby_boards)}
-        for h in hits:
-            lists[h["provider"]].append(h["token"])
-        prefs_out = prefs.model_copy(update={"greenhouse_boards": lists["greenhouse"], "lever_boards": lists["lever"], "ashby_boards": lists["ashby"]})
+        # Persist: new boards into preferences, the research log and the checked set into profile.research. The Scout
+        # (running in parallel) and the student (editing Settings) may have changed this record since we read it, so
+        # re-read it under a row lock and merge only what the Researcher adds.
         added = [{**h, "company": h["token"].replace("-", " ").title(), "at": now.isoformat()} for h in hits]
-        research.update(
-            last_research_at=now.isoformat(),
-            checked=list(dict.fromkeys([*research.get("checked", []), *slugs]))[-800:],
-            added=[*research.get("added", []), *added][-200:],
-            ideas=ideas[:30],
-        )
         async with session_scope() as s:
-            row = await s.get(Profile, profile.id)
-            row.preferences = prefs_out.model_dump()
-            row.research = research
+            row = (await s.execute(select(Profile).where(Profile.id == profile.id).with_for_update())).scalar_one()
+            current = Preferences.model_validate(row.preferences or {})
+            lists = {"greenhouse": list(current.greenhouse_boards), "lever": list(current.lever_boards), "ashby": list(current.ashby_boards)}
+            for h in hits:
+                if h["token"] not in lists[h["provider"]]:
+                    lists[h["provider"]].append(h["token"])
+            row.preferences = current.model_copy(update={"greenhouse_boards": lists["greenhouse"], "lever_boards": lists["lever"], "ashby_boards": lists["ashby"]}).model_dump()
+            latest = dict(row.research or {})
+            latest.update(
+                last_research_at=now.isoformat(),
+                checked=list(dict.fromkeys([*latest.get("checked", []), *slugs]))[-800:],
+                added=[*latest.get("added", []), *added][-200:],
+                ideas=ideas[:30],
+            )
+            row.research = latest
             if hits:
                 fits = sum(h["fits"] for h in hits)
                 s.add(

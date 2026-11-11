@@ -1,15 +1,22 @@
-"""LangGraph wiring: a supervisor routes between the specialist agents over shared state.
+"""LangGraph wiring: the crew runs as parallel lanes, each agent starting as soon as its own inputs exist.
 
-    supervisor ─► researcher ─► scout ─► verifier ─► matcher ─► interviewer ─► tailor ─► … ─► tracker ─► END
-    (every agent hands control back to the supervisor, which picks the next one)
-                   ▲________________________________________________________________|
+    researcher (side lane: starts with the run, finishes on its own time; see runs.execute_run)
+    START ─► scout ─► verifier ─► matcher ─┬─► interviewer ─────────────────────────────► END
+                                            ├─► tracker ─────────────────────────────────► END
+                                            └─► tailor ─► outreach ─► approval ─► dispatch ─► END
 
-The supervisor is deliberately deterministic: it picks the first agent in the pipeline that has not
-run and whose input exists, and skips (and records) agents with nothing to do. Routing by rules
-keeps runs reproducible and cheap; the LLM effort goes into the agents themselves.
+What can't run together, and why: the Verifier needs the Scout's new postings; the Matcher must only score postings
+the Verifier cleared (scams are never scored or tailored); the Tailor needs the Matcher's shortlist, Outreach the
+tailored resumes, and Dispatch the student's approvals. Everything else overlaps: the Researcher widens the search
+while the whole matching lane runs (new boards it adds are fetched by the shared index within minutes). It runs
+outside the graph's steps on purpose: LangGraph advances in synchronized steps, so a slow Researcher inside the
+graph would hold every other lane back. The Interviewer,
+the Tracker and the Tailor → Outreach lane all start the moment matching ends. The Tracker no longer waits for the
+student to approve drafts, so new-match emails go out right away.
 
-State is checkpointed in Postgres after every node, so a crashed or failed run resumes from the last
-completed agent, and the approval gate can pause a run for days.
+Every agent decides for itself whether it has anything to do, and records a skip (with the reason) when it doesn't,
+so "Prepare application" and skill-question runs use the same graph. State is checkpointed in Postgres after every
+step, so a crashed run resumes where it stopped, and the approval gate can pause a run for days.
 """
 
 from collections.abc import Awaitable, Callable
@@ -56,26 +63,59 @@ AGENTS: dict[str, Callable[[PipelineState], Awaitable[dict]]] = {
 }
 
 
-async def supervisor(state: PipelineState) -> dict:
-    done = set(state.get("done", []))
-    skipped: list[str] = []
-    for agent, should_run, reason in PIPELINE:
-        if agent in done:
-            continue
+RULES = {name: (should_run, reason) for name, should_run, reason in PIPELINE}
+
+
+def gated(name: str, fn: Callable[[PipelineState], Awaitable[dict]]):
+    """Runs the agent if it has work in this run; otherwise records why it was skipped."""
+
+    async def node(state: PipelineState) -> dict:
+        should_run, reason = RULES[name]
         if not should_run(state):
-            await mark_skipped(state, agent, reason)
-            skipped.append(agent)
-            continue
-        return {"next": agent, "done": skipped}
-    return {"next": END, "done": skipped}
+            await mark_skipped(state, name, reason)
+            return {"done": [name]}
+        return await fn(state)
+
+    node.__name__ = f"run_{name}"
+    return node
+
+
+# The lanes: (from, to). Nodes with several incoming edges here don't exist on purpose, so no agent ever waits for
+# an unrelated one.
+EDGES: list[tuple[str, str]] = [
+    (START, "scout"),
+    ("scout", "verifier"),
+    ("verifier", "matcher"),
+    ("matcher", "interviewer"),
+    ("matcher", "tracker"),
+    ("matcher", "tailor"),
+    ("tailor", "outreach"),
+    ("outreach", "approval"),
+    ("approval", "dispatch"),
+    ("interviewer", END),
+    ("tracker", END),
+    ("dispatch", END),
+]
+
+
+SIDE_LANE = {"researcher"}  # run alongside the graph by runs.execute_run, not as graph steps
+
+
+async def run_side_lane(state: PipelineState) -> None:
+    """The Researcher, beside the graph. It records its own step (running, done, skipped or failed); a failure here
+    never fails the run, since nothing in this run waits for it."""
+    try:
+        await gated("researcher", AGENTS["researcher"])(state)
+    except Exception:  # agent_step already marked the step failed and logged it
+        pass
 
 
 def build_graph(checkpointer: BaseCheckpointSaver | None = None):
     g = StateGraph(PipelineState)
-    g.add_node("supervisor", supervisor)
     for name, fn in AGENTS.items():
-        g.add_node(name, fn)
-        g.add_edge(name, "supervisor")
-    g.add_edge(START, "supervisor")
-    g.add_conditional_edges("supervisor", lambda s: s["next"], {**{n: n for n in AGENTS}, END: END})
+        if name in SIDE_LANE:
+            continue
+        g.add_node(name, gated(name, fn))
+    for a, b in EDGES:
+        g.add_edge(a, b)
     return g.compile(checkpointer=checkpointer)

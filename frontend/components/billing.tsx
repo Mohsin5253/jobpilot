@@ -42,13 +42,12 @@ const PAID_MSG: Record<string, string> = {
   year_pass: "Paid. Your Year Pass is on: 365 days of Pro.",
 };
 
+// Only what Pro actually adds: the daily limits (config.PLAN_LIMITS). Every feature is in Free too.
 const PRO_FEATURES = [
-  "Up to 50 approved sends a day (Free: up to 10)",
-  "Mock interviews built from each job description",
-  "Proof Link analytics: who opened your proof page",
-  "Referral finder and alumni lookup",
-  "Alerts every minute, and 20 on-demand runs a day",
-  "10× the AI budget for scoring and tailoring",
+  "Up to 50 approved sends and tailored applications a day (Free: 10)",
+  "20 on-demand runs a day (Free: 3), and new-job alerts every minute",
+  "10× the AI budget: more AI tailoring, code reviews and interview feedback each day",
+  "Everything in Free, including mock interviews, Resume & ATS and the proof page",
 ];
 
 export const inr = (n: number | null | undefined) => (typeof n === "number" && Number.isFinite(n) ? `₹${n.toLocaleString("en-IN")}` : "—");
@@ -494,7 +493,7 @@ export function UpgradeBanner() {
   return (
     <div className="mb-5 flex flex-wrap items-center justify-between gap-3 rounded-[var(--radius-card)] border border-[color-mix(in_oklab,var(--cobalt)_35%,transparent)] bg-cobalt-subtle px-4 py-3">
       <div className="text-[13.5px]">
-        <b>You’re on Free.</b> Get Pro for mock interviews, Proof Link analytics and up to 50 sends a day: {inr(p.week_pass)} for a week, {inr(p.pro_monthly)} a month or{" "}
+        <b>You’re on Free.</b> Get Pro for 10× the AI budget and up to 50 tailored applications a day: {inr(p.week_pass)} for a week, {inr(p.pro_monthly)} a month or{" "}
         {inr(p.year_pass)} a year.
       </div>
       <div className="flex gap-2">

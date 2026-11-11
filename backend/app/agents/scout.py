@@ -63,10 +63,11 @@ async def run_scout(state: PipelineState) -> dict:
         since = datetime.fromisoformat(cursor) if refresh and cursor else None
         jobs = await shared_candidates(uuid.UUID(state["user_id"]), prefs, profile_vec, since, now)
 
-        research["match_cursor"] = now.isoformat()
+        # The Researcher may be writing this record at the same moment (parallel lanes): re-read it under a row lock
+        # and change only the Scout's own key, so neither overwrites the other.
         async with session_scope() as s:
-            row = await s.get(Profile, profile.id)
-            row.research = research
+            row = (await s.execute(select(Profile).where(Profile.id == profile.id).with_for_update())).scalar_one()
+            row.research = {**(row.research or {}), "match_cursor": now.isoformat()}
 
         new_ids = [str(j.id) for j in jobs]
         step.detail = (f"{len(new_ids)} new for you" if new_ids else "No new postings") + " from the shared index"

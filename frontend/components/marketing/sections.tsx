@@ -635,7 +635,7 @@ export function Pricing() {
         { t: "Everything in Free" },
         { t: "10× the AI budget: more tailoring, code reviews and interview feedback each day" },
         { t: "Up to 50 tailored applications and 20 on-demand runs a day (Free: 10 and 3)" },
-        { t: "Referral finder" },
+        { t: "New-job alerts every minute (Free: every 15)" },
         { t: "Proof Link analytics", soon: true },
         { t: "Priority verification", soon: true },
       ],

@@ -46,10 +46,11 @@ function useParallax() {
 
 /** The crew on a track, following the demo run: the line fills, the current stage's avatar works, and a caption says what's happening. */
 function MiniFlightPath({ className }: { className?: string }) {
-  const { step, phase } = useDemoStep();
+  const { step, phase, running } = useDemoStep();
   const i = step ? FLIGHT_PATH.indexOf(step) : phase === "finished" ? FLIGHT_PATH.length - 1 : -1;
   const fill = i < 0 ? 0 : i / (FLIGHT_PATH.length - 1);
   const name = step === "you" ? "Your turn" : step ? AGENTS[step].name : null;
+  const together = running.filter((k) => k !== "you").map((k) => AGENTS[k as keyof typeof AGENTS].name);
   return (
     <div className={cn("relative", className)}>
       <div aria-hidden className="relative">
@@ -65,6 +66,10 @@ function MiniFlightPath({ className }: { className?: string }) {
       <p aria-live="polite" className="mt-3 min-h-10 text-center text-[13px] leading-snug text-text-2">
         {phase === "finished" ? (
           <span className="text-text">Run complete. Nothing was sent without your approval.</span>
+        ) : together.length > 1 ? (
+          <>
+            <span className="font-medium text-text">{together.join(" + ")}</span> · working in parallel
+          </>
         ) : name && step ? (
           <>
             <span className="font-medium text-text">{name}</span> · {RUN_STAGES[step].slice(RUN_STAGES[step].startsWith(name) ? name.length : 0).replace(/^[.\s]+/, "")}

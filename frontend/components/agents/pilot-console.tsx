@@ -22,7 +22,19 @@ const WORKING_LINES: Record<string, string> = {
   outreach: "Outreach is drafting short, specific emails to the recruiters.",
   dispatch: "Dispatch is sending the applications you approved.",
   tracker: "Tracker is updating your board and lining up follow-up reminders.",
+  verifier: "Verifier is checking each new posting for scams, dead links and ghost jobs.",
 };
+const NAME = (k: string) => k[0].toUpperCase() + k.slice(1);
+
+/** The crew works in parallel lanes, so several agents can be running at once. */
+function workingLine(run: Run): string {
+  const running = (run.steps ?? []).filter((s) => s.status === "running").map((s) => s.agent);
+  if (running.length > 1) {
+    const names = running.map(NAME);
+    return `${names.slice(0, -1).join(", ")} and ${names.at(-1)} are working in parallel. Each starts as soon as what it needs is ready.`;
+  }
+  return WORKING_LINES[running[0] ?? run.current_step ?? ""] ?? "The crew is working on it.";
+}
 
 /** How the latest run reads as a status pill. */
 export const RUN_STATUS: Record<Run["status"], { status: AgentStatus; label: string }> = {
@@ -62,7 +74,7 @@ function speech(o: Overview | undefined, firstName: string, retry: ReactNode): S
     };
   }
   if (run?.status === "queued" || run?.status === "resume_queued") return { status: "running", text: "Getting the crew ready. This takes a few seconds." };
-  if (run?.status === "running") return { status: "running", text: WORKING_LINES[run.current_step ?? ""] ?? "The crew is working on it." };
+  if (run?.status === "running") return { status: "running", text: workingLine(run) };
   if (run?.status === "failed") {
     return {
       status: "error",

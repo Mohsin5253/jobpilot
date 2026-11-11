@@ -108,12 +108,14 @@ function useRunControl() {
   const start = useStartRun();
   const last = overview?.last_run;
   const active = isActive(last);
+  // Several agents can run at once (parallel lanes): name them all.
+  const running = (last?.steps ?? []).filter((s) => s.status === "running").map((s) => `${s.agent[0].toUpperCase()}${s.agent.slice(1)}`);
   const step = last?.current_step;
   return {
     start: () => start.mutate(),
     pending: start.isPending,
     active,
-    stepLabel: step ? `${step[0].toUpperCase()}${step.slice(1)}…` : "Queued…",
+    stepLabel: running.length > 1 ? `${running.join(" + ")}…` : running.length ? `${running[0]}…` : step ? `${step[0].toUpperCase()}${step.slice(1)}…` : "Queued…",
     disabled: active || !profile?.has_resume,
     reason: !profile?.has_resume ? "Upload your resume first" : undefined,
   };
@@ -573,7 +575,7 @@ export function AppShell({ children }: { children: ReactNode }) {
   const { data: overview } = useOverview();
   const { data: campus } = useCampus();
   const last = overview?.last_run;
-  useRunSync(last ? `${last.id}:${last.status}:${last.current_step}:${last.steps.length}` : undefined);
+  useRunSync(last ? `${last.id}:${last.status}:${last.steps.map((s) => s.status[0]).join("")}` : undefined);
   useLiveUpdates();
 
   const [palette, setPalette] = useState(false);

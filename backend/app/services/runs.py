@@ -1,5 +1,6 @@
 """Run lifecycle: enqueue, claim (Postgres SKIP LOCKED queue), execute / resume the LangGraph pipeline."""
 
+import asyncio
 import time
 import uuid
 from datetime import UTC, datetime, timedelta
@@ -147,6 +148,11 @@ async def execute_run(run_id: uuid.UUID, user_id: uuid.UUID) -> str:
 
     log.info("run.execute", run_id=str(run_id), mode=mode)
     started = time.perf_counter()
+    # The Researcher runs beside the graph on a fresh start (see agents/graph.py): it starts with the Scout and
+    # nothing waits for it, but the run only finishes once it has.
+    from app.agents.graph import run_side_lane
+
+    side = asyncio.create_task(run_side_lane(payload)) if mode == "start" else None
     try:
         with observe("pipeline.run", as_type="chain", metadata={"run_id": str(run_id), "mode": mode}):
             await graph.ainvoke(payload, config)
@@ -156,6 +162,8 @@ async def execute_run(run_id: uuid.UUID, user_id: uuid.UUID) -> str:
         await _finish(run_id, status=RunStatus.failed, error=f"{type(exc).__name__}: {exc}"[:2000], finished_at=datetime.now(UTC))
         return RunStatus.failed
     finally:
+        if side is not None:
+            await side
         flush()
         await _add_active_time(run_id, int((time.perf_counter() - started) * 1000))
 
