@@ -233,3 +233,31 @@ async def restructure_resume(user: UserDep, session: SessionDep, file: UploadFil
         report["sections"].insert(1, "Summary")
     after = ats.score(ats.view_from_resume(resume), field, "", "")
     return {"resume": resume.model_dump(), **report, "before": before["score"], "after": after["score"], "industry": field}
+
+
+class BoostIn(ImproveIn):
+    target: int = Field(default=90, ge=60, le=100)
+    figures: dict[str, str] = Field(default_factory=dict, description="bullet id -> the student's real figure for it (e.g. '200 users', '35% faster')")
+
+
+@router.post("/resume/ai-boost")
+async def ai_boost(body: BoostIn, user: UserDep, session: SessionDep) -> dict:
+    """Takes the resume toward a target ATS score for its field (default 90): every automatic fix, then the real
+    figures the student gives for bullets without results, rewritten in Google's XYZ form. Says how high the score
+    goes once the remaining figures are in. Nothing is invented, and nothing is saved until the student saves it."""
+    await hit("resume_tools", str(user.id))
+    raw, filename = None, None
+    if body.resume is not None:
+        resume = body.resume
+    else:
+        p = await _profile(session, user.id)
+        if p is None or not (p.resume or p.resume_text):
+            raise HTTPException(409, "Upload your resume first, or build one in the Resume builder")
+        resume, raw, filename = ResumeData.model_validate(p.resume or {}), p.resume_text or None, p.resume_filename
+    title, desc = body.job_title, body.job_description
+    if body.match_id:
+        m = await _match(session, user.id, body.match_id)
+        title, desc = m.job.title, m.job.description
+    from app.services.ats_boost import boost
+
+    return await boost(resume, body.industry, title, desc, body.confirmed_keywords, body.figures, body.target, user.id, raw, filename)

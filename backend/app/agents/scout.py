@@ -21,6 +21,7 @@ from app.services.ingest import claim_due, ensure_user_targets, ingest
 from app.services.job_store import job_as_posting
 from app.sources.base import is_relevant
 
+RECHECK_LIMIT = 25  # open matches re-checked when a run finds nothing new
 OPEN_DAYS = 4  # a job no source has listed for this long is treated as closed (as on the dashboard)
 
 
@@ -70,11 +71,35 @@ async def run_scout(state: PipelineState) -> dict:
             row.research = {**(row.research or {}), "match_cursor": now.isoformat()}
 
         new_ids = [str(j.id) for j in jobs]
+        # Nothing new: the rest of the crew works on your open matches instead (re-verify links, re-rank against
+        # your current resume, tailor and draft whatever is still missing), so every agent still does its job.
+        recheck: list[str] = []
+        if not refresh:  # also used if the Verifier blocks every new posting
+            async with session_scope() as s:
+                recheck = [
+                    str(m)
+                    for m in (
+                        await s.execute(
+                            select(JobMatch.id)
+                            .join(Job, Job.id == JobMatch.job_id)
+                            .where(
+                                JobMatch.user_id == uuid.UUID(state["user_id"]),
+                                JobMatch.stage.in_(["found", "shortlisted"]),
+                                Job.last_seen_at >= now - timedelta(days=OPEN_DAYS),
+                                or_(Job.link_status.is_(None), Job.link_status != "dead"),
+                            )
+                            .order_by(JobMatch.score.desc())
+                            .limit(RECHECK_LIMIT)
+                        )
+                    ).scalars()
+                ]
         step.detail = (f"{len(new_ids)} new for you" if new_ids else "No new postings") + " from the shared index"
+        if recheck and not new_ids:
+            step.detail += f" · re-checking your {len(recheck)} open match{'es' if len(recheck) != 1 else ''}"
         if report:
             step.detail += " · " + ", ".join(f"{k}: {v}" for k, v in report.items())
         extras = [f"{merged} merged from other boards" if merged else "", f"{dead} closed listings dropped" if dead else ""]
         if any(extras):
             step.detail += " · " + " · ".join(x for x in extras if x)
         await bump_stats(state["run_id"], jobs_fetched=len(jobs), new_jobs=len(new_ids))
-        return {"new_job_ids": new_ids, "done": ["scout"]}
+        return {"new_job_ids": new_ids, "recheck_match_ids": recheck, "done": ["scout"]}

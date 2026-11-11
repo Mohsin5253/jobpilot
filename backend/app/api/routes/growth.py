@@ -31,6 +31,7 @@ from app.ats_lexicon import INDUSTRIES
 from app.services import interview_report
 from app.services.ats import detect_industry
 from app.services.code_review import review as code_review
+from app.services.interview_rubrics import as_prompt, retrieve
 from app.services.interview_rounds import BAR, build_plan, industry_name
 from app.services.question_trends import refresh as refresh_question_trends
 from app.services.question_trends import trend_questions, trending_skills
@@ -128,14 +129,19 @@ class Opinion(BaseModel):
     feedback: list[str] = Field(max_length=3)
 
 
-async def grade(q: dict, answer: str, user_id: uuid.UUID) -> dict:
+async def grade(q: dict, answer: str, user_id: uuid.UUID, industry: str = "*") -> dict:
     """The rubric, with an AI grader when available (same rubric; falls back to the rules)."""
     base = score_answer(q, answer)
     try:
         op = await get_llm().structured(
             agent="interviewer", tier="fast", schema=Opinion, ctx=CallContext(user_id=user_id), max_tokens=500,
-            system="You grade internship interview answers on a 1-5 rubric: relevance to the job requirement, specificity (own actions, numbers), structure (situation, action, result). Give up to 3 short, kind, concrete tips.",
-            prompt=f"Job requirement: {q['jd_line']}\nQuestion: {q['q']}\n" + (f"A strong answer covers: {', '.join(q['key_points'])}\n" if q.get("key_points") else "") + f"Answer: {answer[:3000]}",
+            system=(
+                "You grade interview answers like a trained interviewer at a large tech company, on a 1-5 rubric: relevance to the "
+                "job requirement, specificity (own actions, numbers), structure (the right framework for the question). Calibrate "
+                "for an intern/fresher. If the answer includes a follow-up exchange, credit how well the candidate adapted. Give up "
+                "to 3 short, concrete tips.\nRubrics for this question:\n" + as_prompt(retrieve(q.get("kind") or "behavioural", industry, 3))
+            ),
+            prompt=f"Job requirement: {q['jd_line']}\nQuestion: {q['q']}\n" + (f"A strong answer covers: {', '.join(q['key_points'])}\n" if q.get("key_points") else "") + f"Answer: {answer[:4000]}",
         )
         return {**base, "relevance": op.relevance, "specificity": op.specificity, "structure": op.structure, "score": round((op.relevance + op.specificity + op.structure) / 3, 1), "feedback": op.feedback or base["feedback"]}
     except (LLMUnavailable, LLMOutputError):
@@ -280,6 +286,7 @@ class AnswerMeta(BaseModel):
     voice_chars: int = Field(default=0, ge=0, le=20000)
     active_ms: int = Field(default=0, ge=0, le=3_600_000)
     pastes_blocked: int = Field(default=0, ge=0, le=1000)
+    follow_up: str | None = Field(default=None, max_length=400, description="The interviewer's follow-up, when one was asked")
 
 
 class AnswerIn(BaseModel):
@@ -317,12 +324,14 @@ async def answer(session_id: str, body: AnswerIn, user: RealUserDep, session: Se
     if q is None:
         raise HTTPException(404, "No such question")
     flags = integrity_flags(body.answer, body.meta) if (s.meta or {}).get("strict", False) else []
-    graded = await grade(q, body.answer, user.id)
+    graded = await grade(q, body.answer, user.id, (s.meta or {}).get("industry", "*"))
     if flags:
         # An answer that may not be the student's own can't show they know it.
         graded = {**graded, "score": min(graded["score"], 1.5), "integrity_flags": flags, "feedback": [f"Not counted: {flags[0].lower()}.", *graded["feedback"][:2]]}
     if body.meta:
         graded["mode"] = body.meta.mode
+        if body.meta.follow_up:
+            graded["follow_up"] = body.meta.follow_up
     s.answers = {**s.answers, q["id"]: body.answer}
     s.scores = {**s.scores, q["id"]: graded}
     if len(s.scores) == len(s.questions):
@@ -492,6 +501,21 @@ class TestResults(BaseModel):
     runtime_ms: int = Field(default=0, ge=0, le=600000)
 
 
+class Clarified(BaseModel):
+    q: str = Field(default="", max_length=400)
+    a: str = Field(default="", max_length=600)
+
+
+class CodingProcess(BaseModel):
+    """What the candidate did at each stage: clarify → approach & complexity → implement → test & optimise."""
+
+    clarifications: list[Clarified] = Field(default_factory=list, max_length=10)
+    time_complexity: str = Field(default="", max_length=60)
+    space_complexity: str = Field(default="", max_length=60)
+    test_notes: str = Field(default="", max_length=2000)
+    stage_ms: dict[str, int] = Field(default_factory=dict)
+
+
 class CodeIn(BaseModel):
     question_id: str
     language: Literal["python", "javascript", "java", "cpp"]
@@ -499,6 +523,7 @@ class CodeIn(BaseModel):
     approach: str = Field(default="", max_length=3000)
     results: TestResults = Field(default_factory=TestResults)
     meta: AnswerMeta | None = None
+    process: CodingProcess | None = None
 
 
 @router.post("/interviews/{session_id}/code")
@@ -516,6 +541,16 @@ async def submit_code(session_id: str, body: CodeIn, user: RealUserDep, session:
         raise HTTPException(404, "No such coding question")
     flags = integrity_flags(body.code, body.meta) if (s.meta or {}).get("strict", False) else []
     rv = await code_review(q["problem"]["id"], body.language, body.code, body.approach, body.results.model_dump(), user.id)
+    if body.process is not None:
+        # The interview process counts, as with a real interviewer: clarify, state complexity, then test.
+        from app.services.coding_bank import BY_ID
+        from app.services.interview_panel import process_scores
+
+        p = BY_ID.get(q["problem"]["id"])
+        ps = process_scores(body.process.model_dump(), p.hint_complexity if p else "")
+        rv = {**rv, **{k: v for k, v in ps.items() if k != "process_feedback"}, "process": body.process.model_dump()}
+        rv["score"] = round(0.75 * rv["score"] + 0.25 * (ps["clarification"] + ps["design"] + ps["testing"]) / 3, 1)
+        rv["improvements"] = [*(rv.get("improvements") or []), *ps["process_feedback"]][:6]
     if flags:
         rv = {**rv, "score": min(rv["score"], 1.5), "integrity_flags": flags, "feedback": [f"Not counted: {flags[0].lower()}.", *rv["feedback"][:2]]}
     rv["tests_visible"] = body.results.total
@@ -530,6 +565,18 @@ async def submit_code(session_id: str, body: CodeIn, user: RealUserDep, session:
 
 async def _report(s: InterviewSession, user, session) -> dict:
     rep = interview_report.build(s)
+    # The panel's scorecard (scribe, technical critic, behavioural coach), evaluated once per finished interview.
+    panel = (s.meta or {}).get("panel")
+    if not panel and s.scores:
+        from app.services.interview_panel import evaluate
+
+        panel = await evaluate(s, user.id)
+        if s.completed_at:
+            s.meta = {**(s.meta or {}), "panel": panel}
+            await session.commit()
+    if panel:
+        rep["panel"] = panel
+        rep["signal"] = panel["verdict"]
     if s.completed_at and not (s.meta or {}).get("report_ai") and s.scores:
         ai = await interview_report.narrative(rep, user.id)
         if ai:
@@ -540,6 +587,53 @@ async def _report(s: InterviewSession, user, session) -> dict:
     if started and s.completed_at:
         rep["minutes_used"] = round((s.completed_at - datetime.fromisoformat(started)).total_seconds() / 60)
     return rep
+
+
+class FollowUpIn(BaseModel):
+    question_id: str
+    answer: str = Field(min_length=1, max_length=5000)
+
+
+@router.post("/interviews/{session_id}/follow-up")
+async def ask_follow_up(session_id: str, body: FollowUpIn, user: RealUserDep, session: SessionDep) -> dict:
+    """The interviewer's one follow-up to this answer (pushback, a new constraint, or 'what was your part?'), asked
+    before the answer is graded. Empty when the question isn't the kind that gets one."""
+    await hit("interview_report", str(user.id))
+    s = await session.get(InterviewSession, session_id)
+    if s is None or s.user_id != user.id:
+        raise HTTPException(404, "No such session")
+    q = next((q for q in s.questions if q["id"] == body.question_id), None)
+    if q is None:
+        raise HTTPException(404, "No such question")
+    from app.services.interview_panel import FOLLOW_UP_KINDS, follow_up
+
+    if q.get("kind") not in FOLLOW_UP_KINDS or len(body.answer.split()) < 12:
+        return {"follow_up": ""}
+    return {"follow_up": await follow_up(q, body.answer, user.id)}
+
+
+class ClarifyIn(BaseModel):
+    question_id: str
+    question: str = Field(min_length=3, max_length=400)
+
+
+@router.post("/interviews/{session_id}/clarify")
+async def clarify_problem(session_id: str, body: ClarifyIn, user: RealUserDep, session: SessionDep) -> dict:
+    """The interviewer answers a clarifying question about the coding problem (constraints, edge cases), from the
+    problem and its tests only. Never the solution."""
+    await hit("code_review", str(user.id))
+    s = await session.get(InterviewSession, session_id)
+    if s is None or s.user_id != user.id:
+        raise HTTPException(404, "No such session")
+    q = next((q for q in s.questions if q["id"] == body.question_id), None)
+    if q is None or q.get("kind") != "coding":
+        raise HTTPException(404, "No such coding question")
+    from app.services.coding_bank import BY_ID
+    from app.services.interview_panel import clarify
+
+    p = BY_ID.get(q["problem"]["id"])
+    problem = {**q["problem"], "tests": [{"args": t["args"], "expected": t["expected"], "visible": t.get("visible", False)} for t in (p.tests if p else [])]}
+    return {"answer": await clarify(problem, body.question, user.id)}
 
 
 @router.get("/interviews/{session_id}/report")

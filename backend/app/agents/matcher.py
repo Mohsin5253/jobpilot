@@ -9,6 +9,7 @@ Without an LLM the first two still produce a ranked, explained list.
 
 import asyncio
 import re
+from typing import Literal
 import uuid
 
 from pydantic import BaseModel, Field
@@ -30,18 +31,62 @@ W_SEMANTIC, W_SKILLS, W_LLM = 0.25, 0.25, 0.50
 W_SEMANTIC_OFFLINE, W_SKILLS_OFFLINE = 0.55, 0.45
 
 
+class Requirement(BaseModel):
+    text: str = Field(description="One requirement from the job, short (e.g. 'Python', 'REST API design', 'SQL joins')")
+    kind: Literal["must", "nice"] = Field(description="must = required / core to the role; nice = preferred, bonus, plus")
+    status: Literal["met", "partial", "missing"] = Field(description="met = resume shows it in work; partial = listed or adjacent; missing")
+    evidence: str = Field(default="", description="For met/partial: a short exact quote from the resume that shows it; empty if missing")
+
+
 class FitReview(BaseModel):
+    requirements: list[Requirement] = Field(default_factory=list, description="The job's 4-10 real requirements, must-haves first")
     fit_score: int = Field(description="0-100 overall fit for this candidate")
     strengths: list[str] = Field(description="Requirements the resume clearly demonstrates (max 6, short)")
     gaps: list[str] = Field(description="Important requirements missing from the resume (max 6, short)")
     explanation: str = Field(description="One or two plain sentences on why")
 
 
-REVIEW_SYSTEM = """You are a meticulous technical recruiter screening internship candidates.
-Judge fit using only what the resume actually shows. A requirement counts as a strength only if the
-resume demonstrates it; list required-but-missing items as gaps. Treat 'nice to have' items as minor.
-Calibrate: 80+ = would shortlist immediately, 60-79 = plausible, 40-59 = stretch, <40 = poor fit.
-Seniority mismatch (e.g. 5+ years required) caps the score at 30."""
+REVIEW_SYSTEM = """You screen candidates the way recruiters at large tech companies do: requirement by requirement,
+with evidence. Steps:
+1. List the job's real requirements (4-10), ignoring boilerplate. Mark each must (required, core to the work) or
+   nice (preferred, plus, bonus).
+2. For each, decide from the resume ONLY: met (shown in a project, role or bullet), partial (only listed as a skill,
+   or an adjacent tool), missing. Quote the resume's own words as evidence for met/partial. Never infer skills the
+   resume doesn't show.
+3. fit_score: 80+ = would shortlist immediately (all musts met), 60-79 = plausible (most musts met),
+   40-59 = stretch, <40 = poor fit. A seniority mismatch (e.g. 3+ years required for an intern/fresher) caps it at 30.
+Strengths are met requirements; gaps are missing must-haves first."""
+
+_WEIGHT = {"must": 3.0, "nice": 1.0}
+_CREDIT = {"met": 1.0, "partial": 0.5, "missing": 0.0}
+
+
+def _quoted(evidence: str, resume_text: str) -> bool:
+    """The evidence really comes from the resume: most of its words appear there."""
+    words = [w for w in re.findall(r"[a-z0-9+#.]{3,}", evidence.lower())]
+    return bool(words) and sum(1 for w in words if w in resume_text) / len(words) >= 0.7
+
+
+def audit_review(review: FitReview, resume_json: str) -> FitReview:
+    """Checks every claimed match against the resume (a 'met' without a real quote is downgraded), then blends the
+    holistic score with weighted requirement coverage, so one optimistic guess can't carry the score."""
+    if not review.requirements:
+        return review
+    text = resume_json.lower()
+    for r in review.requirements:
+        if r.status != "missing" and not _quoted(r.evidence, text):
+            r.status = "partial" if r.status == "met" and r.text.lower() in text else "missing"
+    total = sum(_WEIGHT[r.kind] for r in review.requirements)
+    coverage = sum(_WEIGHT[r.kind] * _CREDIT[r.status] for r in review.requirements) / total if total else 0
+    musts = [r for r in review.requirements if r.kind == "must"]
+    missing_musts = [r.text for r in musts if r.status == "missing"]
+    score = 0.5 * review.fit_score + 0.5 * coverage * 100
+    if musts and len(missing_musts) > len(musts) / 2:
+        score = min(score, 55)  # most must-haves missing: a stretch at best
+    review.fit_score = round(max(0, min(100, score)))
+    review.strengths = list(dict.fromkeys([r.text for r in review.requirements if r.status == "met"] + review.strengths))[:6]
+    review.gaps = list(dict.fromkeys(missing_musts + [r.text for r in review.requirements if r.status == "missing"] + review.gaps))[:6]
+    return review
 
 
 def blend(semantic: float, skills: float, llm_score: float | None) -> float:
@@ -79,7 +124,7 @@ def resume_for_prompt(resume: ResumeData) -> str:
 
 async def review_fit(job: Job, resume_json: str, ctx: CallContext) -> FitReview | None:
     try:
-        return await get_llm().structured(
+        review = await get_llm().structured(
             agent="matcher",
             tier="fast",
             system=REVIEW_SYSTEM,
@@ -92,6 +137,7 @@ async def review_fit(job: Job, resume_json: str, ctx: CallContext) -> FitReview 
             ctx=ctx,
             max_tokens=4000,
         )
+        return audit_review(review, resume_json)
     except (LLMUnavailable, LLMOutputError):
         return None
 
@@ -111,13 +157,23 @@ async def run_matcher(state: PipelineState) -> dict:
         )
         # Rescore mode: after you answer skill questions, re-check the jobs those answers could unlock.
         rescore = [uuid.UUID(m) for m in state.get("rescore_match_ids", [])]
+        # Nothing new this run: re-rank your open matches against your current resume (it may have changed since
+        # they were scored), without new-match alerts for jobs you already know about.
+        recheck = not rescore and not state.get("new_job_ids") and bool(state.get("recheck_match_ids"))
+        previous: dict = {}
+        if recheck:
+            rescore = [uuid.UUID(m) for m in state["recheck_match_ids"]]
+            async with session_scope() as s:
+                previous = {r.job_id: (r.score, r.stage) for r in (await s.execute(select(JobMatch).where(JobMatch.id.in_(rescore)))).scalars()}
         if rescore:
             async with session_scope() as s:
                 job_ids = list(
                     (
                         await s.execute(
                             select(JobMatch.job_id).where(
-                                JobMatch.id.in_(rescore), JobMatch.user_id == uuid.UUID(state["user_id"]), JobMatch.stage == Stage.found
+                                JobMatch.id.in_(rescore),
+                                JobMatch.user_id == uuid.UUID(state["user_id"]),
+                                JobMatch.stage.in_([Stage.found, Stage.shortlisted] if recheck else [Stage.found]),
                             )
                         )
                     ).scalars()
@@ -198,7 +254,14 @@ async def run_matcher(state: PipelineState) -> dict:
                 usage = await usage_for(uuid.UUID(state["user_id"]))
                 cap = min(settings.tailor_top_n, usage["drafts_left"], usage["week_left"])
                 ghost = {r["job"].id for r in scored if r["job"].ghost_risk == "high"}
-                shortlist = [str(m.id) for m in inserted if m.score >= prefs.min_score and m.stage == Stage.found and m.job_id not in ghost][:cap]
+                if recheck:
+                    # Shortlisted jobs still missing a tailored resume (e.g. the daily limit ran out last time) get one now.
+                    from app.models import TailoredResume
+
+                    tailored = set((await s.execute(select(TailoredResume.match_id).where(TailoredResume.match_id.in_([m.id for m in inserted])))).scalars())
+                    shortlist = [str(m.id) for m in inserted if m.score >= prefs.min_score and m.stage in (Stage.found, Stage.shortlisted) and m.id not in tailored and m.job_id not in ghost][:cap]
+                else:
+                    shortlist = [str(m.id) for m in inserted if m.score >= prefs.min_score and m.stage == Stage.found and m.job_id not in ghost][:cap]
                 if shortlist:
                     await s.execute(
                         update(JobMatch).where(JobMatch.id.in_([uuid.UUID(x) for x in shortlist])).values(stage=Stage.shortlisted)
@@ -210,6 +273,8 @@ async def run_matcher(state: PipelineState) -> dict:
                 for m in inserted:
                     if m.score < prefs.min_score:
                         continue
+                    if recheck and m.job_id in previous and previous[m.job_id][0] >= prefs.min_score:
+                        continue  # already a fit you were told about
                     v, job = by_job[m.job_id], jobs[m.job_id]
                     fits.append({"match_id": str(m.id), "title": job.title, "company": job.company, "score": round(m.score)})
                     s.add(
@@ -222,10 +287,15 @@ async def run_matcher(state: PipelineState) -> dict:
                         )
                     )
                 # Pushed to the open dashboard the moment these rows commit (before tailoring starts).
-                if inserted:
-                    await publish(s, state["user_id"], "new_matches", count=len(inserted), fits=fits[:5])
+                if inserted and (fits or not recheck):
+                    await publish(s, state["user_id"], "new_matches", count=len(fits) if recheck else len(inserted), fits=fits[:5])
 
         strong = sum(1 for v in values if v["score"] >= prefs.min_score)
+        if recheck:
+            moved = sum(1 for v in values if v["job_id"] in previous and abs(v["score"] - previous[v["job_id"]][0]) >= 3)
+            step.detail = f"Re-ranked your {len(values)} open matches with your current resume ({reviewed} reviewed by LLM) · {moved} moved 3+ points · {strong} at or above {prefs.min_score} · {len(shortlist)} to tailor"
+            await bump_stats(state["run_id"], matched=len(values), strong_matches=strong, shortlisted=len(shortlist))
+            return {"match_ids": match_ids, "shortlist_ids": shortlist, "done": ["matcher"]}
         step.detail = f"{'Re-scored' if rescore else 'Scored'} {len(values)} jobs ({reviewed} reviewed by LLM) · {strong} at or above {prefs.min_score} · shortlisted {len(shortlist)}"
         await bump_stats(state["run_id"], matched=len(values), strong_matches=strong, shortlisted=len(shortlist))
         return {"match_ids": match_ids, "shortlist_ids": shortlist, "done": ["matcher"]}

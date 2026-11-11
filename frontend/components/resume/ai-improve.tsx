@@ -16,7 +16,24 @@ import { useSaveProfile } from "@/lib/queries";
 import type { Resume } from "@/lib/types";
 
 type Change = { section: string; before: string; after: string; why: string };
-type Improved = { resume: Resume; changes: Change[]; before: number; after: number; after_report: AtsReport; still_missing: string[]; ai: boolean; note: string };
+type Ask = { id: string; text: string; question: string; example: string };
+type Improved = {
+  resume: Resume;
+  changes: Change[];
+  before: number;
+  after: number;
+  after_report: AtsReport;
+  still_missing: string[];
+  ai: boolean;
+  note: string;
+  target: number;
+  reached: boolean;
+  potential: number;
+  needs_figures: Ask[];
+  remaining: { title: string; detail: string; gain: number }[];
+  industry_name: string;
+};
+const TARGETS = [80, 85, 90, 95];
 
 /**
  * One click from the ATS report to a better resume: stronger bullets (facts kept), a summary from the resume's own
@@ -27,13 +44,29 @@ export function AiImprove({ report, target, resume, onOpenInBuilder }: { report:
   const [open, setOpen] = useState(false);
   const missing = report.keywords.missing.filter((k) => !k.soft).map((k) => k.term);
   const [picked, setPicked] = useState<string[]>([]);
+  const [goal, setGoal] = useState(90);
+  const [figures, setFigures] = useState<Record<string, string>>({});
+  const [first, setFirst] = useState<number | null>(null);
   const [busy, setBusy] = useState<"pdf" | "docx" | null>(null);
   const save = useSaveProfile();
   const run = useMutation({
-    mutationFn: () => api.post<Improved>("/resume/ai-improve", { ...target, ...(resume ? { resume } : {}), confirmed_keywords: picked }),
+    // Each round builds on the last one's resume, so figures and fixes add up.
+    mutationFn: (opts: { from?: Resume; figs?: Record<string, string> } = {}) =>
+      api.post<Improved>("/resume/ai-boost", {
+        ...target,
+        ...(opts.from ? { resume: opts.from } : resume ? { resume } : {}),
+        confirmed_keywords: picked,
+        target: goal,
+        figures: opts.figs ?? {},
+      }),
+    onSuccess: (d) => {
+      setFirst((f) => f ?? d.before);
+      setFigures({});
+    },
     onError: (e: Error) => toast.error(e.message),
   });
   const r = run.data;
+  const filled = Object.values(figures).filter((v) => /\d/.test(v)).length;
   const dl = async (f: "pdf" | "docx") => {
     if (!r) return;
     setBusy(f);
@@ -49,17 +82,28 @@ export function AiImprove({ report, target, resume, onOpenInBuilder }: { report:
 
   return (
     <>
-      <Button variant="primary" onClick={() => (run.reset(), setOpen(true))}>
-        <Wand2 /> Improve my resume with AI
+      <Button variant="primary" onClick={() => (run.reset(), setFirst(null), setFigures({}), setOpen(true))}>
+        <Wand2 /> Boost my ATS score with AI
       </Button>
       <Dialog open={open} onOpenChange={setOpen}>
-        <DialogContent title="Improve my resume" description="Applies the report's fixes to your resume. Nothing is invented, and nothing is saved until you choose to." className="max-w-[640px]">
+        <DialogContent title="Boost my ATS score" description="Takes your resume toward the score you pick, using your field's grading. Nothing is invented: where a real number is needed, you're asked for it. Nothing is saved until you choose to." className="max-w-[680px]">
           {!r ? (
             <div className="space-y-4">
+              <div>
+                <div className="text-[13.5px] font-medium">Target score</div>
+                <div className="mt-2 flex flex-wrap gap-1.5">
+                  {TARGETS.map((t) => (
+                    <button key={t} type="button" aria-pressed={goal === t} onClick={() => setGoal(t)} className={`num h-8 rounded-full border px-3.5 text-[13px] ${goal === t ? "border-[var(--cobalt)] bg-cobalt-subtle text-cobalt-text" : "border-border text-text-2 hover:text-text"}`}>
+                      {t}
+                    </button>
+                  ))}
+                </div>
+              </div>
               <ul className="space-y-1.5 text-[13.5px] text-text-2">
-                <li>· Rewrites weak bullets with strong verbs, keeping every fact and number.</li>
-                <li>· Writes a 2-3 line summary from your own resume, naming your field.</li>
-                <li>· Puts the skills recruiters search for first.</li>
+                <li>· Clean single-column structure with standard headings, as enterprise ATS parsers expect.</li>
+                <li>· Weak bullets rewritten with strong action verbs, every fact and number kept.</li>
+                <li>· A 2-3 line summary from your own resume; the skills your field searches for first.</li>
+                <li>· Then it asks for the real figure behind each bullet without a result, and rewrites it in Google&rsquo;s XYZ form (achieved X, measured by Y, by doing Z).</li>
               </ul>
               {!!missing.length && (
                 <div className="rounded-[var(--radius-card)] border border-border p-3">
@@ -81,23 +125,67 @@ export function AiImprove({ report, target, resume, onOpenInBuilder }: { report:
                   </div>
                 </div>
               )}
-              <Button variant="primary" onClick={() => run.mutate()} loading={run.isPending}>
-                <Sparkles /> Improve now
+              <Button variant="primary" onClick={() => run.mutate({})} loading={run.isPending}>
+                <Sparkles /> Boost to {goal}
               </Button>
             </div>
           ) : (
             <div className="space-y-4">
               <div className="flex flex-wrap items-center gap-3">
-                <ScoreRing score={r.before} size={52} stroke={4} />
+                <ScoreRing score={first ?? r.before} size={52} stroke={4} />
                 <ArrowRight className="size-4 text-text-3" />
                 <ScoreRing score={r.after} size={52} stroke={4} />
-                <Badge tone={r.after > r.before ? "success" : "neutral"} className="num">
-                  {r.after >= r.before ? "+" : ""}
-                  {r.after - r.before} points
+                <Badge tone={r.reached ? "success" : "neutral"} className="num">
+                  {r.reached ? `Target ${r.target} reached` : `Target ${r.target}`}
                 </Badge>
-                <span className="text-[12px] text-text-3">{r.ai ? "AI rewrites, checked against your resume" : "Rule-based rewrites (AI unavailable)"}</span>
+                {!r.reached && r.potential > r.after && (
+                  <span className="text-[12.5px] text-text-2">
+                    With your figures: <b className="num">≈{r.potential}</b>
+                  </span>
+                )}
+                <span className="w-full text-[12px] text-text-3">
+                  {r.industry_name} grading · {r.ai ? "AI rewrites, checked against your resume" : "Rule-based rewrites (AI unavailable)"}
+                </span>
               </div>
-              <ul className="max-h-[42vh] space-y-2 overflow-y-auto pr-1">
+              {r.note && <p className="text-[13px]">{r.note}</p>}
+              {!!r.needs_figures.length && (
+                <div className="rounded-[var(--radius-card)] border border-border p-3">
+                  <div className="text-[13.5px] font-medium">Add your real figures</div>
+                  <p className="mt-0.5 text-[12.5px] text-text-3">Leave blank anything you can&rsquo;t back up in an interview. Each one is rewritten in XYZ form using only your bullet and your figure.</p>
+                  <ul className="mt-3 max-h-[34vh] space-y-3 overflow-y-auto pr-1">
+                    {r.needs_figures.map((n) => (
+                      <li key={n.id} className="space-y-1.5">
+                        <p className="text-[12.5px] text-text-2">{n.text}</p>
+                        <input
+                          value={figures[n.id] ?? ""}
+                          onChange={(e) => setFigures((f) => ({ ...f, [n.id]: e.target.value }))}
+                          placeholder={`${n.question} (${n.example})`}
+                          aria-label={`Figure for: ${n.text}`}
+                          className="h-9 w-full rounded-[var(--radius-control)] border border-border bg-transparent px-3 text-[13px] outline-none focus:border-[var(--cobalt)]"
+                        />
+                      </li>
+                    ))}
+                  </ul>
+                  <Button className="mt-3" variant="primary" disabled={!filled} loading={run.isPending} onClick={() => run.mutate({ from: r.resume, figs: figures })}>
+                    <Sparkles /> Apply {filled || ""} figure{filled === 1 ? "" : "s"} and re-score
+                  </Button>
+                </div>
+              )}
+              {!!r.remaining.length && !r.reached && (
+                <div className="text-[12.5px]">
+                  <div className="font-medium">Also worth doing</div>
+                  <ul className="mt-1 space-y-1 text-text-2">
+                    {r.remaining.map((x) => (
+                      <li key={x.title}>
+                        · {x.title} <span className="text-success">+{x.gain}</span>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+              <details>
+                <summary className="cursor-pointer text-[13px] font-medium text-cobalt-text">What changed ({r.changes.length})</summary>
+                <ul className="mt-2 max-h-[36vh] space-y-2 overflow-y-auto pr-1">
                 {r.changes.map((c, i) => (
                   <li key={i} className="rounded-[var(--radius-card)] border border-border p-3 text-[13px]">
                     <div className="mb-1 flex items-center gap-2">
@@ -109,8 +197,8 @@ export function AiImprove({ report, target, resume, onOpenInBuilder }: { report:
                   </li>
                 ))}
                 {!r.changes.length && <li className="text-[13px] text-text-2">Your resume already follows these fixes. Add your real numbers to bullets for the next gain.</li>}
-              </ul>
-              {r.note && <p className="text-[12.5px] text-text-2">{r.note}</p>}
+                </ul>
+              </details>
               {!!r.still_missing.length && <p className="text-[12.5px] text-text-3">Still missing (add only if you've used them): {r.still_missing.join(", ")}</p>}
               <div className="flex flex-wrap gap-2 border-t border-border pt-4">
                 <Button variant="primary" onClick={() => dl("pdf")} loading={busy === "pdf"}>

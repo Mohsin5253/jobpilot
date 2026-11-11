@@ -37,7 +37,13 @@ async def test_independent_agents_overlap(monkeypatch):
     async def no_skip_record(state, agent, reason):
         return None
 
+    checked: dict[str, str] = {}
+
+    async def record_checked(state, agent, detail):
+        checked[agent] = detail
+
     monkeypatch.setattr(crew, "mark_skipped", no_skip_record)
+    monkeypatch.setattr(crew, "mark_checked", record_checked)
     g = crew.build_graph(MemorySaver())
     state = {"run_id": "r", "user_id": "u", "done": [], "errors": []}
     t0 = time.perf_counter()

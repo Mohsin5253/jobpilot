@@ -41,10 +41,21 @@ export type Report = {
   focus: { round: string; do: string }[];
   summary: string | null;
   next_week: string[];
+  panel?: Panel;
 };
 
 const STATUS_TONE = { "Above bar": "success", "Meets bar": "accent", "Below bar": "danger", "Not attempted": "outline" } as const;
-const SIGNAL_TONE: Record<string, "success" | "accent" | "warning" | "danger" | "outline"> = { "Strong hire": "success", Hire: "accent", "Lean no": "warning", "No hire": "danger", "Ended early": "danger" };
+const SIGNAL_TONE: Record<string, "success" | "accent" | "warning" | "danger" | "outline"> = { "Strong Hire": "success", Hire: "accent", "Leaning Hire": "warning", "No Hire": "danger", "Strong No Hire": "danger" };
+const TIERS = ["Strong No Hire", "No Hire", "Leaning Hire", "Hire", "Strong Hire"];
+const ATTR_WORD: Record<number, string> = { 1: "Strong concern", 2: "Concern", 3: "Meets the bar", 4: "Strong" };
+type Panel = {
+  attributes: { key: string; label: string; score: number; evidence: string; comment: string }[];
+  verdict: string;
+  technical_notes: string[];
+  behavioural_notes: string[];
+  scribe: { n: number; framework: string; present: string[]; missing: string[] }[];
+  ai: boolean;
+};
 const VERDICT_TONE: Record<string, "success" | "warning" | "danger" | "outline"> = { correct: "success", "partially correct": "warning", incorrect: "danger" };
 
 async function downloadReport(id: string, format: "pdf" | "docx") {
@@ -124,6 +135,7 @@ export function InterviewReport({ id }: { id: string }) {
           </span>
         </div>
         {r.summary && <p className="text-[14px] leading-relaxed">{r.summary}</p>}
+        {r.panel && <PanelCard p={r.panel} />}
         {!!r.focus.length && (
           <div>
             <div className="mb-2 flex items-center gap-1.5 text-[13px] font-medium">
@@ -223,6 +235,58 @@ function Section({ icon, title, items, empty }: { icon: React.ReactNode; title: 
         </ul>
       ) : (
         <p className="text-[13px] text-text-3">{empty}</p>
+      )}
+    </div>
+  );
+}
+
+/** The panel's scorecard: four attributes (1-4) from a technical critic and a behavioural coach, and the verdict. */
+function PanelCard({ p }: { p: Panel }) {
+  return (
+    <div className="space-y-3 rounded-[var(--radius-card)] border border-border p-4">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <div className="text-[13.5px] font-medium">Panel scorecard</div>
+        <span className="text-[12px] text-text-3">{p.ai ? "Technical critic + behavioural coach, graded against hiring rubrics" : "From your rubric scores"}</span>
+      </div>
+      <div className="flex flex-wrap gap-1" aria-label="Verdict scale">
+        {TIERS.map((t) => (
+          <span key={t} className={`rounded-full border px-2.5 py-0.5 text-[11.5px] ${t === p.verdict ? "border-[var(--cobalt)] bg-cobalt-subtle font-medium text-cobalt-text" : "border-border text-text-3"}`}>
+            {t}
+          </span>
+        ))}
+      </div>
+      <ul className="space-y-2.5">
+        {p.attributes.map((a) => (
+          <li key={a.key} className="text-[13px]">
+            <div className="flex items-center justify-between gap-2">
+              <span className="font-medium">{a.label}</span>
+              <span className="num text-text-2">
+                {a.score}/4 · {ATTR_WORD[a.score]}
+              </span>
+            </div>
+            <div className="mt-1 flex gap-1" aria-hidden>
+              {[1, 2, 3, 4].map((i) => (
+                <span key={i} className={`h-1.5 flex-1 rounded-full ${i <= a.score ? (a.score >= 3 ? "bg-success" : a.score === 2 ? "bg-warning" : "bg-[var(--error)]") : "bg-elevated"}`} />
+              ))}
+            </div>
+            {(a.evidence || a.comment) && (
+              <p className="mt-1 text-[12.5px] text-text-2">
+                {a.evidence && <span className="italic">“{a.evidence}” </span>}
+                {a.comment}
+              </p>
+            )}
+          </li>
+        ))}
+      </ul>
+      {!!(p.technical_notes.length || p.behavioural_notes.length) && (
+        <ul className="space-y-1 border-t border-border pt-2.5 text-[12.5px] text-text-2">
+          {p.technical_notes.map((n) => (
+            <li key={n}>· Technical critic: {n}</li>
+          ))}
+          {p.behavioural_notes.map((n) => (
+            <li key={n}>· Behavioural coach: {n}</li>
+          ))}
+        </ul>
       )}
     </div>
   );

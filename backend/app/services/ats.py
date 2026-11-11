@@ -105,11 +105,12 @@ class ResumeView:
 
 def view_from_resume(resume: ResumeData, raw_text: str | None = None, filename: str | None = None) -> ResumeView:
     bullets = [(sid, t) for sid, t in resume.bullet_index() if t.strip()]
-    exp_headers = [f"{e.title} {e.organization}" for e in resume.experience]
+    exp_headers = [f"{e.title} {e.organization} {e.location}" + (f" Tech: {', '.join(e.tech)}" if e.tech else "") for e in resume.experience]
     proj_headers = [f"{p.name} {' '.join(p.tech)}" for p in resume.projects]
     edu = [f"{e.degree} {e.school} {e.details}" for e in resume.education]
     narrative = "\n".join([resume.summary, *exp_headers, *proj_headers, *(t for _, t in bullets)])
-    structured = "\n".join([resume.name, resume.email, resume.phone, resume.location, *resume.links, narrative, "Skills: " + ", ".join(resume.skills), *edu])
+    groups = [f"{g.name}: {', '.join(g.items)}" for g in resume.skill_groups]
+    structured = "\n".join([resume.name, resume.email, resume.phone, resume.location, *resume.links, narrative, "Skills: " + ", ".join(resume.skills), *groups, *edu, *resume.certifications])
     text = structured if not raw_text else f"{raw_text}\n{structured}"
     return ResumeView(
         text=text,

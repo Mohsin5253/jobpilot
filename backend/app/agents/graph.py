@@ -25,7 +25,7 @@ from langgraph.checkpoint.base import BaseCheckpointSaver
 from langgraph.graph import END, START, StateGraph
 
 from app.agents.approval import run_approval_gate, run_dispatch
-from app.agents.common import PipelineState, mark_skipped
+from app.agents.common import PipelineState, mark_checked, mark_skipped
 from app.agents.interviewer import run_interviewer
 from app.agents.matcher import run_matcher
 from app.agents.outreach import run_outreach
@@ -39,8 +39,8 @@ from app.agents.verifier import run_verifier
 PIPELINE: list[tuple[str, Callable[[PipelineState], bool], str]] = [
     ("researcher", lambda s: not (s.get("rescore_match_ids") or s.get("direct")), "Not needed for this run"),
     ("scout", lambda s: not (s.get("rescore_match_ids") or s.get("direct")), "Not needed for this run"),
-    ("verifier", lambda s: bool(s.get("new_job_ids")) and not (s.get("rescore_match_ids") or s.get("direct")), "No new jobs to check"),
-    ("matcher", lambda s: bool(s.get("new_job_ids") or s.get("rescore_match_ids")) and not s.get("direct"), "No new jobs to score"),
+    ("verifier", lambda s: bool(s.get("new_job_ids") or s.get("recheck_match_ids")) and not (s.get("rescore_match_ids") or s.get("direct")), "No new jobs to check"),
+    ("matcher", lambda s: bool(s.get("new_job_ids") or s.get("rescore_match_ids") or s.get("recheck_match_ids")) and not s.get("direct"), "No new jobs to score"),
     ("interviewer", lambda s: bool(s.get("match_ids")) and not (s.get("rescore_match_ids") or s.get("direct")), "No near-miss jobs to ask about"),
     ("tailor", lambda s: bool(s.get("shortlist_ids")), "No job cleared your minimum fit score"),
     ("outreach", lambda s: bool(s.get("tailored_ids")), "Nothing tailored"),
@@ -66,13 +66,51 @@ AGENTS: dict[str, Callable[[PipelineState], Awaitable[dict]]] = {
 RULES = {name: (should_run, reason) for name, should_run, reason in PIPELINE}
 
 
+def full_run(state: PipelineState) -> bool:
+    """"Run agents" (not "Prepare application" or a skill-question re-score, which use only some of the crew)."""
+    return not (state.get("direct") or state.get("rescore_match_ids"))
+
+
+async def up_to_date(name: str, state: PipelineState, reason: str) -> str:
+    """What the agent found when there was nothing new for it: the state of the work it owns."""
+    import uuid
+
+    from sqlalchemy import func, select
+
+    from app.db import session_scope
+    from app.models import DraftStatus, JobMatch, OutreachDraft, Stage, TailoredResume
+
+    user = uuid.UUID(state["user_id"])
+    async with session_scope() as s:
+        if name in ("approval", "dispatch", "outreach"):
+            pending = (await s.execute(select(func.count()).select_from(OutreachDraft).join(JobMatch, JobMatch.id == OutreachDraft.match_id).where(JobMatch.user_id == user, OutreachDraft.status == DraftStatus.pending))).scalar_one()
+            if name == "approval":
+                return f"Up to date: no new drafts this run · {pending} waiting for you in Approvals" if pending else "Up to date: nothing waiting for your approval"
+            if name == "dispatch":
+                return "Up to date: nothing newly approved to send"
+            return f"Up to date: every tailored resume already has its draft ({pending} awaiting approval)"
+        if name == "tailor":
+            ready = (await s.execute(select(func.count()).select_from(TailoredResume).join(JobMatch, JobMatch.id == TailoredResume.match_id).where(JobMatch.user_id == user, JobMatch.stage.in_([Stage.found, Stage.shortlisted])))).scalar_one()
+            return f"Up to date: your {ready} shortlisted job{'s' if ready != 1 else ''} already have tailored resumes; no other job clears your minimum fit" if ready else "Up to date: no job clears your minimum fit score yet"
+    return f"Up to date: {reason[0].lower() + reason[1:]}"
+
+
 def gated(name: str, fn: Callable[[PipelineState], Awaitable[dict]]):
     """Runs the agent if it has work in this run; otherwise records why it was skipped."""
 
     async def node(state: PipelineState) -> dict:
         should_run, reason = RULES[name]
         if not should_run(state):
-            await mark_skipped(state, name, reason)
+            if full_run(state):
+                # A full run: the agent checked its inputs and everything it owns is already done. That is its job
+                # done for this run (a tick, with what it found), not a skip.
+                try:
+                    detail = await up_to_date(name, state, reason)
+                except Exception:  # the summary is a courtesy; never let it fail the run
+                    detail = f"Up to date: {reason[0].lower() + reason[1:]}"
+                await mark_checked(state, name, detail)
+            else:
+                await mark_skipped(state, name, reason)
             return {"done": [name]}
         return await fn(state)
 

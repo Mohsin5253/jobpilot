@@ -1,7 +1,7 @@
 """The end-of-interview report: every round graded against the field's norms at the candidate's level, with strengths,
 gaps and improvements, the coding verdicts, and an overall signal in the words hiring panels use.
 
-Signals (practice only, never shared): Strong hire / Hire / Lean no / No hire, from the average rubric score against
+Signals (practice only, never shared): Strong Hire / Hire / Leaning Hire / No Hire / Strong No Hire, from the average rubric score against
 the level's bar (interns 3.2/5, freshers 3.6/5) and how many rounds fell below it. An interview ended for integrity
 reasons is reported as such. An AI-written summary is added when available; everything else is rule-based, so the
 report is the same every time it's opened.
@@ -16,7 +16,15 @@ from app.services.interview_rounds import BAR, norm_for
 
 COMPONENTS = {
     "verbal": {"relevance": "Relevance to what was asked", "specificity": "Specific examples and numbers", "structure": "Structure (situation → action → result)"},
-    "coding": {"correctness": "Correctness", "efficiency": "Efficiency vs the expected complexity", "quality": "Code quality", "communication": "Explaining the approach"},
+    "coding": {
+        "correctness": "Correctness",
+        "efficiency": "Efficiency vs the expected complexity",
+        "quality": "Code quality",
+        "communication": "Explaining the approach",
+        "clarification": "Clarifying questions first",
+        "design": "Complexity stated before coding",
+        "testing": "Testing & optimising your own code",
+    },
 }
 GAP_TEXT = {
     "relevance": "Answers drifted from what was asked. Restate the question in one line, then answer that.",
@@ -26,6 +34,9 @@ GAP_TEXT = {
     "efficiency": "Solutions were slower than expected. Start from brute force, then look for a hash map, sorting or two pointers.",
     "quality": "Code was hard to read. Use descriptive names and small helper functions.",
     "communication": "The approach wasn't explained. Say the idea, complexity and edge cases before you code.",
+    "clarification": "Started coding without clarifying. Ask about input size, empty input and duplicates first.",
+    "design": "Complexity wasn't stated (or was off) before coding. Say the brute force, then the better approach with its O().",
+    "testing": "Code wasn't tested by you. Walk through an edge case and name one optimisation before submitting.",
 }
 # Where to practise, per kind of round (and per field where it differs).
 RESOURCES = {
@@ -50,17 +61,20 @@ FIELD_RESOURCES = {
 
 
 def _signal(avg: float | None, below: int, bar: float, terminated: bool) -> str:
+    """The five tiers hiring committees use, from the rubric average against the level's bar."""
     if terminated:
-        return "Ended early"
+        return "No Hire"
     if avg is None:
         return "Not enough answers"
     if avg >= bar + 0.8 and below == 0:
-        return "Strong hire"
+        return "Strong Hire"
     if avg >= bar and below <= 1:
         return "Hire"
-    if avg >= bar - 0.5:
-        return "Lean no"
-    return "No hire"
+    if avg >= bar - 0.3:
+        return "Leaning Hire"
+    if avg >= bar - 0.9:
+        return "No Hire"
+    return "Strong No Hire"
 
 
 def build(s) -> dict:

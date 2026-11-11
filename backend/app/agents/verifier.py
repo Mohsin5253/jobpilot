@@ -27,6 +27,7 @@ from app.llm import LLMOutputError, LLMUnavailable, get_llm
 from app.models import Job, Verification
 from app.services import scam_shield
 
+LINK_RECHECKS = 15  # apply links re-opened per run when re-checking open matches
 RECHECK_AFTER = timedelta(days=1)
 MAX_LLM_REVIEWS = 6
 
@@ -197,10 +198,60 @@ async def second_opinion(job: Job, state: PipelineState) -> SecondOpinion | None
         return None
 
 
+async def _recheck_open(state: PipelineState, step, match_ids: list[uuid.UUID], now: datetime) -> dict:
+    """No new postings: re-open the apply links of your open matches (a closed listing is hidden before you spend
+    time on it) and re-run the scam checks on any not checked recently."""
+    import asyncio
+
+    import httpx
+
+    from app.models import JobMatch
+    from app.sources.authenticity import FIRST_PARTY, check_link
+    from app.sources.base import USER_AGENT
+
+    async with session_scope() as s:
+        rows = (await s.execute(select(JobMatch.id, Job).join(Job, Job.id == JobMatch.job_id).where(JobMatch.id.in_(match_ids)))).all()
+    to_link = [j for _, j in rows if j.source not in FIRST_PARTY and j.url][:LINK_RECHECKS]
+    sem = asyncio.Semaphore(8)
+
+    async def one(client, j):
+        async with sem:
+            return j.id, await check_link(client, j.url)
+
+    status: dict = {}
+    if to_link:
+        async with httpx.AsyncClient(headers={"User-Agent": USER_AGENT}) as client:
+            status = dict(await asyncio.gather(*(one(client, j) for j in to_link)))
+    closed = suspicious = care = 0
+    keep: list[str] = []
+    async with session_scope() as s:
+        for match_id, j0 in rows:
+            j = await s.get(Job, j0.id)
+            if status.get(j.id) == "dead":
+                j.link_status = "dead"
+                closed += 1
+            elif status.get(j.id) == "ok":
+                j.link_status = "ok"
+            if j.legit_checked_at is None or j.legit_checked_at < now - RECHECK_AFTER:
+                await apply_verdict(s, j, now, assess(j))
+            suspicious += j.legit_status == "suspicious"
+            care += j.legit_status == "caution"
+            if j.link_status != "dead" and j.legit_status != "suspicious":
+                keep.append(str(match_id))
+    step.detail = (
+        f"Re-checked your {len(rows)} open match{'es' if len(rows) != 1 else ''}: {len(status)} apply link{'s' if len(status) != 1 else ''} opened, "
+        f"{closed} closed and hidden, {care} need care, {suspicious} blocked"
+    )
+    return {"recheck_match_ids": keep, "done": ["verifier"]}
+
+
 async def run_verifier(state: PipelineState) -> dict:
     async with agent_step(state, "verifier") as step:
         ids = [uuid.UUID(j) for j in state.get("new_job_ids", [])]
+        recheck = [uuid.UUID(m) for m in state.get("recheck_match_ids", [])] if not ids else []
         now = datetime.now(UTC)
+        if recheck:
+            return await _recheck_open(state, step, recheck, now)
         async with session_scope() as s:
             jobs = (await s.execute(select(Job).where(Job.id.in_(ids)))).scalars().all()
             fresh = [j for j in jobs if j.legit_checked_at is None or j.legit_checked_at < now - RECHECK_AFTER]
@@ -233,4 +284,10 @@ async def run_verifier(state: PipelineState) -> dict:
 
         step.detail = f"Checked {len(jobs)} job{'' if len(jobs) == 1 else 's'}: {counts['verified']} verified, {counts['caution']} need care, {counts['suspicious']} blocked as suspicious"
         await bump_stats(state["run_id"], verified=counts["verified"], caution=counts["caution"], suspicious=counts["suspicious"])
+        if not keep and state.get("recheck_match_ids"):
+            # Every new posting was blocked: the rest of the crew works on your open matches instead.
+            first = step.detail
+            out = await _recheck_open(state, step, [uuid.UUID(m) for m in state["recheck_match_ids"]], now)
+            step.detail = f"{first} · {step.detail}"
+            return {**out, "new_job_ids": []}
         return {"new_job_ids": keep, "done": ["verifier"]}

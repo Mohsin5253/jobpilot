@@ -604,7 +604,7 @@ export function TraceSample({ costPerRun }: { costPerRun: string | null }) {
 
 /* ───────────────────── 7. Pricing ───────────────────── */
 
-type Plan = { name: string; price: string; note: string; items: { t: string; soon?: boolean }[]; cta: ReactNode; highlight?: boolean };
+type Plan = { name: string; price: string; note: string; items: { t: string; soon?: boolean }[]; cta: ReactNode; highlight?: boolean; badge?: string };
 
 export function Pricing() {
   const plans: Plan[] = [
@@ -628,9 +628,20 @@ export function Pricing() {
       ),
     },
     {
+      name: "Week Pass",
+      price: `₹${WEEK_PASS_INR}`,
+      note: "one week of Pro, UPI · no renewal",
+      items: [{ t: "Everything in Pro for 7 days" }, { t: "For a placement week or an application sprint" }, { t: "Pay once, nothing renews" }],
+      cta: (
+        <Link href="/billing?plan=week_pass" className={buttonClass({ size: "lg", className: "w-full" })}>
+          Get the Week Pass
+        </Link>
+      ),
+    },
+    {
       name: "Pro",
       price: `₹${PRO_INR}`,
-      note: `per month (UPI AutoPay or card), or ₹${YEAR_PASS_INR.toLocaleString("en-IN")} for a Year Pass`,
+      note: "per month · UPI AutoPay or card · cancel anytime",
       items: [
         { t: "Everything in Free" },
         { t: "10× the AI budget: more tailoring, code reviews and interview feedback each day" },
@@ -647,13 +658,19 @@ export function Pricing() {
       highlight: true,
     },
     {
-      name: "Week Pass",
-      price: `₹${WEEK_PASS_INR}`,
-      note: "one week of Pro, UPI · no renewal",
-      items: [{ t: "Everything in Pro for 7 days" }, { t: "For a placement week or an application sprint" }, { t: "Pay once, nothing renews" }],
+      name: "Year Pass",
+      price: `₹${YEAR_PASS_INR.toLocaleString("en-IN")}`,
+      note: `per year · ≈ ₹${Math.round(YEAR_PASS_INR / 12)}/month · UPI, pay once`,
+      items: [
+        { t: "Everything in Pro for 365 days" },
+        { t: `Save ₹${(PRO_INR * 12 - YEAR_PASS_INR).toLocaleString("en-IN")} vs paying monthly` },
+        { t: "Covers the whole placement season" },
+        { t: "Pay once, nothing renews" },
+      ],
+      badge: "Best value",
       cta: (
-        <Link href="/billing?plan=week_pass" className={buttonClass({ size: "lg", className: "w-full" })}>
-          Get the Week Pass
+        <Link href="/billing?plan=year_pass" className={buttonClass({ size: "lg", className: "w-full" })}>
+          Get the Year Pass
         </Link>
       ),
     },
@@ -677,13 +694,14 @@ export function Pricing() {
   return (
     <Wrap id="pricing">
       <SectionHead center eyebrow="Pricing" title="Free to start. Pay in rupees when you want more depth." sub={`Pro is about better applications, not more of them. Pay by UPI QR, UPI, card or netbanking: ₹${WEEK_PASS_INR} a week, ₹${PRO_INR} a month, or ₹${YEAR_PASS_INR.toLocaleString("en-IN")} a year.`} />
-      <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
+      <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5">
         {plans.map((p, i) => (
           <Reveal key={p.name} delay={i * 0.05}>
             <div className={cn("card flex h-full flex-col p-6", p.highlight && "border-[color-mix(in_oklab,var(--cobalt)_45%,transparent)] shadow-[0_0_0_1px_color-mix(in_oklab,var(--cobalt)_25%,transparent),var(--shadow-2)]")}>
               <div className="flex items-center justify-between">
                 <h3 className="eyebrow">{p.name}</h3>
                 {p.highlight && <Badge tone="accent">Beta</Badge>}
+                {p.badge && <Badge tone="success">{p.badge}</Badge>}
               </div>
               <div className="mt-4">
                 <span className="num text-[40px] leading-none font-semibold tracking-[-0.03em]">{p.price}</span>

@@ -88,12 +88,16 @@ async def test_full_pipeline_with_human_approval(authed):
     overview = (await authed.get("/api/stats/overview")).json()
     assert overview["stage_counts"]["applied"] == 1 and overview["llm_mode"] == "offline"
 
-    # A second run sees no new jobs: matcher onwards are skipped, tracker still runs.
+    # A second run sees no new jobs: every agent still does its job on your open matches (re-checked, re-ranked)
+    # and is ticked, saying what it found; nothing is skipped, and nothing you already know about is re-announced.
     await authed.post("/api/runs")
     assert await _work() == "completed"
     latest = (await authed.get("/api/runs")).json()[0]
-    statuses = {s["agent"]: s["status"] for s in latest["steps"]}
-    assert statuses["matcher"] == "skipped" and statuses["tracker"] == "completed"
+    steps = {s["agent"]: s for s in latest["steps"]}
+    bad = {k: (v["status"], v["detail"]) for k, v in steps.items() if v["status"] != "completed"}
+    assert not bad, bad
+    assert steps["verifier"]["detail"].startswith("Re-checked your") and steps["matcher"]["detail"].startswith("Re-ranked your")
+    assert steps["approval"]["detail"].startswith("Up to date")
 
 
 @respx.mock

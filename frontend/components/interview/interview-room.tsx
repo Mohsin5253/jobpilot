@@ -47,6 +47,10 @@ type Score = {
   efficiency?: number;
   quality?: number;
   communication?: number;
+  clarification?: number;
+  design?: number;
+  testing?: number;
+  follow_up?: string;
   ai?: boolean;
   language?: string;
 };
@@ -449,13 +453,32 @@ function AnswerPanel({
     dictation.start();
   };
 
+  // One follow-up per answer, like a trained interviewer: pushback, a new constraint, or "what was your part?".
+  const [followUp, setFollowUp] = useState<string | null>(null);
+  const probe = useMutation({
+    mutationFn: (answer: string) => api.post<{ follow_up: string }>(`/interviews/${s.id}/follow-up`, { question_id: q.id, answer }),
+    onSuccess: (r, answer) => {
+      if (!r.follow_up) return submit.mutate(answer);
+      setFollowUp(r.follow_up);
+      setText(`${answer}\n\nFollow-up: ${r.follow_up}\nMy answer: `);
+      setLeft((l) => Math.max(l, 0) + 60);
+      head.current?.listen(false);
+      speak(r.follow_up, () => head.current?.listen(true));
+    },
+    onError: (_e, answer) => submit.mutate(answer),
+  });
+  const onSubmit = () => {
+    const answer = text.trim();
+    if (!followUp && left > 25 && answer.split(/\s+/).length >= 12) probe.mutate(answer);
+    else submit.mutate(answer);
+  };
   const submit = useMutation({
     mutationFn: (answer: string) => {
       const m = meta.current;
       return api.post<InterviewSession>(`/interviews/${s.id}/answer`, {
         question_id: q.id,
         answer,
-        meta: { mode: m.spoke && m.typed ? "mixed" : m.spoke ? "voice" : "typed", keystrokes: m.keystrokes, voice_chars: m.voice_chars, active_ms: m.started ? Date.now() - m.started : 0, pastes_blocked: m.pastes_blocked },
+        meta: { mode: m.spoke && m.typed ? "mixed" : m.spoke ? "voice" : "typed", keystrokes: m.keystrokes, voice_chars: m.voice_chars, active_ms: m.started ? Date.now() - m.started : 0, pastes_blocked: m.pastes_blocked, follow_up: followUp },
       });
     },
     onSuccess: (r) => onScored(r, q),
@@ -556,6 +579,13 @@ function AnswerPanel({
           aria-label="Your answer"
           className={cn(dictation.listening && "border-[var(--cobalt)]")}
         />
+        {followUp && (
+          <div className="rounded-[var(--radius-card)] border border-[var(--cobalt)]/40 bg-cobalt-subtle/40 p-3 text-[13.5px]" aria-live="polite">
+            <span className="font-medium text-cobalt-text">Follow-up: </span>
+            {followUp}
+            <span className="mt-1 block text-[12px] text-text-3">Answer it under “My answer:” (speak or type). You have an extra minute; both answers are graded together.</span>
+          </div>
+        )}
         {!dictation.listening && !dictation.transcribing && dictation.source && (
           <p className="text-[12px] text-text-3" aria-live="polite">
             {dictation.source === "whisper" ? "✓ Transcribed word for word by Whisper. Check it and fix any word before you submit." : "Live captions only (the accurate transcriber wasn't available). Read it through and fix any misheard word before you submit."}
@@ -583,11 +613,11 @@ function AnswerPanel({
           </Button>
           <Button
             variant="primary"
-            loading={submit.isPending}
-            disabled={!text.trim() || !ready || dictation.listening || dictation.transcribing}
-            onClick={() => submit.mutate(text.trim())}
+            loading={submit.isPending || probe.isPending}
+            disabled={!text.trim() || !ready || dictation.listening || dictation.transcribing || probe.isPending}
+            onClick={onSubmit}
           >
-            Submit answer <ArrowRight />
+            {followUp ? "Submit both answers" : "Submit answer"} <ArrowRight />
           </Button>
           {!ready && !speaking && (
             <Button variant="ghost" onClick={() => (setReady(true), (meta.current.started = Date.now()))}>
@@ -677,6 +707,22 @@ export function CodeReviewCard({ f, last, onNext }: { f: { q: Q; sc: Score }; la
           </div>
         ))}
       </div>
+      {sc.clarification != null && (
+        <div className="grid grid-cols-3 gap-2 text-[12.5px]" aria-label="Interview process">
+          {(
+            [
+              ["clarification", "Clarified first"],
+              ["design", "Complexity stated"],
+              ["testing", "Tested & optimised"],
+            ] as const
+          ).map(([k, label]) => (
+            <div key={k} className="rounded-[var(--radius-control)] border border-border px-2.5 py-2">
+              <div className="text-text-3">{label}</div>
+              <div className="num text-[15px] font-semibold">{sc[k] ?? "—"}/5</div>
+            </div>
+          ))}
+        </div>
+      )}
       <p className="text-[13px] text-text-2">
         Complexity: <span className="num">{sc.time_complexity}</span> time, <span className="num">{sc.space_complexity}</span> space{sc.optimal === false ? " · not the expected optimum" : sc.optimal ? " · optimal" : ""}
       </p>
@@ -732,13 +778,13 @@ function CodingTurn({
 }) {
   const [ready, setReady] = useState(false);
   useEffect(() => {
-    speak(`${intro ? `${intro} ` : ""}Here's your problem: ${q.problem.title}. Read it, explain your approach, then code it.`, () => {
+    speak(`${intro ? `${intro} ` : ""}Here's your problem: ${q.problem.title}. Start by asking me anything that's unclear, then tell me your approach and its complexity before you code.`, () => {
       setReady(true);
       head.current?.listen(true);
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [q.id]);
-  return <CodingPanel sessionId={s.id} q={q} index={s.questions.findIndex((x) => x.id === q.id)} total={s.questions.length} strict={strict} onFlag={(t) => flag(t)} onReviewed={(r) => onReviewed(r as InterviewSession)} ready={ready} />;
+  return <CodingPanel sessionId={s.id} q={q} index={s.questions.findIndex((x) => x.id === q.id)} total={s.questions.length} strict={strict} onFlag={(t) => flag(t)} onReviewed={(r) => onReviewed(r as InterviewSession)} ready={ready} say={(t) => speak(t)} />;
 }
 
 const EVENT_LABEL: Record<string, string> = {

@@ -23,6 +23,7 @@ class PipelineState(TypedDict, total=False):
     done: Annotated[list[str], operator.add]
     errors: Annotated[list[str], operator.add]
     new_job_ids: list[str]
+    recheck_match_ids: list[str]  # a full run with no new postings: your open matches, re-verified and re-ranked
     rescore_match_ids: list[str]  # set on runs started by answering skill questions
     direct: bool  # "Prepare application" runs: tailor + draft the given shortlist_ids only
     force_research: bool  # "Research now": skip the Researcher's cooldown
@@ -89,6 +90,12 @@ async def agent_step(state: PipelineState, agent: str):
 
 async def mark_skipped(state: PipelineState, agent: str, reason: str) -> None:
     await _patch_step(uuid.UUID(state["run_id"]), agent, status="skipped", detail=reason)
+
+
+async def mark_checked(state: PipelineState, agent: str, detail: str) -> None:
+    """The agent looked at its inputs in a full run and everything is already up to date: its job is done."""
+    now = datetime.now(UTC).isoformat()
+    await _patch_step(uuid.UUID(state["run_id"]), agent, status="completed", detail=detail, started_at=now, ended_at=now)
 
 
 async def bump_stats(run_id: str, **values: int) -> None:

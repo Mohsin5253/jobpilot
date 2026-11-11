@@ -123,7 +123,7 @@ async def test_coding_submission_and_report(authed):
         if q["kind"] != "coding":
             await authed.post(f"/api/interviews/{s['id']}/answer", json={"question_id": q["id"], "answer": "I like it."})
     rep = (await authed.get(f"/api/interviews/{s['id']}/report")).json()
-    assert rep["signal"] in ("Lean no", "No hire") and rep["bar"] in (3.2, 3.6) and rep["minutes"] == 30
+    assert rep["signal"] in ("Leaning Hire", "No Hire", "Strong No Hire") and rep["panel"]["attributes"] and rep["bar"] in (3.2, 3.6) and rep["minutes"] == 30
     assert all(r["norm"] and r["improvements"] for r in rep["rounds"])
     coding = next(r for r in rep["rounds"] if r["kind"] == "coding")
     assert coding["coding"][0]["verdict"] == "partially correct" and coding["status"] in ("Below bar", "Meets bar", "Above bar")

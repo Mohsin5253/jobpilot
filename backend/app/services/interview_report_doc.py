@@ -22,13 +22,14 @@ from app.services.resume_doc import pdf_safe
 IST = ZoneInfo("Asia/Kolkata")
 INTERVIEWERS = {"female": ("Ananya", "Senior recruiter"), "male": ("Arjun", "Hiring manager")}
 RECOMMENDATION = {
-    "Strong hire": "Strong Hire",
+    "Strong Hire": "Strong Hire",
     "Hire": "Hire",
-    "Lean no": "No Hire",
-    "No hire": "Strong No Hire",
-    "Ended early": "No Hire (interview ended early)",
+    "Leaning Hire": "Leaning Hire",
+    "No Hire": "No Hire",
+    "Strong No Hire": "Strong No Hire",
     "Not enough answers": "No decision (too few answers)",
 }
+ATTR_SCALE = {1: "Strong concern", 2: "Concern", 3: "Meets the bar", 4: "Strong"}
 VERBAL_ROUNDS_EXPERIENCE = {"screening", "project", "proof", "skill", "portfolio", "behavioural"}
 CRITERIA = [
     ("experience", "Work Experience & Relevancy", "How well your examples matched what this role needs."),
@@ -173,7 +174,8 @@ def compose(s, report: dict, guides: dict[str, dict], candidate: str) -> dict:
         "overall": report.get("score"),
         "bar": bar,
         "signal": report.get("signal", ""),
-        "recommendation": RECOMMENDATION.get(report.get("signal", ""), report.get("signal", "")),
+        "recommendation": ("No Hire (interview ended early)" if (s.status or "") == "terminated" else RECOMMENDATION.get(report.get("signal", ""), report.get("signal", ""))),
+        "panel": report.get("panel") or {},
         "summary": report.get("summary") or "",
         "matrix": _matrix(s, round_kind, bar),
         "rounds": report["rounds"],
@@ -300,6 +302,15 @@ def render_pdf(data: dict) -> bytes:
     rows += [[P(m["label"], "cellb"), P(_score(m["score"])), P(m["comment"])] for m in data["matrix"]]
     rows.append([P("Overall", "cellb"), P(_score(data["overall"]), "cellb"), P(f"Average of all answers. The bar for this level is {data['bar']}/5.")])
     story.append(table(rows, [width * 0.30, width * 0.10, width * 0.60]))
+    panel = data.get("panel") or {}
+    if panel.get("attributes"):
+        story += heading("Panel scorecard (Google-style attributes, 1-4)")
+        rows = [[P("Attribute", "cellb"), P("Rating", "cellb"), P("Evidence & comment", "cellb")]]
+        rows += [[P(a["label"], "cellb"), P(f"{a['score']}/4 · {ATTR_SCALE.get(a['score'], '')}"), P(" ".join(x for x in (f"“{a['evidence']}”" if a.get("evidence") else "", a.get("comment", "")) if x))] for a in panel["attributes"]]
+        story.append(table(rows, [width * 0.30, width * 0.18, width * 0.52]))
+        notes = [*(f"Technical critic: {n}" for n in panel.get("technical_notes", [])), *(f"Behavioural coach: {n}" for n in panel.get("behavioural_notes", []))]
+        if notes:
+            story.append(KeepTogether([Paragraph("Panel notes", st["label"]), bullets(notes[:6])]))
     story += heading("Round results")
     rows = [[P("Round", "cellb"), P("Score", "cellb"), P("Bar", "cellb"), P("Result", "cellb"), P("Answered", "cellb")]]
     rows += [[P(r["name"]), P(_score(r["score"])), P(f"{r['bar']}/5"), P(r["status"]), P(f"{r['answered']} of {r['total']}")] for r in data["rounds"]]
@@ -319,7 +330,7 @@ def render_pdf(data: dict) -> bytes:
                     header=False,
                     label_col=True,
                 ),
-                Paragraph("Scale: Strong Hire · Hire · No Hire · Strong No Hire. Practice signal against the bar for your level; not shared with any employer.", st["small"]),
+                Paragraph("Scale: Strong No Hire · No Hire · Leaning Hire · Hire · Strong Hire, from the panel's four attributes and the bar for your level. Practice only; not shared with any employer.", st["small"]),
             ]
         )
     )
@@ -541,6 +552,14 @@ def render_docx(data: dict) -> bytes:
     rows = [["Criterion", "Score", "Comments"]] + [[m["label"], _score(m["score"]), m["comment"]] for m in data["matrix"]]
     rows.append(["Overall", _score(data["overall"]), f"Average of all answers. The bar for this level is {data['bar']}/5."])
     table(rows, [53, 18, 107], bold_cols=(0,))
+    panel = data.get("panel") or {}
+    if panel.get("attributes"):
+        heading("Panel scorecard (Google-style attributes, 1-4)")
+        table([["Attribute", "Rating", "Evidence & comment"]] + [[a["label"], f"{a['score']}/4 · {ATTR_SCALE.get(a['score'], '')}", " ".join(x for x in (f"“{a['evidence']}”" if a.get("evidence") else "", a.get("comment", "")) if x)] for a in panel["attributes"]], [53, 32, 93], bold_cols=(0,))
+        notes = [*(f"Technical critic: {n}" for n in panel.get("technical_notes", [])), *(f"Behavioural coach: {n}" for n in panel.get("behavioural_notes", []))]
+        if notes:
+            label("Panel notes")
+            bullets(notes[:6])
     heading("Round results")
     table([["Round", "Score", "Bar", "Result", "Answered"]] + [[r["name"], _score(r["score"]), f"{r['bar']}/5", r["status"], f"{r['answered']} of {r['total']}"] for r in data["rounds"]], [70, 23, 21, 36, 28])
     heading("Summary & recommendation")
@@ -551,7 +570,7 @@ def render_docx(data: dict) -> bytes:
     label("Concerns / red flags")
     bullets(data["concerns"])
     table([["Hiring recommendation", data["recommendation"]], ["Signature & date", data["signed"]]], [53, 125], header=False, label_col=True, bold_cols=(1,))
-    para("Scale: Strong Hire · Hire · No Hire · Strong No Hire. Practice signal against the bar for your level; not shared with any employer.", size=8.5, color=muted)
+    para("Scale: Strong No Hire · No Hire · Leaning Hire · Hire · Strong Hire, from the panel's four attributes and the bar for your level. Practice only; not shared with any employer.", size=8.5, color=muted)
     if data["next_week"]:
         heading("Practice plan for the next 7 days")
         bullets(data["next_week"])
