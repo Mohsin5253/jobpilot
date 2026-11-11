@@ -92,3 +92,40 @@ async def test_interview_follow_up_clarify_and_panel(authed):
     assert {a["key"] for a in panel["attributes"]} >= {"rrk"} and all(1 <= a["score"] <= 4 for a in panel["attributes"])
     session = (await authed.get(f"/api/interviews/{s['id']}")).json()
     assert session["scores"][verbal["id"]]["follow_up"] == fu
+
+
+def test_field_grading_is_role_aware():
+    from app.services import ats
+
+    backend = ResumeData(
+        name="B", skills=["Python", "FastAPI", "PostgreSQL", "Docker", "Git"],
+        projects=[ProjectItem(name="Payments API", tech=["FastAPI", "PostgreSQL"], bullets=["Built a REST API with FastAPI and PostgreSQL serving 2,000 requests a day."])],
+    )
+    rep = ats.score(ats.view_from_resume(backend), "software")
+    assert rep["track"]["key"] == "backend"
+    missing = {m["term"] for m in rep["keywords"]["missing"]}
+    assert not missing & {"React Native", "Kubernetes", "Next.js", "GraphQL"}  # a backend resume isn't graded on mobile or frontend stacks
+    mobile = ResumeData(name="M", skills=["Kotlin", "Android", "Firebase"], projects=[ProjectItem(name="Bus tracker app", tech=["Android", "Kotlin"], bullets=["Built an Android app in Kotlin with Firebase used by 400 students."])])
+    assert ats.score(ats.view_from_resume(mobile), "software")["track"]["key"] == "mobile"
+    # With a job description, the job's own terms decide (no track).
+    assert ats.score(ats.view_from_resume(backend), "software", "Backend Intern", "Python, FastAPI, Redis")["track"] is None
+
+
+async def test_boost_adds_proven_skills_and_plans_the_rest():
+    from app.services.ats_boost import boost, implied_keywords
+
+    r = ResumeData(
+        name="A", links=["github.com/a"], skills=["Python", "Flask"],
+        education=[__import__("app.schemas", fromlist=["x"]).EducationItem(school="X", degree="B.Tech", details="Coursework: Object Oriented Programming, DBMS")],
+        projects=[ProjectItem(name="Notes API", tech=["Flask"], bullets=["Built a Flask API with pytest test cases.", "Implemented a Trie for search."])],
+    )
+    found = dict(implied_keywords(r, ["REST APIs", "Git", "Unit Testing", "Data Structures & Algorithms", "OOP", "Kubernetes"]))
+    assert set(found) == {"REST APIs", "Git", "Unit Testing", "Data Structures & Algorithms", "OOP"}  # never Kubernetes
+    out = await boost(r, "software", "", "", [], {}, 90, None)
+    assert out["after"] > out["before"] and {c["after"] for c in out["changes"] if c["section"] == "Skills"} >= {"REST APIs", "Git"}
+    plan = out["plan"]
+    if not out["reached"]:
+        assert plan["keywords"] or plan["figures"]
+        figs = {f: "used by 150 students" for f in plan["figures"]}
+        again = await boost(ResumeData.model_validate(out["resume"]), out["industry"], "", "", plan["keywords"], figs, 90, None)
+        assert again["after"] >= min(90, plan["projected"]) - 1  # the plan's projection holds

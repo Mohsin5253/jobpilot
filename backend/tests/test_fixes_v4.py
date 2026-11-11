@@ -99,11 +99,12 @@ def test_word_file_is_compact_a4_and_keeps_headings_with_content():
     sec = d.sections[0]
     assert round(sec.page_width.mm) == 210 and round(sec.page_height.mm) == 297
     assert d.styles["Normal"].paragraph_format.space_after.pt <= 2 and d.styles["Normal"].paragraph_format.line_spacing == 1.0
-    heads = [p for p in d.paragraphs if p.text in ("SUMMARY", "SKILLS", "EXPERIENCE", "PROJECTS", "EDUCATION")]
-    assert heads and all(p.paragraph_format.keep_with_next for p in heads)
+    heads = [p for p in d.paragraphs if p.text in ("Summary", "Skills", "Work Experience", "Project Work", "Education")]
+    assert len(heads) >= 4 and all(p.paragraph_format.keep_with_next for p in heads)
     assert any("CGPA 8.1" in p.text for p in d.paragraphs)  # education details are no longer dropped
-    role = next(p for p in d.paragraphs if p.text.startswith("Web Intern"))
-    assert "\tJun 2025 – Aug 2025" in role.text and role.paragraph_format.keep_with_next
+    # The sample layout: "Company" with the dates right-aligned, then the role in italics.
+    i = next(i for i, p in enumerate(d.paragraphs) if "\tJun 2025 – Aug 2025" in p.text)
+    assert d.paragraphs[i].paragraph_format.keep_with_next and d.paragraphs[i + 1].text == "Web Intern" and d.paragraphs[i + 1].runs[0].italic
 
 
 def test_pdf_keeps_each_role_together():

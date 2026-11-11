@@ -20,7 +20,7 @@ import re
 from dataclasses import dataclass, field
 from functools import lru_cache
 
-from app.ats_lexicon import ACTION_VERBS, CLICHES, DEFAULT_INDUSTRY, INDUSTRIES, SOFT_SKILLS, WEAK_PHRASES, Industry
+from app.ats_lexicon import ACTION_VERBS, CLICHES, DEFAULT_INDUSTRY, FUNDAMENTALS, INDUSTRIES, ROLE_TRACKS, SOFT_SKILLS, WEAK_PHRASES, Industry
 from app.schemas import ResumeData
 from app.skills import _BOUNDARY_L, _BOUNDARY_R, SKILLS, _patterns, role_digest
 
@@ -326,7 +326,42 @@ def jd_keywords(title: str, description: str, industry_key: str) -> list[Keyword
     return sorted(terms.values(), key=lambda k: (-k.weight, k.term))[:30]
 
 
-def industry_keywords(industry_key: str) -> list[Keyword]:
+def _recognizable(industry_key: str, term: str) -> bool:
+    from app.skills import SKILLS
+
+    return term in SKILLS or term in INDUSTRIES[industry_key].tech or term in INDUSTRIES[industry_key].terms
+
+
+def detect_track(industry_key: str, v: "ResumeView") -> str | None:
+    """The role this resume fits best within its field: the track whose keywords it shows most, nudged by the
+    role words in its summary, titles and project names."""
+    tracks = ROLE_TRACKS.get(industry_key)
+    if not tracks:
+        return None
+    counts = count_terms(v.text, industry_key, all_tech=True)
+    head = (v.narrative or "")[:1500].lower()
+    best, best_score = None, -1.0
+    for key, (_, words, kws) in tracks.items():
+        kws = [k for k in kws if _recognizable(industry_key, k)]
+        cover = sum(1 for k in kws if counts.get(k)) / max(1, len(kws))
+        bonus = min(0.3, 0.15 * sum(1 for w in words if w in head))
+        if cover + bonus > best_score:
+            best, best_score = key, cover + bonus
+    return best
+
+
+def industry_keywords(industry_key: str, track: str | None = None) -> list[Keyword]:
+    if track and track in ROLE_TRACKS.get(industry_key, {}):
+        out: list[Keyword] = []
+        seen: set[str] = set()
+        for term in FUNDAMENTALS.get(industry_key, ()):
+            if _recognizable(industry_key, term) and term not in seen:
+                out.append(Keyword(term, 1.0, "core"))
+                seen.add(term)
+        track_terms = [t for t in ROLE_TRACKS[industry_key][track][2] if _recognizable(industry_key, t) and t not in seen]
+        for i, term in enumerate(track_terms):
+            out.append(Keyword(term, 1.0 if i < 7 else 0.4, "core" if i < 7 else "nice"))
+        return out
     ind = INDUSTRIES[industry_key]
     ordered = [*ind.tech, *ind.terms]
     out = []
@@ -565,7 +600,8 @@ def score(v: ResumeView, industry_key: str | None = None, job_title: str = "", j
     detected, confidence = detect_industry(job_title, job_description, v.text)
     key = industry_key if industry_key in INDUSTRIES else detected
     ind = INDUSTRIES[key]
-    keywords = jd_keywords(job_title, job_description, key) if with_jd else industry_keywords(key)
+    track = None if with_jd else detect_track(key, v)
+    keywords = jd_keywords(job_title, job_description, key) if with_jd else industry_keywords(key, track)
     if with_jd and len([k for k in keywords if not k.soft]) < 4:
         # A thin posting: fill in with the field's core terms so the score still means something.
         have = {k.term for k in keywords}
@@ -595,6 +631,7 @@ def score(v: ResumeView, industry_key: str | None = None, job_title: str = "", j
         "grade": _grade(total_i),
         "industry": key,
         "industry_name": ind.name,
+        "track": {"key": track, "label": ROLE_TRACKS[key][track][0]} if track else None,
         "detected_industry": detected,
         "detection_confidence": confidence,
         "mode": "job" if with_jd else "industry",

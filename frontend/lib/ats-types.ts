@@ -26,6 +26,7 @@ export interface AtsReport {
   grade: "Excellent" | "Good" | "Fair" | "Needs work";
   industry: string;
   industry_name: string;
+  track?: { key: string; label: string } | null;
   detected_industry: string;
   mode: "job" | "industry";
   breakdown: { key: string; label: string; score: number; weight: number; points: number }[];

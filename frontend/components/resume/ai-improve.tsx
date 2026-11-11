@@ -32,6 +32,9 @@ type Improved = {
   needs_figures: Ask[];
   remaining: { title: string; detail: string; gain: number }[];
   industry_name: string;
+  track: { key: string; label: string } | null;
+  plan: { keywords: string[]; figures: string[]; projected: number; reachable: boolean };
+  missing_keywords: string[];
 };
 const TARGETS = [80, 85, 90, 95];
 
@@ -67,6 +70,7 @@ export function AiImprove({ report, target, resume, onOpenInBuilder }: { report:
   });
   const r = run.data;
   const filled = Object.values(figures).filter((v) => /\d/.test(v)).length;
+  const neededFig = new Set(r?.plan.figures ?? []);
   const dl = async (f: "pdf" | "docx") => {
     if (!r) return;
     setBusy(f);
@@ -144,10 +148,32 @@ export function AiImprove({ report, target, resume, onOpenInBuilder }: { report:
                   </span>
                 )}
                 <span className="w-full text-[12px] text-text-3">
-                  {r.industry_name} grading · {r.ai ? "AI rewrites, checked against your resume" : "Rule-based rewrites (AI unavailable)"}
+                  Graded as {r.industry_name}
+                  {r.track ? ` · ${r.track.label}` : ""} · {r.ai ? "AI rewrites, checked against your resume" : "Rule-based rewrites (AI unavailable)"}
                 </span>
               </div>
               {r.note && <p className="text-[13px]">{r.note}</p>}
+              {!r.reached && !!r.missing_keywords.length && (
+                <div className="rounded-[var(--radius-card)] border border-border p-3">
+                  <div className="text-[13.5px] font-medium">Skills recruiters search for{r.track ? ` in ${r.track.label.toLowerCase()} roles` : ""}</div>
+                  <p className="mt-0.5 text-[12.5px] text-text-3">Tick only the ones you&rsquo;ve really used. {r.plan.keywords.length ? "The highlighted ones get you to the target fastest." : ""}</p>
+                  <div className="mt-2.5 flex flex-wrap gap-1.5">
+                    {r.missing_keywords.map((k) => (
+                      <button
+                        key={k}
+                        type="button"
+                        aria-pressed={picked.includes(k)}
+                        onClick={() => toggle(k)}
+                        className={`h-8 rounded-full border px-3 text-[12.5px] ${picked.includes(k) ? "border-[var(--cobalt)] bg-cobalt-subtle text-cobalt-text" : r.plan.keywords.includes(k) ? "border-warning/60 text-text" : "border-border text-text-2 hover:text-text"}`}
+                      >
+                        {picked.includes(k) ? "✓ " : ""}
+                        {k}
+                        {r.plan.keywords.includes(k) && !picked.includes(k) ? " ★" : ""}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
               {!!r.needs_figures.length && (
                 <div className="rounded-[var(--radius-card)] border border-border p-3">
                   <div className="text-[13.5px] font-medium">Add your real figures</div>
@@ -155,7 +181,10 @@ export function AiImprove({ report, target, resume, onOpenInBuilder }: { report:
                   <ul className="mt-3 max-h-[34vh] space-y-3 overflow-y-auto pr-1">
                     {r.needs_figures.map((n) => (
                       <li key={n.id} className="space-y-1.5">
-                        <p className="text-[12.5px] text-text-2">{n.text}</p>
+                        <p className="text-[12.5px] text-text-2">
+                          {neededFig.has(n.id) && <span className="mr-1 text-warning">★</span>}
+                          {n.text}
+                        </p>
                         <input
                           value={figures[n.id] ?? ""}
                           onChange={(e) => setFigures((f) => ({ ...f, [n.id]: e.target.value }))}
@@ -166,10 +195,14 @@ export function AiImprove({ report, target, resume, onOpenInBuilder }: { report:
                       </li>
                     ))}
                   </ul>
-                  <Button className="mt-3" variant="primary" disabled={!filled} loading={run.isPending} onClick={() => run.mutate({ from: r.resume, figs: figures })}>
-                    <Sparkles /> Apply {filled || ""} figure{filled === 1 ? "" : "s"} and re-score
-                  </Button>
                 </div>
+              )}
+              {!r.reached && (
+                <Button variant="primary" disabled={!filled && !picked.length} loading={run.isPending} onClick={() => run.mutate({ from: r.resume, figs: figures })}>
+                  <Sparkles /> Apply {picked.length ? `${picked.length} skill${picked.length === 1 ? "" : "s"}` : ""}
+                  {picked.length && filled ? " + " : ""}
+                  {filled ? `${filled} figure${filled === 1 ? "" : "s"}` : ""} and re-score
+                </Button>
               )}
               {!!r.remaining.length && !r.reached && (
                 <div className="text-[12.5px]">

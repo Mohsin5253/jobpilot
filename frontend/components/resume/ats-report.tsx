@@ -33,7 +33,9 @@ export function ScoreHeader({ r, title }: { r: AtsReport; title?: string }) {
               Scored against {r.job?.title ? <span className="font-medium text-text">{r.job.title}</span> : "this job description"}, with {r.industry_name.toLowerCase()} rules.
             </>
           ) : (
-            <>Scored with {r.industry_name.toLowerCase()} rules: what recruiters in this field search for and expect.</>
+            <>
+              Scored with {r.industry_name.toLowerCase()} rules{r.track ? <> for <b>{r.track.label.toLowerCase()}</b> roles</> : ""}: what recruiters searching for that role look for and expect.
+            </>
           )}
         </p>
         <p className="mt-1 text-[12.5px] text-text-3">

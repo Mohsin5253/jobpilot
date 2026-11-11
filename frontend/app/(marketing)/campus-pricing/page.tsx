@@ -1,11 +1,11 @@
 import type { Metadata } from "next";
 
 import { CampusEnquiry, CampusPlans } from "@/components/marketing/campus-pricing";
-import { CAMPUS_FAQ } from "@/lib/campus-pricing";
+import { CAMPUS_FAQ, CAMPUS_TERMS } from "@/lib/campus-pricing";
 
 export const metadata: Metadata = {
   title: "Campus pricing",
-  description: "JobPilot for placement cells: staff roles for TPOs, HODs and faculty, a live placement pipeline, AI match proposals you approve, and drives with eligibility checks. Free pilot for one season.",
+  description: "JobPilot for placement cells: staff roles for TPOs, HODs and faculty, a live placement pipeline, AI match proposals you approve, and drives with eligibility checks. From ₹4,999 a year per department; free pilot for one season.",
   alternates: { canonical: "/campus-pricing" },
 };
 
@@ -28,7 +28,18 @@ export default async function CampusPricingPage({ searchParams }: { searchParams
 
       <section className="mt-12" aria-label="Plans">
         <CampusPlans />
-        <p className="mt-4 text-center text-[12.5px] text-text-3">Prices exclude GST. Invoiced yearly; the Pilot needs no payment details.</p>
+        <p className="mt-4 text-center text-[12.5px] text-text-3">Flat yearly prices, GST extra. The Pilot needs no payment details.</p>
+      </section>
+
+      <section className="mt-12" aria-labelledby="terms">
+        <h2 id="terms" className="text-center text-[24px] font-semibold">Terms, in plain words</h2>
+        <ul className="mx-auto mt-5 grid max-w-[920px] gap-2.5 sm:grid-cols-2">
+          {CAMPUS_TERMS.map((t) => (
+            <li key={t} className="card p-4 text-[13.5px] text-text-2">
+              {t}
+            </li>
+          ))}
+        </ul>
       </section>
 
       <section className="mt-16" aria-labelledby="how">

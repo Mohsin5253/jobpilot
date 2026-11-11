@@ -346,6 +346,43 @@ INDUSTRIES: dict[str, Industry] = {
 
 DEFAULT_INDUSTRY = "software"
 
+# Role-aware grading. A recruiter searches for one role ("backend developer intern"), not for every keyword in a
+# field, so without a job description a resume is graded on the field's fundamentals plus the role it fits best.
+# Each track: (label, title words that point to it, keywords in search order). Fields without tracks use their
+# whole list.
+FUNDAMENTALS: dict[str, tuple[str, ...]] = {
+    "software": ("Data Structures & Algorithms", "Git", "SQL", "OOP"),
+    "data_science": ("Python", "SQL", "Statistics", "Machine Learning", "Git"),
+    "data_analytics": ("SQL", "Excel", "Data Analysis", "Data Visualization"),
+    "core_engineering": (),
+}
+ROLE_TRACKS: dict[str, dict[str, tuple[str, tuple[str, ...], tuple[str, ...]]]] = {
+    "software": {
+        "backend": ("Backend developer", ("backend", "back-end", "server", "api"), ("REST APIs", "Python", "Java", "PostgreSQL", "MySQL", "Docker", "Unit Testing", "Linux", "Microservices", "Redis", "Django", "FastAPI", "Flask", "Spring Boot", "System design", "Backend")),
+        "frontend": ("Frontend developer", ("frontend", "front-end", "ui developer", "web developer"), ("JavaScript", "TypeScript", "React", "Next.js", "HTML/CSS", "REST APIs", "Unit Testing", "Frontend", "Redux")),
+        "fullstack": ("Full-stack developer", ("full stack", "full-stack", "fullstack", "mern", "web app"), ("JavaScript", "React", "Node.js", "Express", "REST APIs", "MongoDB", "PostgreSQL", "TypeScript", "HTML/CSS", "Docker", "Full stack")),
+        "mobile": ("Mobile developer", ("android", "ios", "mobile", "flutter", "app developer"), ("Android", "Kotlin", "Java", "Flutter", "Swift", "React Native", "Firebase", "REST APIs", "Unit Testing")),
+        "devops": ("DevOps / cloud engineer", ("devops", "sre", "cloud", "infrastructure", "platform"), ("Linux", "Docker", "Kubernetes", "AWS", "CI/CD", "Terraform", "Bash", "Python", "Microservices", "Scalability", "Debugging")),
+        "sde": ("Software engineer (generalist)", ("sde", "software engineer", "software developer", "programmer"), ("Java", "C++", "Python", "Operating systems", "DBMS", "Computer networks", "REST APIs", "Unit Testing", "Debugging", "Linux")),
+    },
+    "data_science": {
+        "ml": ("Data scientist / ML", ("data scientist", "machine learning", "ml engineer", "data science"), ("Pandas", "NumPy", "scikit-learn", "Feature Engineering", "Model Evaluation", "Data Visualization", "XGBoost", "Regression", "Classification", "Jupyter", "Data preprocessing")),
+        "nlp": ("NLP / LLM engineer", ("nlp", "llm", "genai", "generative", "language model"), ("Deep Learning", "PyTorch", "NLP", "LLMs", "Hugging Face", "RAG", "Embeddings", "Model Evaluation", "Model deployment", "TensorFlow")),
+        "cv": ("Computer vision engineer", ("computer vision", "vision", "image", "cv engineer"), ("Deep Learning", "PyTorch", "TensorFlow", "Computer Vision", "OpenCV", "Model Evaluation", "Data preprocessing", "Model deployment")),
+        "mlops": ("MLOps / data engineer", ("mlops", "data engineer", "pipeline", "platform"), ("MLOps", "Model deployment", "Docker", "Spark", "Airflow", "AWS", "Kafka", "CI/CD", "Data preprocessing")),
+    },
+    "data_analytics": {
+        "bi": ("BI / reporting analyst", ("bi", "business intelligence", "reporting", "mis"), ("Power BI", "Tableau", "Dashboards", "KPIs", "Reporting", "Pivot tables", "Data cleaning", "Looker")),
+        "product": ("Product / business analyst", ("product analyst", "business analyst", "growth", "analytics"), ("Python", "Statistics", "A/B testing", "Google Analytics", "Insights", "Stakeholder management", "BigQuery", "Pandas")),
+    },
+    "core_engineering": {
+        "mech_design": ("Mechanical design engineer", ("mechanical", "design engineer", "cad", "product design"), ("AutoCAD", "SolidWorks", "CATIA", "ANSYS", "CAD/CAM", "Thermal", "MATLAB")),
+        "manufacturing": ("Manufacturing / production engineer", ("manufacturing", "production", "quality", "plant"), ("Manufacturing", "Quality control", "CAD/CAM", "AutoCAD", "Project management")),
+        "electronics": ("Electrical / electronics engineer", ("electrical", "electronics", "embedded", "vlsi", "iot"), ("C", "Embedded systems", "Circuit design", "PLC", "MATLAB", "IoT", "VLSI", "Python")),
+        "civil": ("Civil engineer", ("civil", "structural", "site engineer", "construction"), ("AutoCAD", "Civil design", "Project management", "Quality control")),
+    },
+}
+
 # Verbs that open a strong bullet. Ordered by family only for readability.
 ACTION_VERBS = frozenset(
     ["accelerated", "achieved", "acquired", "analysed", "analyzed", "architected", "assembled", "audited", "authored", "automated", "benchmarked", "boosted", "built", "calculated", "campaigned", "championed", "closed", "coached", "coded", "collaborated", "compiled", "computed", "conceived", "conceptualized", "conducted", "configured", "consolidated", "constructed", "contributed", "converted", "coordinated", "created", "curated", "cut", "debugged", "decreased", "defined", "delivered", "deployed", "designed", "developed", "devised", "diagnosed", "directed", "doubled", "drafted", "drove", "earned", "edited", "eliminated", "enabled", "engineered", "enhanced", "established", "estimated", "evaluated", "executed", "expanded", "experimented", "extracted", "fabricated", "facilitated", "finalized", "forecasted", "formulated", "founded", "generated", "grew", "guided", "halved", "headed", "identified", "illustrated", "implemented", "improved", "increased", "initiated", "innovated", "inspected", "installed", "instituted", "integrated", "interviewed", "introduced", "investigated", "launched", "led", "leveraged", "machined", "managed", "mapped", "maximized", "measured", "mentored", "migrated", "minimized", "modeled", "modelled", "modernized", "monitored", "negotiated", "onboarded", "operated", "optimised", "optimized", "orchestrated", "organised", "organized", "oversaw", "parsed", "partnered", "piloted", "pioneered", "planned", "presented", "prioritized", "processed", "produced", "programmed", "prototyped", "published", "raised", "ranked", "rebuilt", "recruited", "redesigned", "reduced", "refactored", "remodeled", "reorganized", "reported", "researched", "resolved", "restructured", "revamped", "reviewed", "saved", "scaled", "scheduled", "scripted", "secured", "shipped", "simplified", "simulated", "sold", "solved", "sourced", "spearheaded", "standardized", "started", "streamlined", "strengthened", "structured", "supervised", "surveyed", "synthesized", "taught", "tested", "tracked", "trained", "transformed", "translated", "tripled", "troubleshot", "tuned", "unified", "upgraded", "validated", "visualized", "won", "wrote", "served", "performed", "forecast", "predicted", "classified", "clustered", "scraped", "crawled", "visualised", "cleaned", "labelled", "labeled", "annotated", "wrangled", "queried", "indexed", "cached", "containerised", "containerized", "dockerized", "hosted", "released", "maintained", "extended", "ported", "documented", "demonstrated", "hypothesized", "prepared", "ran", "owned", "crafted", "animated", "filmed", "coded", "fine-tuned", "finetuned"]

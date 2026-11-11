@@ -67,13 +67,16 @@ def test_structured_resume_renders_every_section():
     from pypdf import PdfReader
 
     text = "\n".join(pg.extract_text() for pg in PdfReader(io.BytesIO(resume_doc.render_pdf(doc))).pages)
-    for want in ("CERTIFICATIONS & AWARDS", "Mar 2021 – Present", "Tech: AWS, EC2", "Languages: C/C++", "CGPA: 7.96/10"):
+    for want in ("Awards and Certificates", "Work Experience", "Project Work", "Mar 2021 – Present", "AWS, EC2", "Languages: C/C++", "CGPA: 7.96/10"):
         assert want in text, want
+    # The sample's order: Skills, Work Experience, Education, Project Work, Awards and Certificates.
+    assert text.index("Skills") < text.index("Work Experience") < text.index("Education") < text.index("Project Work") < text.index("Awards and Certificates")
     from docx import Document
 
     d = Document(io.BytesIO(resume_doc.render_docx(doc)))
     body = "\n".join(p.text for p in d.paragraphs)
-    assert "Computer Scientist  ·  Adobe, Bangalore\tMar 2021 – Present" in body and "Data Engineering Nanodegree on Udacity" in body
+    assert "Adobe, Bangalore\tMar 2021 – Present\nComputer Scientist" in body and "Data Engineering Nanodegree on Udacity" in body
+    assert "Word Lookup Dictionary (2015): Developed a desktop app" in body  # a project is one bullet led by its name
     assert resume_doc.pdf_safe("hands‑on − x") == "hands-on - x"
 
 

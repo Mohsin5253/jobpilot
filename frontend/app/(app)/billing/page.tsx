@@ -22,7 +22,7 @@ export default function BillingPage() {
         <PlansAndPayments />
       </Suspense>
       <Card id="campus">
-        <CardHeader title="For colleges" description="Placement-cell plans: TPO, HOD and faculty accounts, a live placement pipeline and AI job matches your staff approve. Invoiced yearly to the college; students don't pay." />
+        <CardHeader title="For colleges" description="Placement-cell plans: TPO, HOD and faculty accounts, a live placement pipeline and AI job matches your staff approve. Flat yearly prices invoiced to the college (GST extra), 30-day refund, 25% off for government colleges; students don't pay." />
         <div className="space-y-3 p-5 pt-3">
           <CampusPlans compact onPick={(plan) => (window.location.href = `/campus-pricing?plan=${plan}#enquire`)} />
           <a href="/campus-pricing" className="inline-block text-[13px] font-medium text-cobalt-text">

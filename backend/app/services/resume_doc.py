@@ -90,12 +90,19 @@ def build(resume: ResumeData, match: JobMatch | None) -> TailoredDoc:
     ]
     # Without a target job, skills keep the resume's own groups ("Languages: …"); anything ungrouped goes last.
     groups: list[tuple[str, list[str]]] = []
+    if not match and not resume.skill_groups and resume.skills:
+        from app.skills import group_skills
+
+        groups = group_skills(resume.skills)
     if not match and resume.skill_groups:
         from app.skills import canonicalize
 
         grouped = {k for g in resume.skill_groups for x in g.items for k in (x.lower(), canonicalize(x).lower())}
         groups = [(g.name or "Skills", list(g.items)) for g in resume.skill_groups if g.items]
-        rest = [x for x in resume.skills if x.lower() not in grouped and canonicalize(x).lower() not in grouped]
+        # Skills not in the resume's own groups are listed only if nothing else in the resume shows them (a role's
+        # stack, a project's tech or a bullet), so the Skills block stays as the student wrote it.
+        shown = " ".join([*(t for e in resume.experience for t in e.tech), *(t for p in resume.projects for t in p.tech), *(b for _, b in resume.bullet_index())]).lower()
+        rest = [x for x in resume.skills if x.lower() not in grouped and canonicalize(x).lower() not in grouped and x.lower() not in shown]
         if rest:
             groups.append(("Other", rest))
 
@@ -151,9 +158,49 @@ def _skill_lines(doc: TailoredDoc) -> list[tuple[str, str]]:
     return out
 
 
+# The layout follows the standard one-column engineering resume (the sample the product is built around):
+# Skills, Work Experience, Education, Project Work, Awards and Certificates. Each role: "Company, City" bold with the
+# dates right-aligned, the title in italics beneath, bullets, then the stack as the last bullet. Each project: one
+# bullet led by its bold name. Real text throughout (no tables, columns, icons or images), so every ATS reads it.
+HEADING = {"Experience": "Work Experience", "Projects": "Project Work"}
+
+
+def _order(doc: TailoredDoc) -> list[str]:
+    """Section order. Variant B (compared on the Insights page) leads with projects."""
+    if doc.variant == "B":
+        return ["Projects", "Experience", "Education"]
+    return ["Experience", "Education", "Projects"]
+
+
+def _role_lines(sec: Section) -> tuple[tuple[str, str], tuple[str, str]]:
+    """((bold left, right), (italic left, right)) for a role: company line with dates, then the title."""
+    if sec.sub:
+        return (sec.sub, sec.meta), (sec.heading, "")
+    return (sec.heading, sec.meta), ("", "")
+
+
+def _edu_lines(sec: Section) -> tuple[tuple[str, str], tuple[str, str], list[str]]:
+    """School with dates; degree with the grade on the right; the rest (coursework) below."""
+    import re
+
+    parts = [x.strip() for d in sec.details for x in re.split(r"(?<=\d)\.\s+(?=[A-Z])|;\s+|\s+\|\s+|\s+(?=(?:Relevant\s+)?Coursework\s*:)", d) if x.strip()]
+    grade = next((d for d in parts if len(d) <= 40 and re.search(r"c?gpa|percentage|%|cpi|sgpa|\d\s*/\s*10", d, re.I)), "")
+    rest = [d for d in parts if d != grade]
+    school, degree = (sec.sub, sec.heading) if sec.sub else (sec.heading, "")
+    return (school, sec.meta), (degree, grade), rest
+
+
+def _project_bullet(sec: Section) -> tuple[str, str]:
+    """(bold name, the rest): "Name (2025): what it does. Python, Flask"."""
+    body = " ".join(b.strip() for b in sec.bullets if b.strip())
+    if sec.tech:
+        body = f"{body.rstrip('.')}{'.' if body else ''} {sec.tech}".strip()
+    return sec.heading, body
+
+
 def render_pdf(doc: TailoredDoc) -> bytes:
-    """A4, one column, real text (no tables, images or icons). Every role, project and degree is kept on one page;
-    headings never sit alone at the bottom of a page."""
+    """A4, one column, real text. A role, project or degree never splits across pages; headings never sit alone at
+    the bottom of a page."""
     from reportlab.lib import colors
     from reportlab.lib.enums import TA_CENTER
     from reportlab.lib.pagesizes import A4
@@ -166,102 +213,112 @@ def render_pdf(doc: TailoredDoc) -> bytes:
     def esc(t: str) -> str:
         return _esc(pdf_safe(t))
 
-    ink, muted, accent = colors.HexColor("#111118"), colors.HexColor("#555566"), colors.HexColor("#2F3A8F")
+    ink, muted = colors.HexColor("#111111"), colors.HexColor("#444444")
     st = {
-        "name": ParagraphStyle("name", fontName="Helvetica-Bold", fontSize=18, leading=22, alignment=TA_CENTER, textColor=ink),
-        "contact": ParagraphStyle("contact", fontName="Helvetica", fontSize=8.6, leading=11, alignment=TA_CENTER, textColor=muted),
-        "h": ParagraphStyle("h", fontName="Helvetica-Bold", fontSize=10.2, leading=13, textColor=accent, spaceBefore=8, spaceAfter=1, keepWithNext=1),
-        "role": ParagraphStyle("role", fontName="Helvetica-Bold", fontSize=9.6, leading=12, textColor=ink, spaceBefore=4, keepWithNext=1),
-        "meta": ParagraphStyle("meta", fontName="Helvetica-Oblique", fontSize=8.6, leading=11, textColor=muted, keepWithNext=1),
-        "body": ParagraphStyle("body", fontName="Helvetica", fontSize=9.2, leading=12.2, textColor=ink),
-        "tech": ParagraphStyle("tech", fontName="Helvetica", fontSize=8.6, leading=11, textColor=muted, leftIndent=10, spaceBefore=1),
+        "name": ParagraphStyle("name", fontName="Helvetica-Bold", fontSize=20, leading=24, alignment=TA_CENTER, textColor=ink),
+        "contact": ParagraphStyle("contact", fontName="Helvetica", fontSize=9, leading=12, alignment=TA_CENTER, textColor=muted),
+        "h": ParagraphStyle("h", fontName="Helvetica-Bold", fontSize=11.5, leading=14, textColor=ink, spaceBefore=8, spaceAfter=1, keepWithNext=1),
+        "body": ParagraphStyle("body", fontName="Helvetica", fontSize=9.4, leading=12.2, textColor=ink),
+        "role": ParagraphStyle("role", fontName="Helvetica-Bold", fontSize=9.8, leading=12, textColor=ink, spaceBefore=3, keepWithNext=1),
     }
-    width = A4[0] - 32 * mm
+    width = A4[0] - 30 * mm
 
-    class TitleLine(Flowable):
-        """Bold title (and company) on the left, dates right-aligned on the same line: plain text, no table."""
+    class TwoSide(Flowable):
+        """Left text and right text on one line (plain text, no table), e.g. "Adobe, Bangalore ...... Mar 2021 - Present"."""
 
-        def __init__(self, left: str, sub: str, right: str):
+        def __init__(self, left: str, right: str, font: str, size: float, rfont: str | None = None, space: float = 2.5):
             super().__init__()
-            self.left, self.sub, self.right = pdf_safe(left), pdf_safe(sub), pdf_safe(right)
+            self.left, self.right, self.font, self.size = pdf_safe(left), pdf_safe(right), font, size
+            self.rfont, self.space = rfont or font, space
 
         def wrap(self, aw, ah):
-            return aw, 13
+            self.aw = aw  # the frame's real width (narrower than the page minus margins)
+            return aw, self.size + self.space + 1.5
 
         def draw(self):
             c = self.canv
             c.setFillColor(ink)
-            c.setFont("Helvetica-Bold", 9.6)
-            c.drawString(0, 3, self.left)
-            x = stringWidth(self.left, "Helvetica-Bold", 9.6)
-            if self.sub:
-                c.setFont("Helvetica", 9.4)
-                c.drawString(x, 3, f"  ·  {self.sub}")
+            c.setFont(self.font, self.size)
+            c.drawString(0, 2, self.left)
             if self.right:
-                c.setFillColor(muted)
-                c.setFont("Helvetica-Oblique", 8.6)
-                c.drawRightString(width, 3, self.right)
+                c.setFont(self.rfont, self.size - 0.4)
+                c.drawRightString(getattr(self, "aw", width), 2, self.right)
 
-    def title_block(sec: Section) -> list:
-        left_w = stringWidth(pdf_safe(sec.heading), "Helvetica-Bold", 9.6) + stringWidth(pdf_safe(f"  ·  {sec.sub}") if sec.sub else "", "Helvetica", 9.4)
-        right_w = stringWidth(pdf_safe(sec.meta), "Helvetica-Oblique", 8.6)
-        if left_w + right_w + 14 <= width:
-            line = TitleLine(sec.heading, sec.sub, sec.meta)
-            line.keepWithNext = 1
-            return [Spacer(1, 3), line]
-        out = [Paragraph(esc(sec.heading) + (f'<font name="Helvetica" size="9.4">  ·  {esc(sec.sub)}</font>' if sec.sub else ""), st["role"])]
-        if sec.meta:
-            out.append(Paragraph(esc(sec.meta), st["meta"]))
-        return out
+    def two(left: str, right: str, font: str, size: float, rfont: str | None = None, space: float = 2.5) -> list:
+        if stringWidth(pdf_safe(left), font, size) + stringWidth(pdf_safe(right), rfont or font, size) + 12 <= width:
+            f = TwoSide(left, right, font, size, rfont, space)
+            f.keepWithNext = 1
+            return [f]
+        p = Paragraph(f'<font name="{font}">{esc(left)}</font>' + (f"  ·  {esc(right)}" if right else ""), ParagraphStyle("x", parent=st["body"], fontSize=size, keepWithNext=1))
+        return [p]
 
     buf = io.BytesIO()
-    pdf = SimpleDocTemplate(buf, pagesize=A4, leftMargin=16 * mm, rightMargin=16 * mm, topMargin=13 * mm, bottomMargin=13 * mm, title=" — ".join(x for x in (doc.name, doc.target) if x), author=doc.name)
-    story: list = [Paragraph(esc(doc.name), st["name"]), Paragraph(esc(doc.contact), st["contact"]), Spacer(1, 4)]
+    pdf = SimpleDocTemplate(buf, pagesize=A4, leftMargin=15 * mm, rightMargin=15 * mm, topMargin=12 * mm, bottomMargin=12 * mm, title=" — ".join(x for x in (doc.name, doc.target) if x), author=doc.name)
+    story: list = [Paragraph(esc(doc.name), st["name"]), Spacer(1, 2), Paragraph(esc(doc.contact), st["contact"]), Spacer(1, 2)]
 
-    def heading(text: str) -> None:
-        rule = HRFlowable(width="100%", thickness=0.6, color=colors.HexColor("#D5D7E3"), spaceBefore=0, spaceAfter=3)
+    def heading(text: str) -> list:
+        rule = HRFlowable(width="100%", thickness=0.7, color=ink, spaceBefore=0, spaceAfter=3)
         rule.keepWithNext = 1
-        story.extend([Paragraph(text.upper(), st["h"]), rule])
+        return [Paragraph(esc(text), st["h"]), rule]
 
-    def bullet_list(items: list[str]):
-        return ListFlowable([ListItem(Paragraph(esc(b), st["body"]), leftIndent=10) for b in items], bulletType="bullet", start="•", leftIndent=10, bulletFontSize=8)
+    def section(text: str, blocks: list[list]) -> None:
+        """A heading always travels with its first entry, so it's never stranded at the bottom of a page."""
+        if not blocks:
+            return
+        story.append(KeepTogether([*heading(text), *blocks[0]]))
+        for b in blocks[1:]:
+            story.append(KeepTogether(b))
+
+    def bullet_list(items: list[str], rich: bool = False):
+        return ListFlowable(
+            [ListItem(Paragraph(b if rich else esc(b), st["body"]), leftIndent=11) for b in items],
+            bulletType="bullet", start="•", leftIndent=11, bulletFontSize=8,
+        )
 
     if doc.summary:
-        heading("Summary")
-        story.append(Paragraph(esc(doc.summary), st["body"]))
+        section("Summary", [[Paragraph(esc(doc.summary), st["body"])]])
     if lines := _skill_lines(doc):
-        heading("Skills")
-        for label, items in lines:
-            story.append(Paragraph(f"<b>{esc(label)}:</b> {esc(items)}", st["body"]))
-    for title, sections in doc.body_sections():
-        if sections:
-            heading(title)
-            for sec in sections:
-                # One role or project is one unit: it moves to the next page whole rather than leaving its title behind.
-                block = title_block(sec)
-                if sec.bullets:
-                    block.append(bullet_list(sec.bullets))
-                if sec.tech:
-                    block.append(Paragraph(f"<b>Tech:</b> {esc(sec.tech)}", st["tech"]))
-                story.append(KeepTogether(block))
+        section("Skills", [[Paragraph(f"<b>{esc(label)}:</b> {esc(items)}", st["body"]) for label, items in lines]])
+    for part in _order(doc):
+        if part == "Experience" and doc.experience:
+            blocks = []
+            for sec in doc.experience:
+                (l1, r1), (l2, _) = _role_lines(sec)
+                block = [Spacer(1, 2), *two(l1, r1, "Helvetica-Bold", 9.8, "Helvetica")]
+                if l2:
+                    block += two(l2, "", "Helvetica-Oblique", 9.4)
+                items = list(sec.bullets) + ([sec.tech] if sec.tech else [])
+                if items:
+                    block.append(bullet_list(items))
+                blocks.append(block)
+            section(HEADING["Experience"], blocks)
+        elif part == "Education" and doc.education_items:
+            blocks = []
+            for sec in doc.education_items:
+                (l1, r1), (l2, r2), rest = _edu_lines(sec)
+                block = [Spacer(1, 2), *two(l1, r1, "Helvetica-Bold", 9.8, "Helvetica")]
+                if l2 or r2:
+                    block += two(l2, r2, "Helvetica-Oblique", 9.4, "Helvetica")
+                block += [Paragraph(esc(d), st["body"]) for d in rest]
+                blocks.append(block)
+            section("Education", blocks)
+        elif part == "Projects" and doc.projects:
+            blocks = []
+            for sec in doc.projects:
+                name, body = _project_bullet(sec)
+                blocks.append([bullet_list([f"<b>{esc(name)}</b>{': ' + esc(body) if body else ''}"], rich=True)])
+            section(HEADING["Projects"], blocks)
     if doc.additional:
-        heading("Additional experience")
-        story.append(bullet_list(doc.additional))
-    if doc.education_items:
-        heading("Education")
-        for sec in doc.education_items:
-            block = title_block(sec)
-            block += [Paragraph(esc(d), st["body"]) for d in sec.details]
-            story.append(KeepTogether(block))
+        section("Additional Experience", [[bullet_list(doc.additional)]])
     if doc.certifications:
-        heading("Certifications & awards")
-        story.append(bullet_list(doc.certifications))
+        section("Awards and Certificates", [[bullet_list(doc.certifications)]])
     pdf.build(story)
     return buf.getvalue()
 
 
 def render_docx(doc: TailoredDoc) -> bytes:
-    """A4, one column, tight consistent spacing: headings stay with their content, a role never splits across pages."""
+    """The same layout in Word: A4, one column, right tab stop for dates, headings kept with their content, and a
+    role or project never split across pages."""
     from docx import Document
     from docx.enum.text import WD_ALIGN_PARAGRAPH, WD_TAB_ALIGNMENT
     from docx.oxml import OxmlElement
@@ -271,8 +328,8 @@ def render_docx(doc: TailoredDoc) -> bytes:
     d = Document()
     sec = d.sections[0]
     sec.page_width, sec.page_height = Mm(210), Mm(297)
-    sec.left_margin = sec.right_margin = Mm(16)
-    sec.top_margin = sec.bottom_margin = Mm(13)
+    sec.left_margin = sec.right_margin = Mm(15)
+    sec.top_margin = sec.bottom_margin = Mm(12)
     text_width = sec.page_width - sec.left_margin - sec.right_margin
     d.core_properties.title = " — ".join(x for x in (doc.name, doc.target) if x)
     d.core_properties.author = doc.name
@@ -282,11 +339,10 @@ def render_docx(doc: TailoredDoc) -> bytes:
     normal.font.size = Pt(10)
     normal.element.rPr.rFonts.set(qn("w:eastAsia"), "Calibri")
     pf = normal.paragraph_format
-    pf.space_before, pf.space_after, pf.line_spacing = Pt(0), Pt(1.5), 1.0
+    pf.space_before, pf.space_after, pf.line_spacing = Pt(0), Pt(1), 1.0
     lb = d.styles["List Bullet"].paragraph_format
     lb.space_before, lb.space_after, lb.line_spacing = Pt(0), Pt(1), 1.0
-
-    ink, muted, accent = RGBColor(0x11, 0x11, 0x18), RGBColor(0x55, 0x55, 0x66), RGBColor(0x2F, 0x3A, 0x8F)
+    ink, muted = RGBColor(0x11, 0x11, 0x11), RGBColor(0x44, 0x44, 0x44)
 
     def para(text: str = "", *, bold=False, italic=False, size=None, color=None, align=None, after=None, before=None, keep=False):
         p = d.add_paragraph()
@@ -311,44 +367,37 @@ def render_docx(doc: TailoredDoc) -> bytes:
         ppr = p._p.get_or_add_pPr()
         bdr = OxmlElement("w:pBdr")
         bottom = OxmlElement("w:bottom")
-        for k, v in (("w:val", "single"), ("w:sz", "4"), ("w:space", "1"), ("w:color", "D5D7E3")):
+        for k, v in (("w:val", "single"), ("w:sz", "6"), ("w:space", "1"), ("w:color", "111111")):
             bottom.set(qn(k), v)
         bdr.append(bottom)
         ppr.append(bdr)
 
-    para(doc.name, bold=True, size=17, color=ink, align=WD_ALIGN_PARAGRAPH.CENTER, after=0)
-    para(doc.contact, size=8.5, color=muted, align=WD_ALIGN_PARAGRAPH.CENTER, after=4)
-
     def heading(text: str) -> None:
-        h = para(text.upper(), bold=True, size=10.5, color=accent, before=8, after=2, keep=True)
-        rule_below(h)
+        rule_below(para(text, bold=True, size=11.5, color=ink, before=8, after=2, keep=True))
 
-    def bullets(items: list[str], keep_last_with_next: bool = False) -> None:
-        for i, b in enumerate(items):
-            p = d.add_paragraph(b, style="List Bullet")
-            p.paragraph_format.keep_together = True
-            # Bullets of one role stay together with the role's title (Word's "keep with next").
-            p.paragraph_format.keep_with_next = keep_last_with_next or i < len(items) - 1
-
-    def title_line(s_: Section) -> None:
-        # Title · company on the left, dates right-aligned on the same line.
-        p = para(before=4, after=1, keep=True)
+    def two(left: str, right: str, *, bold=False, italic=False, before=0.0, keep=True) -> None:
+        p = para(before=before, after=0, keep=keep)
         p.paragraph_format.tab_stops.add_tab_stop(text_width, WD_TAB_ALIGNMENT.RIGHT)
-        p.add_run(s_.heading).bold = True
-        if s_.sub:
-            p.add_run(f"  ·  {s_.sub}")
-        if s_.meta:
-            m = p.add_run(f"\t{s_.meta}")
-            m.italic, m.font.size, m.font.color.rgb = True, Pt(9), muted
+        r = p.add_run(left)
+        r.bold, r.italic = bold, italic
+        if right:
+            m = p.add_run(f"\t{right}")
+            m.font.size = Pt(9.5)
 
-    def tech_line(text: str) -> None:
-        p = para(size=None, after=1)
-        p.paragraph_format.left_indent = Mm(4)
-        r = p.add_run("Tech: ")
-        r.bold, r.font.size, r.font.color.rgb = True, Pt(9), muted
-        r = p.add_run(text)
-        r.font.size, r.font.color.rgb = Pt(9), muted
+    def bullets(items: list, keep_last: bool = False) -> None:
+        for i, b in enumerate(items):
+            p = d.add_paragraph(style="List Bullet")
+            if isinstance(b, tuple):  # (bold lead, rest)
+                p.add_run(b[0]).bold = True
+                if b[1]:
+                    p.add_run(f": {b[1]}")
+            else:
+                p.add_run(b)
+            p.paragraph_format.keep_together = True
+            p.paragraph_format.keep_with_next = keep_last or i < len(items) - 1
 
+    para(doc.name, bold=True, size=19, color=ink, align=WD_ALIGN_PARAGRAPH.CENTER, after=1)
+    para(doc.contact, size=9, color=muted, align=WD_ALIGN_PARAGRAPH.CENTER, after=4)
     if doc.summary:
         heading("Summary")
         para(doc.summary)
@@ -358,26 +407,33 @@ def render_docx(doc: TailoredDoc) -> bytes:
             p = para()
             p.add_run(f"{label}: ").bold = True
             p.add_run(items)
-    for title, sections in doc.body_sections():
-        if sections:
-            heading(title)
-            for s_ in sections:
-                title_line(s_)
-                bullets(s_.bullets, keep_last_with_next=bool(s_.tech))
-                if s_.tech:
-                    tech_line(s_.tech)
+    for part in _order(doc):
+        if part == "Experience" and doc.experience:
+            heading(HEADING["Experience"])
+            for s_ in doc.experience:
+                (l1, r1), (l2, _) = _role_lines(s_)
+                two(l1, r1, bold=True, before=3)
+                if l2:
+                    two(l2, "", italic=True)
+                bullets(list(s_.bullets) + ([s_.tech] if s_.tech else []))
+        elif part == "Education" and doc.education_items:
+            heading("Education")
+            for s_ in doc.education_items:
+                (l1, r1), (l2, r2), rest = _edu_lines(s_)
+                two(l1, r1, bold=True, before=3)
+                if l2 or r2:
+                    two(l2, r2, italic=True, keep=bool(rest))
+                for i, det in enumerate(rest):
+                    para(det, keep=i < len(rest) - 1)
+        elif part == "Projects" and doc.projects:
+            heading(HEADING["Projects"])
+            bullets([_project_bullet(s_) for s_ in doc.projects])
     if doc.additional:
-        heading("Additional experience")
+        heading("Additional Experience")
         bullets(doc.additional)
-    if doc.education_items:
-        heading("Education")
-        for s_ in doc.education_items:
-            title_line(s_)
-            for i, det in enumerate(s_.details):
-                para(det, keep=i < len(s_.details) - 1)
     if doc.certifications:
-        heading("Certifications & awards")
+        heading("Awards and Certificates")
         bullets(doc.certifications)
-    buf = io.BytesIO()
-    d.save(buf)
-    return buf.getvalue()
+    out = io.BytesIO()
+    d.save(out)
+    return out.getvalue()

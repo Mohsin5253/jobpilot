@@ -107,7 +107,7 @@ export function ResumeBuilder({ initial, target, setTarget }: { initial: Resume 
         </Card>
 
         <Card>
-          <CardHeader title="Summary" description="2-3 lines: who you are, your strongest skills for this field, what you're looking for." />
+          <CardHeader title="Summary (optional)" description="The standard layout has none; if you add one, 2-3 lines on who you are, your strongest skills and what you're looking for. Some fields' recruiters skim it first." />
           <div className="p-5 pt-3">
             <Textarea value={r.summary} onChange={(e) => set("summary", e.target.value)} rows={3} />
             <p className="mt-1 text-right text-[12px] text-text-3">{r.summary.split(/\s+/).filter(Boolean).length} words · aim for 25-70</p>
@@ -125,8 +125,8 @@ export function ResumeBuilder({ initial, target, setTarget }: { initial: Resume 
         </Card>
 
         <ItemList
-          title="Experience"
-          description="Internships, freelance, college clubs, part-time work. One bullet per line: action verb, what you did, the result."
+          title="Work Experience"
+          description="Internships, freelance, college clubs, part-time work. Prints as “Company, City · dates”, the role in italics, then bullets and the tech line. One bullet per line: action verb, what you did, the result."
           items={r.experience}
           onChange={(v) => set("experience", v)}
           make={() => ({ title: "", organization: "", location: "", start: "", end: "", bullets: [], tech: [] })}
@@ -151,25 +151,6 @@ export function ResumeBuilder({ initial, target, setTarget }: { initial: Resume 
                 <Input value={e.end} onChange={(ev) => upd({ ...e, end: ev.target.value })} placeholder="Aug 2025 or Present" />
               </Field>
               <BulletsField value={e.bullets} onChange={(b) => upd({ ...e, bullets: b })} />
-            </div>
-          )}
-        />
-
-        <ItemList
-          title="Projects"
-          description="For freshers this is often the most important section. Link the repo or demo in Links."
-          items={r.projects}
-          onChange={(v) => set("projects", v)}
-          make={() => ({ name: "", tech: [], bullets: [] })}
-          render={(p, upd) => (
-            <div className="grid gap-3 sm:grid-cols-2">
-              <Field label="Project name">
-                <Input value={p.name} onChange={(ev) => upd({ ...p, name: ev.target.value })} />
-              </Field>
-              <Field label="Tech used">
-                <TagInput value={p.tech} onChange={(v) => upd({ ...p, tech: v })} placeholder="React, Node.js" />
-              </Field>
-              <BulletsField value={p.bullets} onChange={(b) => upd({ ...p, bullets: b })} />
             </div>
           )}
         />
@@ -200,8 +181,27 @@ export function ResumeBuilder({ initial, target, setTarget }: { initial: Resume 
           )}
         />
 
+        <ItemList
+          title="Project Work"
+          description="Prints as one bullet each: the project name in bold, then what it does and the tech. Put a year in brackets if you like, e.g. “Campus Eats (2025)”."
+          items={r.projects}
+          onChange={(v) => set("projects", v)}
+          make={() => ({ name: "", tech: [], bullets: [] })}
+          render={(p, upd) => (
+            <div className="grid gap-3 sm:grid-cols-2">
+              <Field label="Project name">
+                <Input value={p.name} onChange={(ev) => upd({ ...p, name: ev.target.value })} />
+              </Field>
+              <Field label="Tech used">
+                <TagInput value={p.tech} onChange={(v) => upd({ ...p, tech: v })} placeholder="React, Node.js" />
+              </Field>
+              <BulletsField value={p.bullets} onChange={(b) => upd({ ...p, bullets: b })} />
+            </div>
+          )}
+        />
+
         <Card>
-          <CardHeader title="Certifications & awards" description="Certificates, hackathon wins, scholarships, positions of responsibility. One per line." />
+          <CardHeader title="Awards and Certificates" description="Certificates, hackathon wins, scholarships, positions of responsibility. One per line." />
           <div className="p-5 pt-3">
             <LinesField value={r.certifications ?? []} onChange={(v) => set("certifications", v)} placeholder={"AWS Certified Cloud Practitioner (2025)\nWinner, Smart India Hackathon 2024"} />
           </div>

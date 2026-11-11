@@ -82,6 +82,13 @@ SKILLS: dict[str, list[str]] = {
     "Django": ["django"],
     "Node.js": ["node.js", "nodejs", "node"],
     "Express": ["express.js", "expressjs"],
+    "Android": ["android", "android studio", "android sdk", "jetpack compose"],
+    "Kotlin": ["kotlin"],
+    "Flutter": ["flutter", "dart"],
+    "Swift": ["swift", "swiftui"],
+    "React Native": ["react native", "react-native"],
+    "Spring Boot": ["spring boot", "springboot", "spring framework"],
+    "Firebase": ["firebase", "firestore"],
     "React": ["react", "react.js", "reactjs"],
     "Next.js": ["next.js", "nextjs"],
     "HTML/CSS": ["html", "css", "tailwind", "tailwindcss"],
@@ -184,6 +191,32 @@ SKILL_FAMILIES: dict[str, set[str]] = {
 }
 _FAMILY_OF: dict[str, str] = {m.lower(): fam for fam, members in SKILL_FAMILIES.items() for m in members}
 ADJACENT_CREDIT = 0.6
+
+
+LANGUAGES = {"Python", "Java", "JavaScript", "TypeScript", "C++", "C", "C#", "Go", "Rust", "Kotlin", "Swift", "SQL", "R", "Scala", "PHP", "Ruby", "MATLAB", "Bash", "Dart", "HTML/CSS"}
+_CATEGORY = [
+    ("Frameworks & Libraries", {"deep learning frameworks", "classical ML", "LLM tooling", "frontend frameworks", "Node backends", "Python web", "mobile"}),
+    ("Databases", {"relational databases", "NoSQL"}),
+    ("Cloud & DevOps", {"cloud", "containers", "CI/CD", "big data"}),
+    ("Data & BI", {"BI tools"}),
+]
+
+
+def group_skills(skills: list[str]) -> list[tuple[str, list[str]]]:
+    """Skills in the labelled groups a recruiter scans: Languages, Frameworks & Libraries, Databases, Cloud & DevOps,
+    Data & BI, then Tools & Concepts."""
+    out: dict[str, list[str]] = {"Languages": []}
+    for name, _ in _CATEGORY:
+        out[name] = []
+    out["Tools & Concepts"] = []
+    for sk in dict.fromkeys(x.strip() for x in skills if x.strip()):
+        if sk in LANGUAGES:
+            out["Languages"].append(sk)
+            continue
+        fam = _FAMILY_OF.get(sk.lower())
+        cat = next((n for n, fams in _CATEGORY if fam in fams), None) if fam else None
+        out[cat or "Tools & Concepts"].append(sk)
+    return [(k, v) for k, v in out.items() if v]
 
 
 def adjacent(resume_skills: list[str], job_skills: list[str]) -> list[tuple[str, str]]:

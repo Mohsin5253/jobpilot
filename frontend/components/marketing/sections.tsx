@@ -13,7 +13,7 @@ import { StatusPill } from "@/components/ui/status-dot";
 import type { AgentKey } from "@/config/agents";
 import { useStartDemo } from "@/lib/demo";
 import { cn } from "@/lib/utils";
-import { CAMPUS_PER_STUDENT_INR } from "@/lib/campus-pricing";
+import { CAMPUS_COLLEGE_INR, CAMPUS_FROM_INR, CAMPUS_UNIVERSITY_INR, inr } from "@/lib/campus-pricing";
 
 // The one place the plan numbers live. Payments aren't live yet: Pro is switched on by hand during the beta.
 const FREE_SENDS_DEFAULT = 5;
@@ -676,8 +676,8 @@ export function Pricing() {
     },
     {
       name: "Campus",
-      price: `₹${CAMPUS_PER_STUDENT_INR}`,
-      note: "per student / year for a whole college · free pilot for one season",
+      price: inr(CAMPUS_FROM_INR),
+      note: `per department / year · whole college ${inr(CAMPUS_COLLEGE_INR)} · university ${inr(CAMPUS_UNIVERSITY_INR)} · free pilot for one season`,
       items: [
         { t: "TPO, HOD and faculty accounts with department scope" },
         { t: "Live placement pipeline, round by round" },

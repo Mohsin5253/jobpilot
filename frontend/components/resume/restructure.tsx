@@ -190,10 +190,11 @@ function Preview({ r }: { r: Resume }) {
           )}
         </>
       )}
-      {!!r.experience.length && <H>Experience</H>}
+      {!!r.experience.length && <H>Work Experience</H>}
       {r.experience.map((e, i) => (
         <div key={i}>
-          <Role left={e.title || e.organization} sub={[e.title ? e.organization : "", e.location].filter(Boolean).join(", ")} right={span(e.start, e.end)} />
+          <Role left={[e.organization || e.title, e.location].filter(Boolean).join(", ")} right={span(e.start, e.end)} />
+          {e.organization && e.title && <div className="italic">{e.title}</div>}
           <ul className="ml-4 list-disc">
             {e.bullets.map((b, j) => (
               <li key={j}>{b}</li>
@@ -202,7 +203,14 @@ function Preview({ r }: { r: Resume }) {
           {!!e.tech?.length && <p className="ml-4 text-[11.5px] text-text-3">Tech: {e.tech.join(", ")}</p>}
         </div>
       ))}
-      {!!r.projects.length && <H>Projects</H>}
+      {!!r.education.length && <H>Education</H>}
+      {r.education.map((e, i) => (
+        <div key={i}>
+          <Role left={e.degree || e.school} sub={e.degree ? e.school : ""} right={span(e.start, e.end)} />
+          {e.details && <p className="whitespace-pre-line text-text-2">{e.details}</p>}
+        </div>
+      ))}
+      {!!r.projects.length && <H>Project Work</H>}
       {r.projects.map((p, i) => (
         <div key={i}>
           <Role left={p.name} />
@@ -214,16 +222,9 @@ function Preview({ r }: { r: Resume }) {
           {!!p.tech.length && <p className="ml-4 text-[11.5px] text-text-3">Tech: {p.tech.join(", ")}</p>}
         </div>
       ))}
-      {!!r.education.length && <H>Education</H>}
-      {r.education.map((e, i) => (
-        <div key={i}>
-          <Role left={e.degree || e.school} sub={e.degree ? e.school : ""} right={span(e.start, e.end)} />
-          {e.details && <p className="whitespace-pre-line text-text-2">{e.details}</p>}
-        </div>
-      ))}
       {!!r.certifications?.length && (
         <>
-          <H>Certifications & awards</H>
+          <H>Awards and Certificates</H>
           <ul className="ml-4 list-disc">
             {r.certifications.map((c, i) => (
               <li key={i}>{c}</li>
