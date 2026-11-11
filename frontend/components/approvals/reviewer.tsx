@@ -1,6 +1,7 @@
 "use client";
 
-import { ArrowLeft, ArrowUpRight, Check, ChevronDown, ChevronUp, FileDown, Linkedin, Mail, MoreHorizontal, Pencil, RefreshCw, Send, ShieldAlert, ShieldCheck, X } from "lucide-react";
+import { useQuery } from "@tanstack/react-query";
+import { ArrowLeft, ArrowUpRight, Check, ChevronDown, ChevronUp, Eye, FileDown, Linkedin, Mail, MoreHorizontal, Paperclip, Pencil, RefreshCw, Send, ShieldAlert, ShieldCheck, X } from "lucide-react";
 import Link from "next/link";
 import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 
@@ -18,6 +19,7 @@ import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover
 import { ScoreBar, ScoreRing } from "@/components/ui/score-ring";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Tooltip } from "@/components/ui/tooltip";
+import { api } from "@/lib/api";
 import { SOURCE_LABEL } from "@/lib/compose";
 import { useMatch, usePrepare, useProfile } from "@/lib/queries";
 import type { DraftWithJob, MatchDetail } from "@/lib/types";
@@ -361,6 +363,9 @@ export function Reviewer({ draft, index, total, onMove, onApprove, onReject, bus
                     <span>{lines} lines · aim for 4–5</span>
                     <span>{body.length} chars</span>
                   </div>
+                  <div className="card overflow-hidden">
+                    <ResumeAttachment matchId={draft.match_id} onOpen={() => setTab("resume")} />
+                  </div>
                 </div>
               ) : (
                 <article className="card overflow-hidden">
@@ -389,6 +394,7 @@ export function Reviewer({ draft, index, total, onMove, onApprove, onReject, bus
                     </div>
                   </dl>
                   <div className="px-4 py-4 text-[14px] leading-relaxed whitespace-pre-wrap text-text">{body}</div>
+                  <ResumeAttachment matchId={draft.match_id} onOpen={() => setTab("resume")} />
                 </article>
               )
             ) : editing ? (
@@ -533,6 +539,57 @@ export function Reviewer({ draft, index, total, onMove, onApprove, onReject, bus
           </div>
         </DialogContent>
       </Dialog>
+    </div>
+  );
+}
+
+
+/** The tailored resume this application sends, shown as the email's attachment: its file, its ATS score for the
+ * job against your target, and ways to open it. It's the exact file attached when you send. */
+function ResumeAttachment({ matchId, onOpen }: { matchId: string; onOpen?: () => void }) {
+  const { data } = useQuery({
+    queryKey: ["ats-target", matchId],
+    queryFn: () => api.get<{ score: number; target: number; ok: boolean; tailored: boolean; filename: string }>(`/matches/${matchId}/ats-target`),
+  });
+  return (
+    <div className="space-y-2.5 border-t border-border bg-surface-2/40 px-4 py-3">
+      <div className="flex items-center gap-3">
+      <div className="flex size-9 shrink-0 items-center justify-center rounded-[var(--radius-control)] border border-border bg-surface text-[10.5px] font-semibold text-[var(--error)]">PDF</div>
+      <div className="min-w-0 flex-1">
+        <div className="flex items-center gap-1.5 text-[13px] font-medium">
+          <Paperclip className="size-3.5 shrink-0 text-text-3" />
+          <span className="break-all">{data?.filename ?? "Tailored resume.pdf"}</span>
+        </div>
+        <div className="mt-0.5 flex flex-wrap items-center gap-1.5 text-[12px] text-text-3">
+          <span>{data?.tailored ? "Tailored for this job" : "Your resume (not tailored yet)"}</span>
+          {data && (
+            <>
+              <span>·</span>
+              <span className="num">ATS {data.score}</span>
+              {data.target ? (
+                <Badge tone={data.ok ? "success" : "warning"}>{data.ok ? `target ${data.target} reached` : `below target ${data.target}: won't send`}</Badge>
+              ) : null}
+            </>
+          )}
+        </div>
+      </div>
+      </div>
+      <div className="flex flex-wrap gap-1.5 pl-12">
+        <a href={`/api/matches/${matchId}/resume?format=pdf&inline=true`} target="_blank" rel="noreferrer" className={buttonClass({ size: "sm", variant: "secondary" })}>
+          <Eye /> View
+        </a>
+        <a href={`/api/matches/${matchId}/resume?format=pdf`} download className={buttonClass({ size: "sm", variant: "ghost" })}>
+          <FileDown /> PDF
+        </a>
+        <a href={`/api/matches/${matchId}/resume?format=docx`} download className={buttonClass({ size: "sm", variant: "ghost" })}>
+          <FileDown /> Word
+        </a>
+        {onOpen && (
+          <Button size="sm" variant="ghost" onClick={onOpen}>
+            What changed
+          </Button>
+        )}
+      </div>
     </div>
   );
 }

@@ -166,3 +166,15 @@ async def test_prepare_saves_target_and_send_is_gated(authed):
         except BelowTarget as exc:
             assert exc.target == 100 and exc.score < 100
         assert check_target(RESUME, m, {})[1] == 0  # no target: never blocks
+
+
+async def test_tailored_resume_opens_inline_and_reports_its_file(authed):
+    from tests.test_interview_v3 import _match
+
+    mid = await _match()
+    await authed.post(f"/api/matches/{mid}/prepare", json={"resume": RESUME.model_dump()})
+    r = await authed.get(f"/api/matches/{mid}/resume", params={"inline": "true"})
+    assert r.status_code == 200 and r.headers["content-disposition"].startswith("inline;") and r.content.startswith(b"%PDF")
+    assert (await authed.get(f"/api/matches/{mid}/resume")).headers["content-disposition"].startswith("attachment;")
+    t = (await authed.get(f"/api/matches/{mid}/ats-target")).json()
+    assert t["filename"].endswith(".pdf") and "Asha" in t["filename"]

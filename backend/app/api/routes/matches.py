@@ -243,8 +243,9 @@ async def decide_bullet(match_id: uuid.UUID, source_id: str, body: BulletDecisio
 
 
 @router.get("/{match_id}/resume")
-async def tailored_resume(match_id: uuid.UUID, user: UserDep, session: SessionDep, format: Literal["pdf", "docx"] = "pdf") -> Response:
-    """Your uploaded resume, tailored for this job (relevant skills first, Tailor's bullets, confirmed skills)."""
+async def tailored_resume(match_id: uuid.UUID, user: UserDep, session: SessionDep, format: Literal["pdf", "docx"] = "pdf", inline: bool = False) -> Response:
+    """Your uploaded resume, tailored for this job (relevant skills first, Tailor's bullets, confirmed skills): the
+    exact file attached when the application is sent. `inline` opens the PDF in the browser instead of downloading."""
     m = await _get(session, user.id, match_id)
     profile = (await session.execute(select(Profile).where(Profile.user_id == user.id))).scalar_one()
     doc = resume_doc.build(ResumeData.model_validate(profile.resume or {}), m)
@@ -252,7 +253,8 @@ async def tailored_resume(match_id: uuid.UUID, user: UserDep, session: SessionDe
         content, mime = resume_doc.render_pdf(doc), "application/pdf"
     else:
         content, mime = resume_doc.render_docx(doc), "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
-    return Response(content, media_type=mime, headers={"Content-Disposition": f'attachment; filename="{resume_doc.filename(doc, format)}"'})
+    how = "inline" if inline and format == "pdf" else "attachment"
+    return Response(content, media_type=mime, headers={"Content-Disposition": f'{how}; filename="{resume_doc.filename(doc, format)}"'})
 
 
 @router.get("/{match_id}/contacts", response_model=ContactsOut)
@@ -323,4 +325,5 @@ async def ats_target(match_id: uuid.UUID, user: UserDep, session: SessionDep) ->
     resume = ResumeData.model_validate(p.resume or {})
     target = int((p.preferences or {}).get("ats_target") or 0)
     sc = tailored_score(resume, m) if (resume.experience or resume.projects or resume.skills) else 0
-    return {"score": sc, "target": target, "ok": not target or sc >= target, "tailored": m.tailored is not None}
+    filename = resume_doc.filename(resume_doc.build(resume, m), "pdf")
+    return {"score": sc, "target": target, "ok": not target or sc >= target, "tailored": m.tailored is not None, "filename": filename}
