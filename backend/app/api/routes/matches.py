@@ -3,6 +3,7 @@ from datetime import UTC, datetime, timedelta
 from typing import Literal
 
 from fastapi import APIRouter, HTTPException, Query, Response
+from pydantic import BaseModel, Field
 from sqlalchemy import exists, func, or_, select
 from sqlalchemy.orm import selectinload
 
@@ -196,13 +197,26 @@ async def apply(match_id: uuid.UUID, user: UserDep, session: SessionDep) -> Matc
     return to_out_loaded(m)
 
 
+class PrepareIn(BaseModel):
+    target: int | None = Field(default=None, ge=0, le=100, description="ATS score the tailored resume must reach before it's sent")
+    resume: ResumeData | None = Field(default=None, description="Your resume with the skills and figures you confirmed for this job; saved first")
+
+
 @router.post("/{match_id}/prepare", response_model=RunOut, status_code=202)
-async def prepare(match_id: uuid.UUID, user: UserDep, session: SessionDep) -> RunOut:
-    """Tailor + draft outreach for one job on demand, whatever its score or track."""
+async def prepare(match_id: uuid.UUID, user: UserDep, session: SessionDep, body: PrepareIn | None = None) -> RunOut:
+    """Tailor + draft outreach for one job on demand, whatever its score or track. With a target, the resume you
+    confirmed (keywords you've used, your real figures) is saved first, and the tailored version is only sent if it
+    reaches the target."""
     m = await _get(session, user.id, match_id)
     from app.services.usage import enforce_run_limit
 
     await enforce_run_limit(session, user)
+    if body and (body.target is not None or body.resume is not None):
+        p = (await session.execute(select(Profile).where(Profile.user_id == user.id))).scalar_one()
+        if body.resume is not None:
+            p.resume = body.resume.model_dump()
+        if body.target is not None:
+            p.preferences = {**(p.preferences or {}), "ats_target": body.target}
     run, created = await enqueue_run(session, user.id, trigger="prepare", params={"direct": True, "shortlist_ids": [str(m.id)]})
     if not created:
         raise HTTPException(409, "Agents are busy with another run — try again when it finishes")
@@ -297,3 +311,16 @@ async def export_labels(user: UserDep, session: SessionDep) -> list[dict]:
         }
         for m in rows
     ]
+
+
+@router.get("/{match_id}/ats-target")
+async def ats_target(match_id: uuid.UUID, user: UserDep, session: SessionDep) -> dict:
+    """The exact resume that would be sent for this job, scored against it, and your target."""
+    from app.services.ats import tailored_score
+
+    m = await _get(session, user.id, match_id)
+    p = (await session.execute(select(Profile).where(Profile.user_id == user.id))).scalar_one()
+    resume = ResumeData.model_validate(p.resume or {})
+    target = int((p.preferences or {}).get("ats_target") or 0)
+    sc = tailored_score(resume, m) if (resume.experience or resume.projects or resume.skills) else 0
+    return {"score": sc, "target": target, "ok": not target or sc >= target, "tailored": m.tailored is not None}

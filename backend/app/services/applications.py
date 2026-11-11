@@ -18,6 +18,25 @@ from app.services.mailer import send_as_user
 OPT_OUT = "If this isn't relevant, just reply \"no\" and I won't follow up."
 
 
+class BelowTarget(Exception):
+    """The tailored resume scores below the student's ATS target for this job: it isn't sent."""
+
+    def __init__(self, score: int, target: int):
+        super().__init__(f"Your tailored resume scores {score} for this job, below your target of {target}. Open the job and use “Reach target” first.")
+        self.score, self.target = score, target
+
+
+def check_target(resume: ResumeData, match, prefs: dict) -> tuple[int, int]:
+    """(score, target) for the resume that would be sent; raises BelowTarget when a target is set and not met."""
+    from app.services.ats import tailored_score
+
+    target = int((prefs or {}).get("ats_target") or 0)
+    sc = tailored_score(resume, match)
+    if target and sc < target:
+        raise BelowTarget(sc, target)
+    return sc, target
+
+
 def with_opt_out(body: str) -> str:
     return body if "won't follow up" in body else f"{body.rstrip()}\n\n{OPT_OUT}"
 
@@ -41,6 +60,7 @@ async def send_application(draft_id: uuid.UUID, wait: bool = False, channel: str
     if match.job.legit_status == "suspicious":  # defence in depth: the routes refuse these first
         raise PermissionError("This posting was flagged as a likely scam and can't be sent")
     resume = ResumeData.model_validate(profile.resume or {})
+    check_target(resume, match, profile.preferences or {})  # only a resume that reached the target is sent
     doc = resume_doc.build(resume, match)
     await send_as_user(
         draft.user_id,

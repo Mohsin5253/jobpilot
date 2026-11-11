@@ -43,7 +43,22 @@ const TARGETS = [80, 85, 90, 95];
  * facts, and the missing keywords the student ticks as genuinely used. Shows every change and the new score, then
  * downloads it (PDF or Word), saves it, or opens it in the builder.
  */
-export function AiImprove({ report, target, resume, onOpenInBuilder }: { report: AtsReport; target: Record<string, unknown>; resume?: Resume; onOpenInBuilder?: (r: Resume) => void }) {
+export function AiImprove({
+  report,
+  target,
+  resume,
+  onOpenInBuilder,
+  onApply,
+  label = "Boost my ATS score with AI",
+}: {
+  report: AtsReport;
+  target: Record<string, unknown>;
+  resume?: Resume;
+  onOpenInBuilder?: (r: Resume) => void;
+  /** In the builder: every round is applied to the draft straight away, so the live score follows. */
+  onApply?: (r: Resume) => void;
+  label?: string;
+}) {
   const [open, setOpen] = useState(false);
   const missing = report.keywords.missing.filter((k) => !k.soft).map((k) => k.term);
   const [picked, setPicked] = useState<string[]>([]);
@@ -65,6 +80,8 @@ export function AiImprove({ report, target, resume, onOpenInBuilder }: { report:
     onSuccess: (d) => {
       setFirst((f) => f ?? d.before);
       setFigures({});
+      setPicked([]);
+      onApply?.(d.resume);
     },
     onError: (e: Error) => toast.error(e.message),
   });
@@ -87,7 +104,7 @@ export function AiImprove({ report, target, resume, onOpenInBuilder }: { report:
   return (
     <>
       <Button variant="primary" onClick={() => (run.reset(), setFirst(null), setFigures({}), setOpen(true))}>
-        <Wand2 /> Boost my ATS score with AI
+        <Wand2 /> {label}
       </Button>
       <Dialog open={open} onOpenChange={setOpen}>
         <DialogContent title="Boost my ATS score" description="Takes your resume toward the score you pick, using your field's grading. Nothing is invented: where a real number is needed, you're asked for it. Nothing is saved until you choose to." className="max-w-[680px]">

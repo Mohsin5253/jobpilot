@@ -129,3 +129,40 @@ async def test_boost_adds_proven_skills_and_plans_the_rest():
         figs = {f: "used by 150 students" for f in plan["figures"]}
         again = await boost(ResumeData.model_validate(out["resume"]), out["industry"], "", "", plan["keywords"], figs, 90, None)
         assert again["after"] >= min(90, plan["projected"]) - 1  # the plan's projection holds
+
+
+def test_broken_saved_resume_is_detected_and_lone_bullets_parse():
+    from app.services.resume_restructure import clean_text, layout_parse, looks_broken, tidy
+
+    broken = ResumeData(projects=[ProjectItem(name="Engineered a predictive model using machine learning algorithms to diagnose", bullets=[]), ProjectItem(name="Designed an AI-driven report generation module that translates findings", bullets=[])])
+    assert looks_broken(broken) and not looks_broken(RESUME)
+    raw = "Asha\nasha@example.com\nPROJECTS\nAI Medical Assistant | Python, Flask, SQLite\n\x7f\nEngineered a predictive model using machine learning algorithms and a Kaggle dataset to diagnose\nprobable diseases from user-input symptoms.\n\x7f\nBuilt the backend with Flask and SQLite to manage user data.\nEDUCATION\nB.E. AI & DS, Rizvi College 2028\n"
+    r = tidy(layout_parse(clean_text(raw)[0]))
+    (p,) = r.projects
+    assert p.name == "AI Medical Assistant" and len(p.bullets) == 2 and "probable diseases" in p.bullets[0] and "\x7f" not in " ".join(p.bullets)
+
+
+async def test_prepare_saves_target_and_send_is_gated(authed):
+    from tests.test_interview_v3 import _match
+    from app.services.applications import BelowTarget, check_target
+    from app.db import session_scope
+    from app.models import JobMatch
+    from sqlalchemy import select
+
+    mid = await _match()
+    r = await authed.post(f"/api/matches/{mid}/prepare", json={"target": 99, "resume": RESUME.model_dump()})
+    assert r.status_code == 202
+    prof = (await authed.get("/api/profile")).json()
+    assert prof["preferences"]["ats_target"] == 99 and prof["resume"]["name"] == "Asha"
+    t = (await authed.get(f"/api/matches/{mid}/ats-target")).json()
+    assert t["target"] == 99 and t["ok"] is (t["score"] >= 99)
+    async with session_scope() as s:
+        from sqlalchemy.orm import selectinload
+
+        m = (await s.execute(select(JobMatch).where(JobMatch.id == __import__("uuid").UUID(mid)).options(selectinload(JobMatch.tailored)))).unique().scalar_one()
+        try:
+            check_target(RESUME, m, {"ats_target": 100})
+            raise AssertionError("should be below a 100 target")
+        except BelowTarget as exc:
+            assert exc.target == 100 and exc.score < 100
+        assert check_target(RESUME, m, {})[1] == 0  # no target: never blocks

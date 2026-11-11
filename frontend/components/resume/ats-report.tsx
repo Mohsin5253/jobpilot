@@ -62,7 +62,7 @@ export function AtsReportView({
   onUseBullet?: (id: string, text: string) => void;
   jobTitle?: string;
   jobDescription?: string;
-  improve?: { target: Record<string, unknown>; resume?: Resume; onOpenInBuilder?: (r: Resume) => void };
+  improve?: { target: Record<string, unknown>; resume?: Resume; onOpenInBuilder?: (r: Resume) => void; onApply?: (r: Resume) => void };
 }) {
   const hard = r.keywords.missing.filter((k) => !k.soft);
   const [showPass, setShowPass] = useState(false);
@@ -74,7 +74,7 @@ export function AtsReportView({
         <ScoreHeader r={r} />
         {improve && (
           <div className="mt-4 flex flex-wrap items-center gap-3 rounded-[var(--radius-card)] border border-[color-mix(in_oklab,var(--cobalt)_30%,transparent)] bg-cobalt-subtle p-3">
-            <AiImprove report={r} target={improve.target} resume={improve.resume} onOpenInBuilder={improve.onOpenInBuilder} />
+            <AiImprove report={r} target={improve.target} resume={improve.resume} onOpenInBuilder={improve.onOpenInBuilder} onApply={improve.onApply} />
             <span className="text-[12.5px] text-text-2">Applies these fixes to your resume, adds the keywords you confirm, and gives you a clean PDF or Word file.</span>
           </div>
         )}

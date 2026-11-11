@@ -107,6 +107,8 @@ class Preferences(BaseModel):
     remote_ok: bool = True
     max_age_days: int = Field(default=45, ge=1, le=365)  # skip postings older than this (when the date is known)
     min_score: int = Field(default=60, ge=0, le=100)
+    # The ATS score a tailored resume must reach for its job before it's sent (0 = no gate).
+    ats_target: int = Field(default=0, ge=0, le=100)
     greenhouse_boards: list[str] = Field(default_factory=_boards(DEFAULT_GREENHOUSE))
     lever_boards: list[str] = Field(default_factory=_boards(DEFAULT_LEVER))
     ashby_boards: list[str] = Field(default_factory=_boards(DEFAULT_ASHBY))

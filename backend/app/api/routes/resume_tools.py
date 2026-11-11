@@ -254,6 +254,12 @@ async def ai_boost(body: BoostIn, user: UserDep, session: SessionDep) -> dict:
         if p is None or not (p.resume or p.resume_text):
             raise HTTPException(409, "Upload your resume first, or build one in the Resume builder")
         resume, raw, filename = ResumeData.model_validate(p.resume or {}), p.resume_text or None, p.resume_filename
+        from app.services.resume_restructure import looks_broken, restructure
+
+        if raw and looks_broken(resume):  # saved by an older parser in a broken shape: rebuild it from the file
+            fixed, _ = await restructure(raw, CallContext(user_id=user.id), base=resume)
+            fixed.summary = fixed.summary or resume.summary
+            resume = fixed
     title, desc = body.job_title, body.job_description
     if body.match_id:
         m = await _match(session, user.id, body.match_id)

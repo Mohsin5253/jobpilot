@@ -75,11 +75,15 @@ async def test_tailored_resume_documents(authed):
     assert pdf.status_code == 200 and pdf.content.startswith(b"%PDF") and "attachment" in pdf.headers["content-disposition"]
     docx = await authed.get(f"/api/matches/{m['id']}/resume", params={"format": "docx"})
     text = "\n".join(p.text for p in Document(io.BytesIO(docx.content)).paragraphs)
-    assert "Relevant to this role:" in text and "Aarav Mehta" in text
+    assert "Aarav Mehta" in text and "\nSkills\n" in text  # grouped like the sample resume
     profile = (await authed.get("/api/profile")).json()
-    for line in text.splitlines():  # nothing on the document outside the resume's own skill list
-        if line.startswith("Relevant to this role:"):
-            assert set(line.split(":", 1)[1].strip().split(", ")) <= set(profile["resume"]["skills"])
+    import re
+
+    skills_block = re.split(r"\n(?:Work Experience|Education|Project Work|Additional Experience|Awards and Certificates)\n", text.split("\nSkills\n", 1)[1])[0]
+    for line in skills_block.splitlines():  # nothing on the document outside the resume's own skill list
+        if ":" in line:
+            assert set(line.split(":", 1)[1].strip().split(", ")) <= set(profile["resume"]["skills"]), line
+    assert any(":" in ln for ln in skills_block.splitlines())  # labelled groups, e.g. "Languages: Python, SQL"
 
 
 async def test_send_application_attaches_resume(authed, monkeypatch):

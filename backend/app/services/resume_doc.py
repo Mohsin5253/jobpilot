@@ -88,23 +88,34 @@ def build(resume: ResumeData, match: JobMatch | None) -> TailoredDoc:
         Section(heading=e.degree or e.school, sub=e.school if e.degree else "", meta=span(e.start, e.end), details=[d.strip() for d in e.details.split("\n") if d.strip()])
         for e in resume.education
     ]
-    # Without a target job, skills keep the resume's own groups ("Languages: …"); anything ungrouped goes last.
+    # Skills in labelled groups like the sample ("Languages: …"): the resume's own groups, or grouped automatically.
+    # For a job, the skills it asks for come first in each group, and every skill is printed (a recruiter's ATS
+    # searches the file's text). Without a job, skills the resume's own groups leave out are listed only if
+    # nothing else shows them, so the block stays as the student wrote it.
+    from app.skills import canonicalize, group_skills
+
     groups: list[tuple[str, list[str]]] = []
-    if not match and not resume.skill_groups and resume.skills:
-        from app.skills import group_skills
-
-        groups = group_skills(resume.skills)
-    if not match and resume.skill_groups:
-        from app.skills import canonicalize
-
+    if resume.skill_groups:
         grouped = {k for g in resume.skill_groups for x in g.items for k in (x.lower(), canonicalize(x).lower())}
         groups = [(g.name or "Skills", list(g.items)) for g in resume.skill_groups if g.items]
-        # Skills not in the resume's own groups are listed only if nothing else in the resume shows them (a role's
-        # stack, a project's tech or a bullet), so the Skills block stays as the student wrote it.
         shown = " ".join([*(t for e in resume.experience for t in e.tech), *(t for p in resume.projects for t in p.tech), *(b for _, b in resume.bullet_index())]).lower()
-        rest = [x for x in resume.skills if x.lower() not in grouped and canonicalize(x).lower() not in grouped and x.lower() not in shown]
-        if rest:
+        rest = [x for x in resume.skills if x.lower() not in grouped and canonicalize(x).lower() not in grouped and (match or x.lower() not in shown)]
+        if rest and not match:
             groups.append(("Other", rest))
+        elif rest:
+            # For a job, extra skills (e.g. ones the student just confirmed) go into labelled groups too.
+            names = {n for n, _ in groups}
+            for name, items in group_skills(rest):
+                if name in names:
+                    groups = [(n, its + [x for x in items if x not in its]) if n == name else (n, its) for n, its in groups]
+                else:
+                    groups.append((name, items))
+    elif resume.skills:
+        groups = group_skills(resume.skills)
+    if match:
+        rank = {w: i for i, w in enumerate(x.lower() for x in key)}
+        groups = [(name, sorted(items, key=lambda x: rank.get(x.lower(), len(rank)))) for name, items in groups]
+        groups.sort(key=lambda g: min((rank.get(x.lower(), len(rank)) for x in g[1]), default=len(rank)))
 
     return TailoredDoc(
         name=resume.name or "Resume",
@@ -183,7 +194,7 @@ def _edu_lines(sec: Section) -> tuple[tuple[str, str], tuple[str, str], list[str
     """School with dates; degree with the grade on the right; the rest (coursework) below."""
     import re
 
-    parts = [x.strip() for d in sec.details for x in re.split(r"(?<=\d)\.\s+(?=[A-Z])|;\s+|\s+\|\s+|\s+(?=(?:Relevant\s+)?Coursework\s*:)", d) if x.strip()]
+    parts = [x.strip() for d in sec.details for x in re.split(r"(?<=\d)\.\s+(?=[A-Z])|;\s+|\s+\|\s+|(?<!Relevant)\s+(?=(?:Relevant\s+)?Coursework\s*:)", d) if x.strip()]
     grade = next((d for d in parts if len(d) <= 40 and re.search(r"c?gpa|percentage|%|cpi|sgpa|\d\s*/\s*10", d, re.I)), "")
     rest = [d for d in parts if d != grade]
     school, degree = (sec.sub, sec.heading) if sec.sub else (sec.heading, "")

@@ -731,3 +731,11 @@ def available_industries() -> list[dict]:
 
 
 __all__ = ["SKILLS", "available_industries", "compare", "detect_industry", "score", "view_from_doc", "view_from_resume"]
+
+
+def tailored_score(resume: ResumeData, match) -> int:
+    """The ATS score of the exact resume that would be sent for this job (the tailored document) against the job."""
+    from app.services import resume_doc
+
+    doc = resume_doc.build(resume, match)
+    return score(view_from_doc(doc, resume), None, match.job.title, match.job.description)["score"]

@@ -83,6 +83,7 @@ export interface Preferences {
   remote_ok: boolean;
   max_age_days: number;
   min_score: number;
+  ats_target?: number;
   greenhouse_boards: string[];
   lever_boards: string[];
   ashby_boards: string[];

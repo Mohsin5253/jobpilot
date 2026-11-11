@@ -8,6 +8,7 @@ import { toast } from "sonner";
 import { ScoreHeader } from "@/components/resume/ats-report";
 import { AtsTarget, targetBody, type Target } from "@/components/resume/ats-target";
 import { AtsReportView } from "@/components/resume/ats-report";
+import { AiImprove } from "@/components/resume/ai-improve";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardHeader } from "@/components/ui/card";
@@ -80,7 +81,11 @@ export function ResumeBuilder({ initial, target, setTarget }: { initial: Resume 
     });
     toast.success("Bullet replaced. Fill in any [placeholder] with your real figure.");
   };
-  const report = score.data;
+  // Keep the last score while a re-score runs: otherwise the target dialog (inside the score panel) unmounts the
+  // moment a boost round is applied to the draft.
+  const lastReport = useRef<AtsReport | undefined>(undefined);
+  if (score.data) lastReport.current = score.data;
+  const report = score.data ?? lastReport.current;
 
   return (
     <div className="grid gap-5 lg:grid-cols-[minmax(0,1fr)_380px]">
@@ -212,6 +217,12 @@ export function ResumeBuilder({ initial, target, setTarget }: { initial: Resume 
         <Card className="space-y-4 p-5">
           <AtsTarget value={target} onChange={setTarget} />
           {report ? <ScoreHeader r={report} title="Live ATS score" /> : <p className="text-[13px] text-text-3">{target.kind === "match" && !target.matchId ? "Choose a job to score against." : "Scoring…"}</p>}
+          {report && (
+            <div className="space-y-1.5">
+              <AiImprove report={report} target={targetBody(target)} resume={r} onApply={(next) => setR({ ...blank, ...next })} label="Reach my target score" />
+              <p className="text-[12px] text-text-3">Each round is applied to this draft straight away; save it when you&rsquo;re happy.</p>
+            </div>
+          )}
           {report?.improvements.slice(0, 3).map((i) => (
             <div key={i.title} className="flex items-start justify-between gap-2 text-[13px]">
               <span className="text-text-2">{i.title}</span>
@@ -235,7 +246,7 @@ export function ResumeBuilder({ initial, target, setTarget }: { initial: Resume 
           <details className="group">
             <summary className="cursor-pointer text-[13px] font-medium text-cobalt-text">Full report and bullet suggestions</summary>
             <div className="mt-3">
-              <AtsReportView r={report} onUseBullet={useBullet} jobTitle={target.title} jobDescription={target.description} improve={{ target: targetBody(target), resume: r, onOpenInBuilder: (next) => setR({ ...blank, ...next }) }} />
+              <AtsReportView r={report} onUseBullet={useBullet} jobTitle={target.title} jobDescription={target.description} improve={{ target: targetBody(target), resume: r, onOpenInBuilder: (next) => setR({ ...blank, ...next }), onApply: (next) => setR({ ...blank, ...next }) }} />
             </div>
           </details>
         )}

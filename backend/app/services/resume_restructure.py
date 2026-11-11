@@ -20,7 +20,7 @@ _PRIVATE_USE = re.compile("[-\U000f0000-\U000fffff]")
 _CONTACT_AHEAD = r"(?=[\w.+-]+@|\+?\(?\d|X{3}|(?:www\.)?[\w-]+\.(?:com|in|io|dev|me|org|net|co|app)\b|https?://)"
 # A lone icon character in front of an email, phone or link ("ć xxx@gmail.com | Ħ 98...").
 _ICON = re.compile(r"(^|\|)\s*[^\s|]\s+" + _CONTACT_AHEAD)
-_BULLET_START = re.compile(r"^\s*(?:[•\-\*–▪●◦➢►▶✓✔○■□➤]|o\s|\d{1,2}[.)]\s)")
+_BULLET_START = re.compile(r"^\s*(?:[•\-\*–▪●◦➢►▶✓✔○■□➤\uf0b7\uf0a7]|o\s|\d{1,2}[.)]\s)")
 _LABEL = re.compile(r"^[A-Z][\w &/+.-]{1,32}:\s")
 _DATE = r"(?:(?:jan|feb|mar|apr|may|jun|jul|aug|sep|sept|oct|nov|dec)[a-z]*\.?\s+)?(?:19|20)\d{2}|present|current|now|ongoing"
 DATE_RANGE = re.compile(rf"\(?\b({_DATE})\s*(?:-|–|—|to)\s*({_DATE})\b\)?", re.IGNORECASE)
@@ -47,8 +47,15 @@ def _section_of(line: str) -> str | None:
 
 def clean_text(text: str) -> tuple[str, dict]:
     """Repairs what PDF extraction breaks, and counts each fix for the report."""
-    fixes = {"icons": 0, "split_words": 0, "joined_lines": 0}
+    fixes = {"icons": 0, "split_words": 0, "joined_lines": 0, "bullets": 0}
     text = text.replace("­", "").replace("\r", "")
+    # A bullet symbol the PDF put on a line of its own (often a control or private-use character, e.g. \x7f):
+    # it belongs to the next line.
+    lone = re.compile(r"^[ \t]*[\x00-\x08\x0b-\x1f\x7f\u2022\u2023\u2043\u2219\u00b7\u25aa\u25ab\u25a0\u25a1\u25cf\u25cb\u25e6\u27a2\u25ba\u25b6\u2713\u2714\u2794\ue000-\uf8ff*\-–][ \t]*\n[ \t]*(?=\S)", re.M)
+    fixes["bullets"] = len(lone.findall(text))
+    text = lone.sub("• ", text)
+    # Control characters anywhere else are noise (they print as boxes).
+    text = re.sub(r"[\x00-\x08\x0b-\x1f\x7f]", " ", text)
     fixes["icons"] += len(_PRIVATE_USE.findall(text))
     text = _PRIVATE_USE.sub(" ", text)
 
@@ -480,3 +487,14 @@ async def restructure(text: str, ctx: CallContext, *, base: ResumeData | None = 
     if dropped:
         notes.append(f"Left out {dropped} AI line{'s' if dropped > 1 else ''} that didn't match your resume's wording.")
     return data, {"ai": ai, "notes": notes, "unplaced": unplaced, "sections": _section_list(data), "fixes": fixes}
+
+
+def looks_broken(r: ResumeData) -> bool:
+    """A resume saved by an older parser in a broken shape: line fragments as project or role names, empty
+    entries, or stray symbols. Rebuilt from the original file before tailoring."""
+    items = [(p.name, p.bullets) for p in r.projects] + [(e.title or e.organization, e.bullets) for e in r.experience]
+    if not items:
+        return False
+    sentence_names = sum(1 for name, bullets in items if not bullets and len(name.split()) >= 7)
+    junk = any(re.fullmatch(r"[\s\x00-\x1f\x7f■□▪•·]*", b or "") for _, bullets in items for b in bullets)
+    return sentence_names >= 2 or junk or any("\x7f" in (name + " ".join(b)) for name, b in items)
