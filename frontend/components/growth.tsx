@@ -12,6 +12,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardHeader } from "@/components/ui/card";
 import { Input, Switch } from "@/components/ui/input";
+import { Segmented } from "@/components/ui/misc";
 import { api } from "@/lib/api";
 import { cn } from "@/lib/utils";
 
@@ -23,8 +24,9 @@ export function GrowthPanel({ matchId }: { matchId: string }) {
   const router = useRouter();
   const [who, setWho] = useState<InterviewerKey>("female");
   const [strict, setStrict] = useState(true);
+  const [minutes, setMinutes] = useState<"30" | "45" | "60">("45");
   const start = useMutation({
-    mutationFn: () => api.post<Session>("/interviews", { match_id: matchId, interviewer: who, strict }),
+    mutationFn: () => api.post<Session>("/interviews", { match_id: matchId, interviewer: who, strict, minutes: Number(minutes) }),
     onSuccess: (s) => router.push(`/interview/${s.id}`),
     onError: (e: Error) => toast.error(e.message),
   });
@@ -32,7 +34,7 @@ export function GrowthPanel({ matchId }: { matchId: string }) {
   return (
     <div className="grid gap-4 lg:grid-cols-2">
       <Card>
-        <CardHeader icon={<Mic className="size-4" />} title="Mock interview for this job" description="The real rounds for this kind of role (screening, technical or case, project, HR), with questions from this job description and your projects. Answer by typing or speaking." />
+        <CardHeader icon={<Mic className="size-4" />} title="Mock interview for this job" description="The real rounds for this kind of role (screening, technical or case, coding for tech roles, project, HR), with questions from this job description, your projects and what's trending in this field. Answer by typing or speaking." />
         <div className="space-y-4 p-5 pt-3">
           <div className="grid grid-cols-2 gap-3" role="radiogroup" aria-label="Interviewer">
             {(Object.values(INTERVIEWERS) as (typeof INTERVIEWERS)[InterviewerKey][]).map((iv) => (
@@ -51,6 +53,13 @@ export function GrowthPanel({ matchId }: { matchId: string }) {
                 </span>
               </button>
             ))}
+          </div>
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div>
+              <div className="text-[13.5px] font-medium">Length</div>
+              <p className="text-[12.5px] text-text-3">Like the real thing. Tech roles include a coding round (Python, JavaScript, Java or C++) reviewed by an AI code reviewer.</p>
+            </div>
+            <Segmented value={minutes} onChange={setMinutes} options={[{ value: "30", label: "30 min" }, { value: "45", label: "45 min" }, { value: "60", label: "60 min" }]} />
           </div>
           <div className="flex items-start justify-between gap-3 rounded-[var(--radius-card)] border border-border p-3">
             <div>

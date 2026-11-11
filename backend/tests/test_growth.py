@@ -100,7 +100,7 @@ async def test_mock_interview_cites_the_jd_and_feeds_skills(authed):
     mid = await _match()
     sess = (await authed.post("/api/interviews", json={"match_id": mid})).json()
     qs = sess["questions"]
-    assert 8 <= len(qs) <= 12 and all(q["jd_line"] for q in qs)
+    assert 5 <= len(qs) <= 16 and all(q["jd_line"] for q in qs)  # sized to the interview length (45 min by default)
     sql_q = next(q for q in qs if q.get("skill") == "SQL")
     assert "SQL" in sql_q["jd_line"]
     weak = (await authed.post(f"/api/interviews/{sess['id']}/answer", json={"question_id": qs[-1]["id"], "answer": "I like it."})).json()

@@ -355,42 +355,227 @@ def _jd_questions(jd_lines: list[str], take: int) -> list[dict]:
     return out
 
 
-def build_rounds(industry_key: str | None, title: str, company: str, jd_lines: list[str], evidence: dict | None, resume_projects: list[str], seed: int = 0) -> tuple[list[dict], list[dict], str]:
-    """(rounds, questions, industry). seed rotates which bank questions are picked, so retakes differ."""
+DURATIONS = (30, 45, 60)
+# Real interviews spend longer on a case or role-play than on a factual question: minimum answer time per round kind.
+MIN_SECONDS = {"case": 360, "roleplay": 240, "portfolio": 300, "project": 240}
+OVERHEAD_S = 60  # reading the question, the interviewer's follow-up and feedback
+
+# Deeper questions and follow-ups for each field's core rounds, so 45 and 60-minute interviews go deeper, not wider.
+EXTRA: dict[str, dict[str, tuple[BankQ, ...]]] = {
+    "marketing": {
+        "case": (
+            BankQ("Follow-up: halfway through the month your CAC is double the target. What do you cut, what do you keep, and why?", "Budget trade-offs under pressure", ("cac", "cut", "channels", "data", "test"), 300),
+            BankQ("How would you measure whether an influencer campaign actually drove sales, not just views?", "Attribution", ("utm", "codes", "attribution", "control", "conversion"), 300),
+        ),
+        "technical": (
+            BankQ("Walk me through how you'd set up a Google Ads search campaign for a coaching institute: structure, keywords and bidding.", "Paid search", ("campaign", "ad groups", "keywords", "negative", "bidding", "landing page"), 240),
+            BankQ("What does a good marketing funnel report look like for an app? Name the stages and one metric for each.", "Funnel metrics", ("awareness", "install", "activation", "retention", "conversion"), 180),
+        ),
+    },
+    "finance": {
+        "case": (
+            BankQ("Follow-up: what single number would change your mind about that company, and where would you find it?", "Investment judgement", ("metric", "annual report", "valuation", "risk"), 240),
+            BankQ("A client's working capital cycle went from 60 to 95 days. What could be happening and what would you look at first?", "Working-capital diagnosis", ("receivables", "inventory", "payables", "cash", "days"), 300),
+        ),
+    },
+    "consulting": {
+        "case": (
+            BankQ("Follow-up: your client can only fund one fix this year. Which do you recommend, and how do you size its impact?", "Prioritisation and sizing", ("impact", "cost", "assume", "estimate", "recommend"), 360),
+            BankQ("Estimate the yearly revenue of a single Bengaluru metro station's food stalls.", "Guesstimate", ("footfall", "conversion", "ticket size", "assume", "days"), 420),
+        ),
+    },
+    "sales": {
+        "roleplay": (
+            BankQ("Role-play continued: the owner says 'my nephew already does this for free'. Respond.", "Competitive objection", ("understand", "value", "time", "risk", "trial"), 180),
+            BankQ("Close the call: ask for the next step in a way that's hard to say no to.", "Closing", ("next step", "date", "trial", "decision maker"), 150),
+        ),
+        "technical": (BankQ("How do you qualify a lead? Explain BANT or another framework with an example.", "Qualification", ("budget", "authority", "need", "timeline"), 180),),
+    },
+    "hr": {
+        "case": (
+            BankQ("Two managers both want the only strong intern candidate. How do you decide and communicate it?", "Stakeholder management", ("criteria", "fit", "communicate", "fair", "data"), 300),
+            BankQ("Exit interviews show interns leave because of unclear work. Propose a fix and how you'd measure it.", "Retention", ("onboarding", "goals", "manager", "survey", "metric"), 300),
+        ),
+    },
+    "operations": {
+        "case": (
+            BankQ("Follow-up: your fix needs 3 extra riders per shift. How do you justify the cost?", "Business case", ("cost", "late", "refunds", "retention", "compare"), 300),
+            BankQ("A warehouse's picking errors doubled after a layout change. How do you investigate?", "Process root cause", ("data", "observe", "sku", "layout", "training"), 300),
+        ),
+    },
+    "product": {
+        "case": (
+            BankQ("Follow-up: engineering says your feature takes 3 months. What's the smallest version you'd ship in 3 weeks to learn?", "MVP scoping", ("mvp", "learn", "metric", "scope", "users"), 300),
+            BankQ("Write the success metric and one guardrail metric for a new 'pay later' button in a food app.", "Metrics design", ("success", "guardrail", "default", "orders", "repayment"), 240),
+        ),
+    },
+    "design": {
+        "case": (
+            BankQ("Follow-up: usability testing shows users miss your main button. What do you change and how do you retest?", "Iteration", ("hierarchy", "contrast", "test", "users", "measure"), 300),
+            BankQ("Critique the checkout of an app you use: one thing that works, one that doesn't, and your fix.", "Design critique", ("users", "friction", "fix", "why"), 240),
+        ),
+    },
+}
+
+
+def level_of(title: str) -> str:
+    """intern for internships and summer roles; fresher for entry-level full-time (SDE-1, GET, analyst, trainee)."""
+    t = title.lower()
+    return "intern" if any(w in t for w in ("intern", "internship", "summer", "apprentice", "co-op")) else "fresher"
+
+
+# What a good candidate shows in each kind of round, per field: the bar the report measures against.
+NORMS_DEFAULT = {
+    "screening": "Clear 60-second introduction that links your studies and projects to this role, and a reason for this company that shows you researched it.",
+    "technical": "Correct fundamentals explained in your own words, with an example from your own work; you say what you don't know instead of guessing.",
+    "coding": "A working solution within the time, edge cases handled, complexity stated, readable code with good names.",
+    "project": "You can explain the problem, your own contribution, design choices with trade-offs, and a measurable result.",
+    "portfolio": "A case study told as problem → research → options → decision → outcome, with evidence from users.",
+    "case": "A structured approach (framework first), reasonable assumptions stated aloud, numbers where possible, and a clear recommendation.",
+    "roleplay": "You listen first, tie the product to the customer's problem, handle the objection calmly and ask for a next step.",
+    "behavioural": "STAR answers (situation, task, action, result) with your own actions and what you learned.",
+}
+NORMS: dict[str, dict[str, str]] = {
+    "software": {
+        "coding": "Indian product-company bar: solve an easy problem fully and a medium one with the optimal approach in about 20-25 minutes, state time and space complexity, and test edge cases.",
+        "technical": "Core CS (DSA, OS, DBMS, networks) explained with examples; for backend roles, APIs, databases and basic system design.",
+    },
+    "data_science": {
+        "coding": "Write correct Python for metrics, vectors and data handling without libraries, handle edge cases (zero division, empty input), and explain complexity.",
+        "technical": "ML fundamentals (bias-variance, metrics, leakage), plus current GenAI practice: RAG, embeddings and evaluating LLM output.",
+    },
+    "data_analytics": {
+        "coding": "Translate SQL thinking (GROUP BY, window functions, dedupe) into correct code, and handle empty and duplicate data.",
+        "technical": "SQL and Excel/Power BI fluency, and turning data into a recommendation a business team can act on.",
+    },
+    "core_engineering": {"coding": "Correct bit-level and embedded-style logic with attention to overflow and data sizes.", "technical": "Core subject fundamentals with units and real examples from labs or projects."},
+    "product": {"case": "User-first framing, a clear prioritisation and the metric that would prove success."},
+    "design": {"portfolio": "Evidence-led design: research, iteration and the outcome, plus accessibility."},
+    "marketing": {"case": "A plan tied to an audience and budget with measurable KPIs (CTR, CAC, ROAS) and how you'd test and learn."},
+    "finance": {"technical": "Accounting links, valuation steps and Indian taxation basics (GST, TDS) stated precisely."},
+    "consulting": {"case": "MECE structure, explicit assumptions, quick maths and a so-what recommendation."},
+    "sales": {"roleplay": "Discovery questions before pitching, value tied to the customer, objection handled, next step asked for."},
+    "hr": {"technical": "Practical HR processes and Indian compliance (POSH, PF/ESI, labour codes) explained correctly."},
+    "operations": {"case": "Data-first root-cause analysis and a fix with a KPI to track it."},
+}
+BAR = {"intern": 3.2, "fresher": 3.6}  # average rubric score (1-5) a round needs to meet the bar at this level
+
+
+def norm_for(industry: str, kind: str) -> str:
+    return NORMS.get(industry, {}).get(kind) or NORMS_DEFAULT.get(kind, NORMS_DEFAULT["technical"])
+
+
+def build_plan(
+    industry_key: str | None,
+    title: str,
+    company: str,
+    jd_lines: list[str],
+    evidence: dict | None,
+    resume_projects: list[str],
+    minutes: int = 45,
+    level: str | None = None,
+    trend_qs: list[dict] | None = None,
+    trending: list[str] | None = None,
+    seed: int = 0,
+) -> tuple[list[dict], list[dict], str, str]:
+    """(rounds, questions, industry, level) for a real-length interview (30, 45 or 60 minutes)."""
+    from app.services.coding_bank import CODING_INDUSTRIES, pick_problems
+
+    minutes = minutes if minutes in DURATIONS else 45
+    level = level or level_of(title)
     key = industry_key if industry_key in ROUNDS else detect_industry(title, "\n".join(jd_lines))[0]
-    rounds_def = ROUNDS.get(key) or ROUNDS["software"]
-    rounds, questions = [], []
+    rounds_def = list(ROUNDS.get(key) or ROUNDS["software"])
+    coding = key in CODING_INDUSTRIES
+    if coding:
+        at = next((i + 1 for i, r in enumerate(rounds_def) if r.kind == "technical"), 1)
+        rounds_def.insert(at, Round("Coding round", "coding", "Coding round. Think out loud, explain your approach, then code it. You can run the sample tests before you submit."))
+
+    # Candidate questions per round, best first.
     jd_qs = _jd_questions(jd_lines, 3)
+    trends = list(trend_qs or [])
     repos = [r.get("name") for r in ((evidence or {}).get("github") or {}).get("top_repos", [])[:2] if r.get("name")]
-    for ri, rd in enumerate(rounds_def):
-        rounds.append({"index": ri, "name": rd.name, "kind": rd.kind, "intro": rd.intro})
+    candidates: list[list[dict]] = []
+    for rd in rounds_def:
         qs: list[dict] = []
         if rd.kind == "screening":
             qs.append({"kind": "screening", "skill": None, "jd_line": f"{title} at {company}", "q": rd.bank[0].q, "key_points": list(rd.bank[0].key_points), "seconds": rd.bank[0].seconds})
-            qs.append({"kind": "screening", "skill": None, "jd_line": f"Why {company}", "q": f"Why do you want this {title} internship, and why {company}?", "key_points": [company.lower().split()[0] if company else "company", "role", "learn"], "seconds": 90})
+            qs.append({"kind": "screening", "skill": None, "jd_line": f"Why {company}", "q": f"Why do you want this {title} role, and why {company}?", "key_points": [company.lower().split()[0] if company else "company", "role", "learn"], "seconds": 90})
+        elif rd.kind == "coding":
+            for p in pick_problems(key, level, minutes, trending, seed):
+                qs.append({"kind": "coding", "skill": None, "jd_line": f"Coding: {', '.join(p.tags)} ({p.difficulty})", "q": f"{p.title}: {p.statement}", "key_points": [], "seconds": p.minutes * 60, "problem": p.public()})
         else:
-            if rd.kind in ("technical",) and jd_qs:
+            if rd.kind == "technical" and jd_qs:
                 qs += jd_qs[:2]
                 jd_qs = jd_qs[2:]
+            # Trend questions go to the field's main round: technical for tech fields, the case/role-play round otherwise.
+            if trends and (rd.kind == "technical" or (not coding and rd.kind in ("case", "roleplay", "portfolio"))):
+                for t in trends[:2]:
+                    qs.append({"kind": rd.kind, "skill": t["skill"], "jd_line": t["label"], "q": t["q"], "key_points": t["key_points"], "seconds": 150, "trend": True})
+                trends = trends[2:]
             if rd.kind in ("project", "portfolio"):
                 for name in (repos or resume_projects)[:1]:
                     qs.append({"kind": "proof", "skill": None, "jd_line": f"Your project: {name}", "q": f"Walk me through {name}: the problem, your design choices, and one thing you'd do differently.", "key_points": ["problem", "chose", "because", "differently"], "seconds": 180})
-            n = len(rd.bank)
-            picks = [rd.bank[(seed + k) % n] for k in range(min(rd.take, n))]
-            for b in picks:
-                qs.append({"kind": rd.kind, "skill": None, "jd_line": b.tests, "q": b.q, "key_points": list(b.key_points), "seconds": b.seconds})
+            bank = list(rd.bank)
+            n = len(bank)
+            ordered = [bank[(seed + k) % n] for k in range(n)] + list(EXTRA.get(key, {}).get(rd.kind, ()))
+            for b in ordered:
+                qs.append({"kind": rd.kind, "skill": None, "jd_line": b.tests, "q": b.q, "key_points": list(b.key_points), "seconds": max(b.seconds, MIN_SECONDS.get(rd.kind, 0))})
         for q in qs:
-            questions.append({**q, "round": ri, "round_name": rd.name})
-    # Short banks (or no job description): top up from the field's unused questions so every session has 8+.
-    if len(questions) < 8:
-        asked = {q["q"] for q in questions}
-        spare = [(ri, rd, b) for ri, rd in enumerate(rounds_def) if rd.kind != "screening" for b in rd.bank if b.q not in asked]
-        for ri, rd, b in spare[: 8 - len(questions)]:
-            questions.append({"kind": rd.kind, "skill": None, "jd_line": b.tests, "q": b.q, "key_points": list(b.key_points), "seconds": b.seconds, "round": ri, "round_name": rd.name})
-        questions.sort(key=lambda q: q["round"])
-    questions = questions[:16]
+            q["seconds"] = max(q["seconds"], MIN_SECONDS.get(rd.kind, 0)) if q["kind"] != "coding" else q["seconds"]
+        candidates.append(qs)
+
+    # Fit the interview to its length, in real minutes: coding problems take their own time; every other question
+    # costs its answer time plus reading and follow-up. Everyone gets a screening question and one HR question; the
+    # rest of the time goes to the field's core rounds, round-robin, so a 60-minute interview goes deeper.
+    def cost(q: dict) -> int:
+        return q["seconds"] + (0 if q["kind"] == "coding" else OVERHEAD_S)
+
+    target = minutes * 60
+    take = [0] * len(rounds_def)
+    used = 0
+    for i, rd in enumerate(rounds_def):
+        if rd.kind == "coding":
+            take[i] = len(candidates[i])
+            used += sum(cost(q) for q in candidates[i])
+        elif candidates[i]:
+            take[i] = 1
+            used += cost(candidates[i][0])
+    screening_i = next((i for i, r in enumerate(rounds_def) if r.kind == "screening"), None)
+    hr_i = len(rounds_def) - 1
+    if screening_i is not None and minutes >= 45 and len(candidates[screening_i]) > 1:
+        take[screening_i] = 2
+        used += cost(candidates[screening_i][1])
+    core = [i for i, r in enumerate(rounds_def) if r.kind != "coding" and i not in (screening_i, hr_i)]
+    while core:
+        moved = False
+        for i in core:
+            if take[i] < len(candidates[i]) and used + cost(candidates[i][take[i]]) <= target:
+                used += cost(candidates[i][take[i]])
+                take[i] += 1
+                moved = True
+        if not moved:
+            break
+    if take[hr_i] < min(2, len(candidates[hr_i])) and used + cost(candidates[hr_i][take[hr_i]]) <= target:
+        used += cost(candidates[hr_i][take[hr_i]])
+        take[hr_i] += 1
+
+    rounds, questions = [], []
+    for ri, rd in enumerate(rounds_def):
+        chosen = candidates[ri] if rd.kind == "coding" else candidates[ri][: take[ri]]
+        if not chosen:
+            continue
+        idx = len(rounds)
+        rounds.append({"index": idx, "name": rd.name, "kind": rd.kind, "intro": rd.intro, "norm": norm_for(key, rd.kind)})
+        for q in chosen:
+            questions.append({**q, "round": idx, "round_name": rd.name})
     for i, q in enumerate(questions):
         q["id"] = f"q{i + 1}"
+    return rounds, questions, key, level
+
+
+def build_rounds(industry_key: str | None, title: str, company: str, jd_lines: list[str], evidence: dict | None, resume_projects: list[str], seed: int = 0) -> tuple[list[dict], list[dict], str]:
+    """The 45-minute plan without trend questions (kept for callers that don't need the level)."""
+    rounds, questions, key, _ = build_plan(industry_key, title, company, jd_lines, evidence, resume_projects, 45, None, None, None, seed)
     return rounds, questions, key
 
 

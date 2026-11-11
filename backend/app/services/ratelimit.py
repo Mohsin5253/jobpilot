@@ -23,6 +23,7 @@ LIMITS: dict[str, tuple[int, int]] = {
     "scam_check": (30, 60 * 60),
     "resume_tools": (60, 60 * 60),
     "interview": (30, 60 * 60),
+    "code_review": (60, 60 * 60),
 }
 
 

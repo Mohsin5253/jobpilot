@@ -214,7 +214,7 @@ def test_every_industry_has_real_rounds():
         assert kinds[0] == "screening" and kinds[-1] == "behavioural", key
         assert len(rounds) >= 3
         rs, qs, ind = build_rounds(key, "Intern", "Acme", [], None, ["My project"])
-        assert ind == key and 8 <= len(qs) <= 16
+        assert ind == key and 5 <= len(qs) <= 16
         assert {q["round"] for q in qs} == set(range(len(rs)))
         assert all(q["q"] and q["jd_line"] for q in qs)
 
@@ -230,9 +230,9 @@ async def test_interview_v2_rounds_interviewer_and_report(authed):
     s = (await authed.post("/api/interviews", json={"match_id": mid, "interviewer": "male", "strict": True})).json()
     assert s["meta"]["interviewer"] == "male" and s["meta"]["industry"] == "software" and s["status"] == "active"
     assert [r["kind"] for r in s["rounds"]][0] == "screening"
-    q = next(q for q in s["questions"] if "duplicate" in q["q"])
-    assert q["round_name"].startswith("Technical")
-    good = "I used a hash set: I scanned the array once and checked the set before inserting, which is O(n) time and O(n) space. The other approach is to sort first, O(n log n), then compare neighbours with O(1) extra space."
+    q = next(q for q in s["questions"] if q["round_name"].startswith("Technical"))
+    assert any(r["kind"] == "coding" for r in s["rounds"]) and s["meta"]["minutes"] == 45 and s["meta"]["level"] in ("intern", "fresher")
+    good = f"I worked on this in my internship: I used {q.get('skill') or ''} with {', '.join(q['key_points'])} and I built a service that reduced latency by 40%, which the team adopted, so the result was measurable."
     out = (await authed.post(f"/api/interviews/{s['id']}/answer", json={"question_id": q["id"], "answer": good, "meta": {"mode": "typed", "keystrokes": len(good) + 20, "active_ms": 90000}})).json()
     assert out["scores"][q["id"]]["score"] >= 3 and not out["scores"][q["id"]].get("integrity_flags")
     assert out["rounds"][q["round"]]["answered"] == 1

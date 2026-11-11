@@ -9,11 +9,14 @@ const PROD = process.env.NODE_ENV === "production";
 // script and Next's inline bootstrap; dev also needs 'unsafe-eval' for fast refresh.
 const CSP = [
   "default-src 'self'",
-  `script-src 'self' 'unsafe-inline'${PROD ? "" : " 'unsafe-eval'"}`,
+  // blob:, jsDelivr and wasm-unsafe-eval are for the mock-interview code runner (lib/code-runner.ts): candidate code
+  // runs in a Web Worker inside an opaque-origin sandboxed frame, and Python runs on Pyodide (WebAssembly).
+  `script-src 'self' 'unsafe-inline' blob: https://cdn.jsdelivr.net 'wasm-unsafe-eval'${PROD ? "" : " 'unsafe-eval'"}`,
+  "worker-src 'self' blob:",
   "style-src 'self' 'unsafe-inline'",
   "img-src 'self' data: blob:",
   "font-src 'self' data:",
-  "connect-src 'self'",
+  "connect-src 'self' https://cdn.jsdelivr.net",
   "frame-ancestors 'none'",
   "base-uri 'self'",
   "form-action 'self'",
@@ -38,7 +41,8 @@ const nextConfig: NextConfig = {
           { key: "X-Content-Type-Options", value: "nosniff" },
           { key: "X-Frame-Options", value: "DENY" },
           { key: "Referrer-Policy", value: "strict-origin-when-cross-origin" },
-          { key: "Permissions-Policy", value: "camera=(), microphone=(), geolocation=()" },
+          // The microphone is for spoken answers in mock interviews (this site only; nothing is recorded or uploaded).
+          { key: "Permissions-Policy", value: "camera=(), microphone=(self), geolocation=()" },
           { key: "Content-Security-Policy", value: CSP },
           ...(PROD ? [{ key: "Strict-Transport-Security", value: "max-age=63072000; includeSubDomains; preload" }] : []),
         ],

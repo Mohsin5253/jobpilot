@@ -20,6 +20,7 @@ from app.services.evidence_refresh import refresh_evidence
 from app.services.campus_v2 import transparency_sweep
 from app.services.payments import expire_plans
 from app.services.quota import weekly_report
+from app.services.question_trends import refresh as refresh_question_trends
 from app.services.retention import retention_sweep
 from app.services.whatsapp import digest_sweep
 from app.sources.authenticity import reverify_jobs
@@ -77,6 +78,8 @@ class Worker:
         self.scheduler.add_job(expire_plans, "cron", minute=50, id="expire-plans", replace_existing=True, max_instances=1)
         # Mondays 09:00 IST: "we skipped N weak or risky matches for you".
         self.scheduler.add_job(weekly_report, "cron", day_of_week="mon", hour=3, minute=30, id="weekly-report", replace_existing=True, max_instances=1)
+        # Interview questions follow the market: re-measure rising skills per field and refresh the question bank.
+        self.scheduler.add_job(refresh_question_trends, "cron", day_of_week="sun", hour=4, minute=40, id="question-trends", replace_existing=True, max_instances=1)
         # Proof-of-skills pack: re-read linked GitHub / Codeforces profiles once a week.
         self.scheduler.add_job(refresh_evidence, "cron", hour=4, minute=20, id="evidence", replace_existing=True, max_instances=1)
         self.scheduler.start()

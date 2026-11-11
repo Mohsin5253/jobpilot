@@ -392,6 +392,36 @@ class InterviewSession(Base):
     completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
 
+class TrendQuestion(Base):
+    """Interview questions about skills rising in a field's postings, refreshed weekly (question_trends.py)."""
+
+    __tablename__ = "question_bank"
+    __table_args__ = (Index("ix_qbank_industry_active", "industry", "active"),)
+
+    id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=uuid.uuid4)
+    industry: Mapped[str] = mapped_column(String(30))
+    round_kind: Mapped[str] = mapped_column(String(20))  # technical | case | behavioural
+    skill: Mapped[str] = mapped_column(String(80))
+    question: Mapped[str] = mapped_column(Text)
+    key_points: Mapped[list[str]] = mapped_column(JSONB, default=list, server_default="[]")
+    source: Mapped[str] = mapped_column(String(20), default="baseline")  # baseline (curated) | postings (measured) | ai
+    growth: Mapped[float | None] = mapped_column(Float)  # share of postings now vs the previous 30 days, e.g. 0.4 = +40%
+    active: Mapped[bool] = mapped_column(Boolean, default=True, server_default="true")
+    created_at: Mapped[datetime] = _now_col()
+
+
+class IndustryTrend(Base):
+    """The skills rising in each field's postings, measured weekly: [{skill, share, previous, growth, postings}]."""
+
+    __tablename__ = "industry_trends"
+
+    industry: Mapped[str] = mapped_column(String(30), primary_key=True)
+    skills: Mapped[list[dict[str, Any]]] = mapped_column(JSONB, default=list)
+    postings: Mapped[int] = mapped_column(Integer, default=0)
+    source: Mapped[str] = mapped_column(String(20), default="baseline")
+    refreshed_at: Mapped[datetime] = _now_col()
+
+
 class GapProject(Base):
     """A 48-hour mini-project that closes a near-miss skill gap, verified against a repo the student owns."""
 

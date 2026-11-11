@@ -21,12 +21,18 @@ from pydantic import BaseModel, Field
 from sqlalchemy import func, select
 
 from app.agents.matcher import W_SKILLS, W_SKILLS_OFFLINE, level_factor
-from app.api.deps import RealUserDep, SessionDep, UserDep
+from app.api.deps import AdminDep, RealUserDep, SessionDep, UserDep
 from app.config import settings
 from app.llm import CallContext, LLMOutputError, LLMUnavailable, get_llm
 from app.models import AgentRun, GapProject, InterviewSession, JobMatch, Profile, RunStatus
 from app.schemas import AdditionalSkill, ResumeData
-from app.services.interview_rounds import build_rounds, industry_name
+from app.ats_lexicon import INDUSTRIES
+from app.services import interview_report
+from app.services.ats import detect_industry
+from app.services.code_review import review as code_review
+from app.services.interview_rounds import BAR, build_plan, industry_name
+from app.services.question_trends import refresh as refresh_question_trends
+from app.services.question_trends import trend_questions, trending_skills
 from app.services.ratelimit import hit
 from app.skills import extract_skills, role_digest, skill_overlap
 
@@ -140,6 +146,8 @@ class StartIn(BaseModel):
     interviewer: Literal["male", "female"] = "female"
     strict: bool = True
     industry: str | None = None
+    minutes: Literal[30, 45, 60] = 45
+    level: Literal["intern", "fresher"] | None = None
 
 
 @router.post("/interviews", status_code=201)
@@ -151,12 +159,26 @@ async def start_interview(body: StartIn, user: RealUserDep, session: SessionDep)
     profile = await _profile(session, user.id)
     resume = ResumeData.model_validate(profile.resume or {})
     previous = (await session.execute(select(func.count()).select_from(InterviewSession).where(InterviewSession.user_id == user.id, InterviewSession.application_id == m.id))).scalar_one()
-    rounds, questions, industry = build_rounds(body.industry, m.job.title, m.job.company, jd_lines(m.job.description), profile.evidence, [p.name for p in resume.projects if p.name], seed=previous)
+    lines = jd_lines(m.job.description)
+    industry = body.industry if body.industry in INDUSTRIES else detect_industry(m.job.title, "\n".join(lines))[0]
+    trends = await trend_questions(industry, 4, seed=previous)
+    hot = [t["skill"] for t in (await trending_skills(industry))["skills"]]
+    rounds, questions, industry, level = build_plan(industry, m.job.title, m.job.company, lines, profile.evidence, [p.name for p in resume.projects if p.name], body.minutes, body.level, trends, hot, seed=previous)
     sess = InterviewSession(
         user_id=user.id,
         application_id=m.id,
         questions=questions,
-        meta={"industry": industry, "industry_name": industry_name(industry), "interviewer": body.interviewer, "strict": body.strict, "rounds": rounds, "job": {"title": m.job.title, "company": m.job.company}},
+        meta={
+            "industry": industry,
+            "industry_name": industry_name(industry),
+            "interviewer": body.interviewer,
+            "strict": body.strict,
+            "rounds": rounds,
+            "job": {"title": m.job.title, "company": m.job.company},
+            "minutes": body.minutes,
+            "level": level,
+            "bar": BAR[level],
+        },
         integrity={"events": [], "violations": 0},
         status="active",
     )
@@ -203,7 +225,10 @@ def _session_out(s: InterviewSession) -> dict:
             "terminated_reason": integ.get("terminated_reason"),
         },
         "report": {"score": avg, "verdict": _verdict(avg) if s.completed_at else "Not finished", "answered": len(all_sc), "total": len(s.questions)},
+        "started_at": meta.get("started_at"),
     }
+
+
 
 
 # Leaving the interview (switching tab or app, leaving full screen) counts against a strict session; the third ends it.
@@ -437,3 +462,102 @@ async def submit_repo(project_id: str, body: RepoIn, user: RealUserDep, session:
     g.status, g.repo_url, g.before_score, g.after_score, g.run_id, g.verified_at = "verified", body.repo_url, before, after, run.id, datetime.now(UTC)
     await session.commit()
     return _gap_out(g)
+
+
+@router.post("/interviews/{session_id}/start")
+async def start_clock(session_id: str, user: RealUserDep, session: SessionDep) -> dict:
+    """Starts the interview clock (once), so the report can compare time used with the planned length."""
+    s = await session.get(InterviewSession, session_id)
+    if s is None or s.user_id != user.id:
+        raise HTTPException(404, "No such session")
+    if not (s.meta or {}).get("started_at"):
+        s.meta = {**(s.meta or {}), "started_at": datetime.now(UTC).isoformat()}
+        await session.commit()
+    return _session_out(s)
+
+
+class TestFailure(BaseModel):
+    args: list | dict | str | int | float | None = None
+    expected: list | dict | str | int | float | bool | None = None
+    got: list | dict | str | int | float | bool | None = None
+    error: str | None = Field(default=None, max_length=500)
+
+
+class TestResults(BaseModel):
+    ran: bool = False
+    passed: int = Field(default=0, ge=0, le=200)
+    total: int = Field(default=0, ge=0, le=200)
+    failures: list[TestFailure] = Field(default_factory=list, max_length=20)
+    runtime_ms: int = Field(default=0, ge=0, le=600000)
+
+
+class CodeIn(BaseModel):
+    question_id: str
+    language: Literal["python", "javascript", "java", "cpp"]
+    code: str = Field(min_length=1, max_length=20000)
+    approach: str = Field(default="", max_length=3000)
+    results: TestResults = Field(default_factory=TestResults)
+    meta: AnswerMeta | None = None
+
+
+@router.post("/interviews/{session_id}/code")
+async def submit_code(session_id: str, body: CodeIn, user: RealUserDep, session: SessionDep) -> dict:
+    """Submits a coding answer to the AI code reviewer. Test results come from the candidate's browser (code is never
+    run on our servers); the reviewer reads the code and can't overrule tests that actually ran."""
+    await hit("code_review", str(user.id))
+    s = await session.get(InterviewSession, session_id)
+    if s is None or s.user_id != user.id:
+        raise HTTPException(404, "No such session")
+    if (s.status or "active") == "terminated":
+        raise HTTPException(409, "This interview was ended because you left it too many times. Start a new one to try again.")
+    q = next((q for q in s.questions if q["id"] == body.question_id), None)
+    if q is None or q.get("kind") != "coding":
+        raise HTTPException(404, "No such coding question")
+    flags = integrity_flags(body.code, body.meta) if (s.meta or {}).get("strict", False) else []
+    rv = await code_review(q["problem"]["id"], body.language, body.code, body.approach, body.results.model_dump(), user.id)
+    if flags:
+        rv = {**rv, "score": min(rv["score"], 1.5), "integrity_flags": flags, "feedback": [f"Not counted: {flags[0].lower()}.", *rv["feedback"][:2]]}
+    rv["tests_visible"] = body.results.total
+    s.answers = {**s.answers, q["id"]: body.code + (f"\n\n/* Approach: {body.approach.strip()} */" if body.approach.strip() else "")}
+    s.scores = {**s.scores, q["id"]: rv}
+    if len(s.scores) == len(s.questions):
+        s.completed_at = s.completed_at or datetime.now(UTC)
+        s.status = "completed"
+    await session.commit()
+    return _session_out(s)
+
+
+@router.get("/interviews/{session_id}/report")
+async def full_report(session_id: str, user: UserDep, session: SessionDep) -> dict:
+    """Every round against the field's norms at your level: strengths, gaps, improvements, coding verdicts, and an
+    overall practice signal. The AI-written summary is generated once and kept."""
+    s = await session.get(InterviewSession, session_id)
+    if s is None or s.user_id != user.id:
+        raise HTTPException(404, "No such session")
+    rep = interview_report.build(s)
+    if s.completed_at and not (s.meta or {}).get("report_ai") and s.scores:
+        ai = await interview_report.narrative(rep, user.id)
+        if ai:
+            s.meta = {**(s.meta or {}), "report_ai": ai}
+            await session.commit()
+            rep["summary"], rep["next_week"] = ai["summary"], ai["next_week"]
+    started = (s.meta or {}).get("started_at")
+    if started and s.completed_at:
+        rep["minutes_used"] = round((s.completed_at - datetime.fromisoformat(started)).total_seconds() / 60)
+    return rep
+
+
+@router.get("/interviews/trends/{industry}")
+async def trends(industry: str, user: UserDep) -> dict:
+    """The skills rising in this field's postings (or the curated snapshot until there are enough postings)."""
+    if industry not in INDUSTRIES:
+        raise HTTPException(404, "Unknown field")
+    out = await trending_skills(industry)
+    out["questions"] = await trend_questions(industry, 6)
+    return out
+
+
+@router.post("/admin/trends/refresh")
+async def refresh_trends(user: AdminDep) -> dict:
+    """Admin: re-measure trends from postings and refresh the question bank now (it also runs weekly)."""
+    return await refresh_question_trends()

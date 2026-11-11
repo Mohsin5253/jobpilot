@@ -2,12 +2,15 @@
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { AlertTriangle, ArrowRight, Check, Clock, Maximize, Mic, MicOff, RotateCcw, ShieldAlert, ShieldCheck, Volume2, VolumeX } from "lucide-react";
+import dynamic from "next/dynamic";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useRef, useState, type ClipboardEvent, type DragEvent, type KeyboardEvent } from "react";
 import { toast } from "sonner";
 
+import type { Problem } from "@/components/interview/coding-panel";
 import { Interviewer3D, type InterviewerHandle } from "@/components/interview/interviewer-3d";
+import { InterviewReport } from "@/components/interview/interview-report";
 import { INTERVIEWERS, pickVoice, type InterviewerKey } from "@/components/interview/interviewers";
 import { Badge } from "@/components/ui/badge";
 import { Button, buttonClass } from "@/components/ui/button";
@@ -18,8 +21,34 @@ import { ScoreRing } from "@/components/ui/score-ring";
 import { api } from "@/lib/api";
 import { cn } from "@/lib/utils";
 
-type Q = { id: string; q: string; jd_line: string; skill: string | null; kind: string; round: number; round_name: string; seconds?: number };
-type Score = { relevance: number; specificity: number; structure: number; score: number; tests: string; feedback: string[]; integrity_flags?: string[]; mode?: string };
+type Q = { id: string; q: string; jd_line: string; skill: string | null; kind: string; round: number; round_name: string; seconds?: number; trend?: boolean; problem?: Problem };
+type Score = {
+  relevance: number;
+  specificity: number;
+  structure: number;
+  score: number;
+  tests: string;
+  feedback: string[];
+  integrity_flags?: string[];
+  mode?: string;
+  // coding review
+  verdict?: string;
+  summary?: string;
+  tests_label?: string;
+  time_complexity?: string;
+  space_complexity?: string;
+  optimal?: boolean;
+  bugs?: string[];
+  edge_cases_missed?: string[];
+  code_quality?: string[];
+  improvements?: string[];
+  correctness?: number;
+  efficiency?: number;
+  quality?: number;
+  communication?: number;
+  ai?: boolean;
+  language?: string;
+};
 type Round = { index: number; name: string; kind: string; intro: string; total: number; answered: number; score: number | null };
 export type InterviewSession = {
   id: string;
@@ -29,7 +58,8 @@ export type InterviewSession = {
   scores: Record<string, Score>;
   completed_at: string | null;
   status: "active" | "completed" | "terminated";
-  meta: { industry?: string; industry_name?: string; interviewer?: InterviewerKey; strict?: boolean; job?: { title: string; company: string } };
+  meta: { industry?: string; industry_name?: string; interviewer?: InterviewerKey; strict?: boolean; job?: { title: string; company: string }; minutes?: number; level?: string; bar?: number };
+  started_at?: string | null;
   rounds: Round[];
   integrity: { violations: number; max_violations: number; counts: Record<string, number>; flagged_answers: string[]; terminated_reason: string | null };
   report: { score: number | null; verdict: string; answered: number; total: number };
@@ -46,6 +76,9 @@ type SR = {
   interimResults: boolean;
 };
 type IntegrityType = "tab_hidden" | "window_blur" | "fullscreen_exit" | "paste_blocked" | "copy_blocked" | "drop_blocked" | "shortcut_blocked" | "context_menu";
+
+// The code editor (CodeMirror) loads only when a coding question starts.
+const CodingPanel = dynamic(() => import("@/components/interview/coding-panel").then((m) => m.CodingPanel), { ssr: false, loading: () => <Skeleton className="min-h-[520px]" /> });
 
 const fmt = (s: number) => `${Math.floor(s / 60)}:${String(Math.max(0, s) % 60).padStart(2, "0")}`;
 
@@ -167,6 +200,7 @@ function Room({ s, setS }: { s: InterviewSession; setS: (s: InterviewSession) =>
       }
     }
     setStarted(true);
+    api.post<InterviewSession>(`/interviews/${s.id}/start`).then(setS, () => {});
   };
 
   if (done) return <Report s={s} />;
@@ -208,12 +242,13 @@ function Room({ s, setS }: { s: InterviewSession; setS: (s: InterviewSession) =>
           ) : (
             <Badge tone="outline">Practice mode</Badge>
           )}
+          <Clock30 s={s} />
           <Button size="icon" variant="ghost" aria-label={muted ? "Turn interviewer voice on" : "Mute interviewer"} onClick={() => (setMuted((m) => !m), speechSynthesis?.cancel())}>
             {muted ? <VolumeX className="size-4" /> : <Volume2 className="size-4" />}
           </Button>
         </div>
       </div>
-      <div className="grid gap-5 lg:grid-cols-[minmax(0,440px)_minmax(0,1fr)]">
+      <div className={cn("grid gap-5", current?.kind === "coding" && !feedback ? "lg:grid-cols-[minmax(0,240px)_minmax(0,1fr)]" : "lg:grid-cols-[minmax(0,440px)_minmax(0,1fr)]")}>
         <div className="space-y-3">
           <Interviewer3D ref={head} who={who} speaking={speaking} />
           <p className="text-center text-[12px] text-text-3">
@@ -227,6 +262,24 @@ function Room({ s, setS }: { s: InterviewSession; setS: (s: InterviewSession) =>
             onNext={() => {
               setFeedback(null);
               head.current?.listen(false);
+            }}
+          />
+        ) : current?.kind === "coding" && current.problem ? (
+          <CodingTurn
+            key={current.id}
+            s={s}
+            q={current as Q & { problem: Problem }}
+            intro={firstOfRound ? round?.intro : undefined}
+            strict={strict}
+            speak={speak}
+            head={head}
+            flag={flag}
+            onReviewed={(r) => {
+              setS(r);
+              const sc = r.scores[current.id];
+              setFeedback({ q: current, sc });
+              head.current?.nod();
+              speak(sc.verdict === "correct" ? "Your solution is correct. Let's look at the review." : "Thanks. Let's go through the review.");
             }}
           />
         ) : current ? (
@@ -512,6 +565,7 @@ function AnswerPanel({
 
 function FeedbackCard({ f, last, onNext }: { f: { q: Q; sc: Score }; last: boolean; onNext: () => void }) {
   const { sc } = f;
+  if (sc.verdict) return <CodeReviewCard f={f} last={last} onNext={onNext} />;
   return (
     <Card className="space-y-4 p-5">
       <div className="flex items-center gap-4">
@@ -539,6 +593,114 @@ function FeedbackCard({ f, last, onNext }: { f: { q: Q; sc: Score }; last: boole
       </Button>
     </Card>
   );
+}
+
+const VERDICT_TONE: Record<string, "success" | "warning" | "danger" | "outline"> = { correct: "success", "partially correct": "warning", incorrect: "danger", "not verified": "outline" };
+
+/** The AI code reviewer's verdict on one coding answer. */
+export function CodeReviewCard({ f, last, onNext }: { f: { q: Q; sc: Score }; last?: boolean; onNext?: () => void }) {
+  const { sc } = f;
+  const list = (title: string, items?: string[]) =>
+    !!items?.length && (
+      <div>
+        <div className="mb-1 text-[12.5px] font-medium text-text-2">{title}</div>
+        <ul className="space-y-1 text-[13px] text-text-2">
+          {items.map((x) => (
+            <li key={x}>· {x}</li>
+          ))}
+        </ul>
+      </div>
+    );
+  return (
+    <Card className="space-y-4 p-5">
+      <div className="flex flex-wrap items-center gap-3">
+        <ScoreRing score={sc.score * 20} size={64} stroke={5} label={false} />
+        <div>
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="text-[18px] font-semibold">Code review</span>
+            <Badge tone={VERDICT_TONE[sc.verdict ?? ""] ?? "outline"}>{sc.verdict}</Badge>
+          </div>
+          <div className="text-[12.5px] text-text-3">
+            {sc.tests_label} · {sc.language} · {sc.ai ? "AI code reviewer" : "rule-based review (AI unavailable)"}
+          </div>
+        </div>
+      </div>
+      {!!sc.integrity_flags?.length && (
+        <p className="flex gap-2 text-[13px] text-[var(--error)]">
+          <AlertTriangle className="size-4 shrink-0" /> {sc.integrity_flags.join(". ")}.
+        </p>
+      )}
+      {sc.summary && <p className="text-[13.5px]">{sc.summary}</p>}
+      <div className="grid grid-cols-2 gap-2 text-[12.5px] sm:grid-cols-4">
+        {(["correctness", "efficiency", "quality", "communication"] as const).map((k) => (
+          <div key={k} className="rounded-[var(--radius-control)] border border-border px-2.5 py-2">
+            <div className="text-text-3 capitalize">{k}</div>
+            <div className="num text-[15px] font-semibold">{sc[k] ?? "—"}/5</div>
+          </div>
+        ))}
+      </div>
+      <p className="text-[13px] text-text-2">
+        Complexity: <span className="num">{sc.time_complexity}</span> time, <span className="num">{sc.space_complexity}</span> space{sc.optimal === false ? " · not the expected optimum" : sc.optimal ? " · optimal" : ""}
+      </p>
+      {list("Bugs", sc.bugs)}
+      {list("Edge cases missed", sc.edge_cases_missed)}
+      {list("Code quality", sc.code_quality)}
+      {list("How to improve", sc.improvements)}
+      {onNext && (
+        <Button variant="primary" onClick={onNext}>
+          {last ? "See my report" : "Next question"} <ArrowRight />
+        </Button>
+      )}
+    </Card>
+  );
+}
+
+/** Overall interview clock against the planned length (30, 45 or 60 minutes). */
+function Clock30({ s }: { s: InterviewSession }) {
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    const t = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(t);
+  }, []);
+  if (!s.started_at || !s.meta.minutes) return null;
+  const used = Math.floor((now - new Date(s.started_at).getTime()) / 1000);
+  const over = used > s.meta.minutes * 60;
+  return (
+    <span className={cn("num inline-flex items-center gap-1 text-[12.5px]", over ? "text-[var(--error)]" : "text-text-2")} title="Time in this interview">
+      <Clock className="size-3.5" /> {fmt(used)} / {s.meta.minutes}:00
+    </span>
+  );
+}
+
+/** A coding question: the interviewer reads the problem title, then the editor opens. */
+function CodingTurn({
+  s,
+  q,
+  intro,
+  strict,
+  speak,
+  head,
+  flag,
+  onReviewed,
+}: {
+  s: InterviewSession;
+  q: Q & { problem: Problem };
+  intro?: string;
+  strict: boolean;
+  speak: (t: string, then?: () => void) => void;
+  head: React.RefObject<InterviewerHandle | null>;
+  flag: (t: IntegrityType, m?: string) => void;
+  onReviewed: (r: InterviewSession) => void;
+}) {
+  const [ready, setReady] = useState(false);
+  useEffect(() => {
+    speak(`${intro ? `${intro} ` : ""}Here's your problem: ${q.problem.title}. Read it, explain your approach, then code it.`, () => {
+      setReady(true);
+      head.current?.listen(true);
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [q.id]);
+  return <CodingPanel sessionId={s.id} q={q} index={s.questions.findIndex((x) => x.id === q.id)} total={s.questions.length} strict={strict} onFlag={(t) => flag(t)} onReviewed={(r) => onReviewed(r as InterviewSession)} ready={ready} />;
 }
 
 const EVENT_LABEL: Record<string, string> = {
@@ -599,20 +761,9 @@ function Report({ s }: { s: InterviewSession }) {
         </div>
       </Card>
 
-      <div className="grid gap-4 lg:grid-cols-2">
-        <Card>
-          <CardHeader title="Rounds" />
-          <ul className="divide-y divide-border">
-            {s.rounds.map((r) => (
-              <li key={r.index} className="flex items-center justify-between gap-3 px-5 py-3 text-[13.5px]">
-                <span>{r.name}</span>
-                <span className="num text-text-2">
-                  {r.score != null ? `${r.score}/5` : "—"} · {r.answered}/{r.total}
-                </span>
-              </li>
-            ))}
-          </ul>
-        </Card>
+      <InterviewReport id={s.id} />
+
+      <div className="grid gap-4">
         <Card>
           <CardHeader title="Integrity" description={s.meta.strict ? "Strict mode was on." : "Practice mode: not proctored."} />
           <div className="space-y-2 p-5 pt-3 text-[13.5px]">
@@ -650,13 +801,19 @@ function Report({ s }: { s: InterviewSession }) {
                 </summary>
                 <div className="mt-2 space-y-2 text-[13px]">
                   <p className="text-text-3">Tests: {q.jd_line}</p>
-                  {s.answers[q.id] && <p className="rounded-[var(--radius-control)] bg-elevated p-3 whitespace-pre-line">{s.answers[q.id]}</p>}
+                  {s.answers[q.id] &&
+                    (q.kind === "coding" ? (
+                      <pre className="num overflow-x-auto rounded-[var(--radius-control)] bg-elevated p-3 text-[12px]">{s.answers[q.id]}</pre>
+                    ) : (
+                      <p className="rounded-[var(--radius-control)] bg-elevated p-3 whitespace-pre-line">{s.answers[q.id]}</p>
+                    ))}
+                  {sc?.verdict && <CodeReviewCard f={{ q, sc }} />}
                   {sc?.integrity_flags?.map((f) => (
                     <p key={f} className="text-[var(--error)]">
                       {f}
                     </p>
                   ))}
-                  {sc?.feedback.map((f) => (
+                  {!sc?.verdict && sc?.feedback.map((f) => (
                     <p key={f} className="text-text-2">
                       · {f}
                     </p>
