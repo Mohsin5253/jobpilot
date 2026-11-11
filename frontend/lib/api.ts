@@ -16,13 +16,39 @@ export async function signOut(path: "/auth/logout" | "/auth/logout-all" = "/auth
   window.location.replace("/");
 }
 
-async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
+// The API sleeps after 15 minutes without traffic (Render free tier) and proxied requests then get a 502 instead of
+// waking it. One shared wake-up call (see app/wake) wakes it directly; every request waiting on it then retries once.
+let waking: Promise<boolean> | null = null;
+function wakeApi(): Promise<boolean> {
+  if (!waking) {
+    if (typeof window !== "undefined") {
+      import("sonner").then(({ toast }) => toast.loading("Waking up the server. This takes up to a minute after a quiet spell…", { id: "api-wake", duration: 60_000 }));
+    }
+    waking = fetch("/wake", { cache: "no-store" })
+      .then((r) => r.ok)
+      .catch(() => false)
+      .finally(() => {
+        if (typeof window !== "undefined") import("sonner").then(({ toast }) => toast.dismiss("api-wake"));
+        setTimeout(() => (waking = null), 5_000);
+      });
+  }
+  return waking;
+}
+
+async function request<T>(path: string, init: RequestInit = {}, retried = false): Promise<T> {
   const isForm = init.body instanceof FormData;
   const res = await fetch(`/api${path}`, {
     credentials: "include",
     ...init,
     headers: { ...(isForm || !init.body ? {} : { "content-type": "application/json" }), ...init.headers },
   });
+  // Reads are always safe to retry. A write (send, approve, start) is retried only when Render says no instance was
+  // running (x-render-routing: no-deploy), i.e. the request never reached the API, so nothing can happen twice.
+  const asleep = res.status === 502 || res.status === 503 || res.status === 504;
+  const safe = (init.method ?? "GET").toUpperCase() === "GET" || res.headers.get("x-render-routing") === "no-deploy";
+  if (asleep && safe && !retried && typeof window !== "undefined") {
+    if (await wakeApi()) return request<T>(path, init, true);
+  }
   if (res.status === 401 && typeof window !== "undefined" && !signingOut && !path.startsWith("/auth/") && window.location.pathname !== "/") {
     // Clear the dead cookie first, or the middleware would bounce /login straight back to the app.
     await fetch("/api/auth/logout", { method: "POST", credentials: "include" }).catch(() => undefined);

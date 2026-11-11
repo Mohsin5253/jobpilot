@@ -1,0 +1,23 @@
+# Keeps the API awake. On Render's free tier it sleeps after 15 minutes without traffic; requests that arrive through
+# the Vercel site's /api proxy then fail with 502 instead of waking it, and scheduled jobs (daily agent runs, the weekly
+# question refresh) don't run while it sleeps. A direct request every 10 minutes keeps it up.
+# One always-on free service uses about 720 of the 750 free instance hours Render gives a workspace each month.
+# Set the repository variable API_HEALTH_URL to override the address (Settings > Secrets and variables > Actions).
+name: keep-warm
+
+on:
+  schedule:
+    - cron: "*/10 * * * *"
+  workflow_dispatch:
+
+permissions: {}
+
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    steps:
+      - name: Ping the API
+        env:
+          URL: ${{ vars.API_HEALTH_URL || 'https://jobpilot-api-97o0.onrender.com/health' }}
+        run: curl -fsS --retry 3 --retry-delay 20 --max-time 90 "$URL"

@@ -82,6 +82,13 @@ def offline_review(p: Problem, lang: str, code: str, approach: str, results: dic
         corr = 5 if verdict == "correct" else max(1, round(1 + 3 * passed / max(total, 1)))
     else:
         verdict, corr = "not verified", 3
+    if empty:  # nothing written: no efficiency or quality to judge
+        return {
+            "verdict": "incorrect", "summary": "No solution was written.", "time_complexity": "n/a", "space_complexity": "n/a", "optimal": False,
+            "bugs": [], "edge_cases_missed": [], "code_quality": [],
+            "improvements": ["Write a brute-force solution first, even if it's slow, then improve it: a working answer scores far better than none.", "Say your approach and its complexity before you code."],
+            "correctness": 1, "efficiency": 1, "quality": 1, "communication": 1 if not approach.strip() else min(5, 3 + ("o(" in approach.lower())), "ai": False,
+        }
     loops = _nested_loops(code, lang)
     expects_linear = "O(n)" in p.hint_complexity and "log" not in p.hint_complexity.split("O(n)")[0]
     eff = 2 if (loops >= 2 and expects_linear) else 4 if loops <= 1 else 3

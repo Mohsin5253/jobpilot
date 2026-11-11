@@ -128,3 +128,9 @@ async def test_coding_submission_and_report(authed):
     coding = next(r for r in rep["rounds"] if r["kind"] == "coding")
     assert coding["coding"][0]["verdict"] == "partially correct" and coding["status"] in ("Below bar", "Meets bar", "Above bar")
     assert any(r["gaps"] for r in rep["rounds"]) and rep["focus"]
+
+
+def test_blank_submission_scores_the_minimum():
+    p = code_review.BY_ID["valid_parentheses"]
+    r = code_review.offline_review(p, "python", p.signature("python"), "", {"ran": True, "passed": 0, "total": 7})
+    assert r["verdict"] == "incorrect" and r["correctness"] == r["efficiency"] == r["quality"] == r["communication"] == 1

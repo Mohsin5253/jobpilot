@@ -1,7 +1,7 @@
 import { NextResponse, type NextRequest } from "next/server";
 
 // Public pages: the landing page, trust and legal pages and the sign-in flows. Everything else needs a session.
-const PUBLIC = ["/login", "/register", "/forgot-password", "/reset-password", "/privacy", "/terms", "/trust", "/transparency", "/scam-check", "/scam-card", "/p/"];
+const PUBLIC = ["/login", "/register", "/forgot-password", "/reset-password", "/privacy", "/terms", "/trust", "/transparency", "/scam-check", "/scam-card", "/p/", "/wake"];
 const AUTH_ONLY = ["/login", "/register"];
 
 export function middleware(req: NextRequest) {
