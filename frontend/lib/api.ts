@@ -47,7 +47,10 @@ async function request<T>(path: string, init: RequestInit = {}, retried = false)
   const asleep = res.status === 502 || res.status === 503 || res.status === 504;
   const safe = (init.method ?? "GET").toUpperCase() === "GET" || res.headers.get("x-render-routing") === "no-deploy";
   if (asleep && safe && !retried && typeof window !== "undefined") {
-    if (await wakeApi()) return request<T>(path, init, true);
+    // Retry even if the wake call timed out: a cold start (with migrations) can take a little over its 55s wait,
+    // and the API is usually up moments later.
+    await wakeApi();
+    return request<T>(path, init, true);
   }
   if (res.status === 401 && typeof window !== "undefined" && !signingOut && !path.startsWith("/auth/") && window.location.pathname !== "/") {
     // Clear the dead cookie first, or the middleware would bounce /login straight back to the app.

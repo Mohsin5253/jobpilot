@@ -57,3 +57,20 @@ async def test_independent_agents_overlap(monkeypatch):
     # 8 agents x 0.3s one after another would take 2.4s; in lanes it's 5 steps deep.
     assert elapsed < 1.9, elapsed
     assert "researcher" in spans and set(final["done"]) >= {"scout", "verifier", "matcher", "interviewer", "tailor", "outreach", "tracker", "approval", "dispatch"}
+
+
+async def test_keep_awake_pings_its_own_public_address(monkeypatch):
+    import httpx
+    import respx
+
+    from app import worker
+    from app.config import settings
+
+    monkeypatch.setattr(settings, "render_external_url", "https://jobpilot-api.example.onrender.com")
+    with respx.mock(assert_all_called=True) as m:
+        route = m.get("https://jobpilot-api.example.onrender.com/health").mock(return_value=httpx.Response(200, json={"status": "ok"}))
+        await worker.keep_awake_ping()
+        assert route.called
+    with respx.mock() as m:  # a failed ping is logged, never raised
+        m.get("https://jobpilot-api.example.onrender.com/health").mock(side_effect=httpx.ConnectError("down"))
+        await worker.keep_awake_ping()

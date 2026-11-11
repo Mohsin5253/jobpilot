@@ -61,6 +61,8 @@ class Worker:
 
     async def start(self) -> None:
         await get_graph()
+        if settings.keep_awake and settings.render_external_url:
+            self.scheduler.add_job(keep_awake_ping, "interval", minutes=10, id="keep-awake", replace_existing=True, max_instances=1)
         self.scheduler.add_job(enqueue_scheduled_runs, "cron", minute=0, id="daily-runs", replace_existing=True)
         self.scheduler.add_job(follow_up_sweep, "cron", minute=15, id="follow-ups", replace_existing=True)
         # Researcher: re-run the agents for each user every research_interval_hours (checked twice an hour).
@@ -95,6 +97,18 @@ class Worker:
             t.cancel()
         await close_graph()
         log.info("worker.stopped", worker=self.id)
+
+
+async def keep_awake_ping() -> None:
+    """Requests this service's own public address, so Render counts it as traffic and never puts it to sleep."""
+    import httpx
+
+    url = f"{settings.render_external_url.rstrip('/')}/health"
+    try:
+        async with httpx.AsyncClient(timeout=20) as c:
+            await c.get(url)
+    except httpx.HTTPError as exc:
+        log.warning("keep_awake.failed", error=type(exc).__name__)
 
 
 async def main() -> None:

@@ -176,6 +176,11 @@ class Settings(BaseSettings):
 
     # Worker
     embedded_worker: bool = True  # run the queue consumer + scheduler inside the API process
+    # Render sets RENDER_EXTERNAL_URL for every web service. With keep_awake on, the scheduler requests it every 10
+    # minutes: the request comes back in through Render's front door, so a free instance never sleeps (a sleeping
+    # one can't be woken by requests proxied through the Vercel site). Uses ~720 of the 750 free hours a month.
+    render_external_url: str | None = None
+    keep_awake: bool = True
     worker_poll_seconds: float = 2.0
     run_lock_timeout_minutes: int = 30
 

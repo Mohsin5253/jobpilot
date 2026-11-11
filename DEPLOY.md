@@ -234,3 +234,10 @@ Every officer view writes an `audit_events` row (`tpo_view`).
 
 Render Postgres takes daily backups (point-in-time recovery on paid plans). Users export or delete their own data in
 Settings → **Your data**. Deleting an account removes every row that belongs to it.
+
+**Staying awake on the free tier.** Render stops a free API after 15 minutes without inbound traffic, and requests
+proxied through the Vercel site can't wake it (they get a 502). Two things keep it up: the API pings its own public
+address (`RENDER_EXTERNAL_URL`, set by Render) every 10 minutes from its scheduler (`KEEP_AWAKE=true`, the default),
+and `.github/workflows/keep-warm.yml` pings it from GitHub as a backup. If it ever sleeps anyway (after a redeploy, for
+example), the site's `/wake` route wakes it and retries the request. Staying awake uses about 720 of the 750 free
+instance hours Render gives a workspace each month.
