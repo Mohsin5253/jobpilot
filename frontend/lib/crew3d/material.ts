@@ -104,11 +104,27 @@ const FRAGMENT = /* glsl */ `
   uniform float uFade;
   uniform vec2 uLight;
   uniform vec2 uTurn;
+  uniform vec4 uMouth;  // mouth centre (uv), half width, how open (0 = closed: no effect at all)
   varying vec2 vUv;
   varying float vHead;
 
   float depthAt(vec2 uv) {
     return mix(texture2D(uDepthA, uv).r, texture2D(uDepthB, uv).r, uMix);
+  }
+
+  // Talking: the jaw region below the lips is sampled from slightly higher up, so the chin and lower lip drop;
+  // the gap that opens between the lips gets a dark mouth interior. Off (open = 0) for every other character.
+  vec2 jawUv(vec2 uv, out float inside) {
+    inside = 0.0;
+    if (uMouth.w <= 0.001) return uv;
+    vec2 d = uv - uMouth.xy;
+    float across = 1.0 - smoothstep(uMouth.z * 0.7, uMouth.z * 1.5, abs(d.x));
+    float below = -d.y;
+    float jaw = smoothstep(-0.002, 0.004, below) * (1.0 - smoothstep(0.045, 0.1, below));
+    float drop = uMouth.w * 0.014 * across * jaw;
+    float lips = 1.0 - smoothstep(0.0, 1.0, abs(d.x) / (uMouth.z * 0.92));
+    inside = step(0.0, below) * step(below, drop * 0.8) * lips;
+    return uv + vec2(0.0, drop);
   }
 
   void main() {
@@ -119,7 +135,10 @@ const FRAGMENT = /* glsl */ `
       alpha = outline * smoothstep(0.0, 0.22, vUv.y); // busts dissolve into the floor instead of ending in a hard cut
       if (alpha < 0.02) discard;
     }
-    vec3 col = mix(texture2D(uColorA, vUv).rgb, texture2D(uColorB, vUv).rgb, uMix);
+    float inside;
+    vec2 cuv = jawUv(vUv, inside);
+    vec3 col = mix(texture2D(uColorA, cuv).rgb, texture2D(uColorB, cuv).rgb, uMix);
+    col = mix(col, vec3(0.16, 0.06, 0.06), inside * 0.82);
     float here = depthAt(vUv);
 
     // Surface normal from the depth gradient, so the scene lights relight the render as it turns.
@@ -176,6 +195,7 @@ export function createCrewMaterial(source: Crew3DSource, { size = 1.1, masked = 
       uPulse: { value: 0 },
       uFade: { value: 1 },
       uLight: { value: new THREE.Vector2(-0.55, 0.45) },
+      uMouth: { value: new THREE.Vector4(0.5, 0.5, 0.05, 0) },
     },
   });
 }

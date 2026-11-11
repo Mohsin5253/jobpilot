@@ -13,11 +13,12 @@ skill and re-score the match. The before/after scores are recorded in a run trac
 import re
 import uuid
 from datetime import UTC, datetime, timedelta
+from typing import Literal
 
 import httpx
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
-from sqlalchemy import select
+from sqlalchemy import func, select
 
 from app.agents.matcher import W_SKILLS, W_SKILLS_OFFLINE, level_factor
 from app.api.deps import RealUserDep, SessionDep, UserDep
@@ -25,6 +26,8 @@ from app.config import settings
 from app.llm import CallContext, LLMOutputError, LLMUnavailable, get_llm
 from app.models import AgentRun, GapProject, InterviewSession, JobMatch, Profile, RunStatus
 from app.schemas import AdditionalSkill, ResumeData
+from app.services.interview_rounds import build_rounds, industry_name
+from app.services.ratelimit import hit
 from app.skills import extract_skills, role_digest, skill_overlap
 
 router = APIRouter(tags=["growth"])
@@ -91,6 +94,13 @@ def score_answer(q: dict, answer: str) -> dict:
     target = {s.lower() for s in extract_skills(q["jd_line"])} | ({q["skill"].lower()} if q.get("skill") else set())
     mentioned = {s.lower() for s in extract_skills(a)}
     relevance = 5 if target and target & mentioned else 3 if not target and words > 30 else 2 if words > 30 else 1
+    points = [p.lower() for p in q.get("key_points") or []]
+    if points and not (target and target & mentioned):
+        low = a.lower()
+        covered = sum(1 for p in points if p in low)
+        relevance = max(1, min(5, 1 + round(4 * min(1.0, covered / max(1, 0.6 * len(points))))))
+        if words < 12:
+            relevance = min(relevance, 2)
     specificity = min(5, 1 + bool(_ACTION.search(a)) * 2 + bool(re.search(r"\d", a)) + (words > 60))
     structure = min(5, 1 + bool(_ACTION.search(a)) + bool(_RESULT.search(a)) * 2 + (words > 40))
     total = round((relevance + specificity + structure) / 3, 1)
@@ -118,25 +128,116 @@ async def grade(q: dict, answer: str, user_id: uuid.UUID) -> dict:
         op = await get_llm().structured(
             agent="interviewer", tier="fast", schema=Opinion, ctx=CallContext(user_id=user_id), max_tokens=500,
             system="You grade internship interview answers on a 1-5 rubric: relevance to the job requirement, specificity (own actions, numbers), structure (situation, action, result). Give up to 3 short, kind, concrete tips.",
-            prompt=f"Job requirement: {q['jd_line']}\nQuestion: {q['q']}\nAnswer: {answer[:3000]}",
+            prompt=f"Job requirement: {q['jd_line']}\nQuestion: {q['q']}\n" + (f"A strong answer covers: {', '.join(q['key_points'])}\n" if q.get("key_points") else "") + f"Answer: {answer[:3000]}",
         )
         return {**base, "relevance": op.relevance, "specificity": op.specificity, "structure": op.structure, "score": round((op.relevance + op.specificity + op.structure) / 3, 1), "feedback": op.feedback or base["feedback"]}
     except (LLMUnavailable, LLMOutputError):
         return base
 
 
+class StartIn(BaseModel):
+    match_id: uuid.UUID
+    interviewer: Literal["male", "female"] = "female"
+    strict: bool = True
+    industry: str | None = None
+
+
 @router.post("/interviews", status_code=201)
-async def start_interview(body: dict, user: RealUserDep, session: SessionDep) -> dict:
-    m = await _match(session, user.id, body.get("match_id"))
+async def start_interview(body: StartIn, user: RealUserDep, session: SessionDep) -> dict:
+    """A mock interview for one job, in the rounds that field really uses (screening, technical or case, project,
+    HR), asked by the interviewer the student picked. Strict mode turns on integrity checks (see /integrity)."""
+    await hit("interview", str(user.id))
+    m = await _match(session, user.id, body.match_id)
     profile = await _profile(session, user.id)
-    sess = InterviewSession(user_id=user.id, application_id=m.id, questions=build_questions(m.job.title, m.job.company, m.job.description, profile.evidence))
+    resume = ResumeData.model_validate(profile.resume or {})
+    previous = (await session.execute(select(func.count()).select_from(InterviewSession).where(InterviewSession.user_id == user.id, InterviewSession.application_id == m.id))).scalar_one()
+    rounds, questions, industry = build_rounds(body.industry, m.job.title, m.job.company, jd_lines(m.job.description), profile.evidence, [p.name for p in resume.projects if p.name], seed=previous)
+    sess = InterviewSession(
+        user_id=user.id,
+        application_id=m.id,
+        questions=questions,
+        meta={"industry": industry, "industry_name": industry_name(industry), "interviewer": body.interviewer, "strict": body.strict, "rounds": rounds, "job": {"title": m.job.title, "company": m.job.company}},
+        integrity={"events": [], "violations": 0},
+        status="active",
+    )
     session.add(sess)
     await session.commit()
     return _session_out(sess)
 
 
+def _verdict(avg: float | None) -> str:
+    if avg is None:
+        return "Not finished"
+    return "Interview-ready" if avg >= 4 else "Almost there" if avg >= 3.2 else "Needs more practice"
+
+
 def _session_out(s: InterviewSession) -> dict:
-    return {"id": str(s.id), "match_id": str(s.application_id), "questions": s.questions, "answers": s.answers, "scores": s.scores, "completed_at": s.completed_at.isoformat() if s.completed_at else None}
+    meta = s.meta or {}
+    integ = s.integrity or {}
+    rounds = []
+    for r in meta.get("rounds", []):
+        qids = [q["id"] for q in s.questions if q.get("round") == r["index"]]
+        sc = [s.scores[i]["score"] for i in qids if i in s.scores]
+        rounds.append({**r, "total": len(qids), "answered": len(sc), "score": round(sum(sc) / len(sc), 1) if sc else None})
+    all_sc = [v["score"] for v in s.scores.values()]
+    avg = round(sum(all_sc) / len(all_sc), 1) if all_sc else None
+    counts: dict[str, int] = {}
+    for e in integ.get("events", []):
+        counts[e["type"]] = counts.get(e["type"], 0) + 1
+    flagged = [qid for qid, v in s.scores.items() if v.get("integrity_flags")]
+    return {
+        "id": str(s.id),
+        "match_id": str(s.application_id),
+        "questions": s.questions,
+        "answers": s.answers,
+        "scores": s.scores,
+        "completed_at": s.completed_at.isoformat() if s.completed_at else None,
+        "status": s.status or "active",
+        "meta": meta,
+        "rounds": rounds,
+        "integrity": {
+            "violations": integ.get("violations", 0),
+            "max_violations": MAX_VIOLATIONS,
+            "counts": counts,
+            "flagged_answers": flagged,
+            "terminated_reason": integ.get("terminated_reason"),
+        },
+        "report": {"score": avg, "verdict": _verdict(avg) if s.completed_at else "Not finished", "answered": len(all_sc), "total": len(s.questions)},
+    }
+
+
+# Leaving the interview (switching tab or app, leaving full screen) counts against a strict session; the third ends it.
+VIOLATIONS = {"tab_hidden", "window_blur", "fullscreen_exit"}
+ATTEMPTS = {"paste_blocked", "copy_blocked", "drop_blocked", "shortcut_blocked", "context_menu", "devtools"}
+MAX_VIOLATIONS = 3
+
+
+class IntegrityIn(BaseModel):
+    type: Literal["tab_hidden", "window_blur", "fullscreen_exit", "paste_blocked", "copy_blocked", "drop_blocked", "shortcut_blocked", "context_menu", "devtools"]
+    question_id: str | None = Field(default=None, max_length=10)
+
+
+@router.post("/interviews/{session_id}/integrity")
+async def integrity(session_id: str, body: IntegrityIn, user: RealUserDep, session: SessionDep) -> dict:
+    """Records a proctoring event. In strict mode the third time you leave the interview ends it."""
+    s = await session.get(InterviewSession, session_id, with_for_update=True)
+    if s is None or s.user_id != user.id:
+        raise HTTPException(404, "No such session")
+    if s.status != "active":
+        return _session_out(s)
+    integ = dict(s.integrity or {})
+    events = list(integ.get("events", []))[-199:]
+    events.append({"type": body.type, "q": body.question_id, "at": datetime.now(UTC).isoformat()})
+    integ["events"] = events
+    if body.type in VIOLATIONS:
+        integ["violations"] = integ.get("violations", 0) + 1
+        if (s.meta or {}).get("strict") and integ["violations"] >= MAX_VIOLATIONS:
+            s.status = "terminated"
+            s.completed_at = s.completed_at or datetime.now(UTC)
+            integ["terminated_reason"] = f"You left the interview {integ['violations']} times (switched tab or app, or exited full screen). In strict mode the session ends, as a proctored interview would."
+    s.integrity = integ
+    await session.commit()
+    return _session_out(s)
 
 
 @router.get("/interviews/{session_id}")
@@ -147,9 +248,36 @@ async def get_interview(session_id: str, user: UserDep, session: SessionDep) -> 
     return _session_out(s)
 
 
+class AnswerMeta(BaseModel):
+    mode: Literal["typed", "voice", "mixed"] = "typed"
+    keystrokes: int = Field(default=0, ge=0, le=100000)
+    voice_chars: int = Field(default=0, ge=0, le=20000)
+    active_ms: int = Field(default=0, ge=0, le=3_600_000)
+    pastes_blocked: int = Field(default=0, ge=0, le=1000)
+
+
 class AnswerIn(BaseModel):
     question_id: str
     answer: str = Field(min_length=1, max_length=5000)
+    meta: AnswerMeta | None = None
+
+
+def integrity_flags(answer: str, meta: AnswerMeta | None) -> list[str]:
+    """Signs the answer wasn't produced here: text that appeared without keystrokes (pasted or injected), or typing
+    faster than a person can. Spoken answers come from the browser's speech recognition and are exempt from the
+    keystroke check, but not from the time check."""
+    if meta is None:
+        return []
+    flags = []
+    typed = max(0, len(answer) - meta.voice_chars)
+    if typed > 40 and meta.keystrokes < 0.6 * typed:
+        flags.append("Most of this answer wasn't typed in the answer box")
+    secs = meta.active_ms / 1000
+    if typed > 60 and secs > 0 and typed / secs > 14:
+        flags.append("Typed faster than a person can (over 14 characters a second)")
+    if meta.voice_chars > 80 and secs > 0 and len(answer.split()) / secs > 5:
+        flags.append("More words than could be spoken in the time")
+    return flags
 
 
 @router.post("/interviews/{session_id}/answer")
@@ -157,13 +285,23 @@ async def answer(session_id: str, body: AnswerIn, user: RealUserDep, session: Se
     s = await session.get(InterviewSession, session_id)
     if s is None or s.user_id != user.id:
         raise HTTPException(404, "No such session")
+    if (s.status or "active") == "terminated":
+        raise HTTPException(409, "This interview was ended because you left it too many times. Start a new one to try again.")
     q = next((q for q in s.questions if q["id"] == body.question_id), None)
     if q is None:
         raise HTTPException(404, "No such question")
+    flags = integrity_flags(body.answer, body.meta) if (s.meta or {}).get("strict", False) else []
+    graded = await grade(q, body.answer, user.id)
+    if flags:
+        # An answer that may not be the student's own can't show they know it.
+        graded = {**graded, "score": min(graded["score"], 1.5), "integrity_flags": flags, "feedback": [f"Not counted: {flags[0].lower()}.", *graded["feedback"][:2]]}
+    if body.meta:
+        graded["mode"] = body.meta.mode
     s.answers = {**s.answers, q["id"]: body.answer}
-    s.scores = {**s.scores, q["id"]: await grade(q, body.answer, user.id)}
+    s.scores = {**s.scores, q["id"]: graded}
     if len(s.scores) == len(s.questions):
         s.completed_at = s.completed_at or datetime.now(UTC)
+        s.status = "completed"
     await session.commit()
     return _session_out(s)
 
@@ -191,7 +329,7 @@ async def apply_skills(session_id: str, body: ApplySkills, user: RealUserDep, se
     for qid in body.question_ids:
         q = next((q for q in s.questions if q["id"] == qid), None)
         sc = s.scores.get(qid) or {}
-        if q and q.get("skill") and sc.get("score", 0) >= 4 and len(s.answers.get(qid, "").split()) >= 30:
+        if q and q.get("skill") and sc.get("score", 0) >= 4 and not sc.get("integrity_flags") and len(s.answers.get(qid, "").split()) >= 30:
             _add_skill(profile, q["skill"], s.answers[qid])
             added.append(q["skill"])
     if added:

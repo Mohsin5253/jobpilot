@@ -1,0 +1,672 @@
+"use client";
+
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { AlertTriangle, ArrowRight, Check, Clock, Maximize, Mic, MicOff, RotateCcw, ShieldAlert, ShieldCheck, Volume2, VolumeX } from "lucide-react";
+import Link from "next/link";
+import { useRouter } from "next/navigation";
+import { useCallback, useEffect, useRef, useState, type ClipboardEvent, type DragEvent, type KeyboardEvent } from "react";
+import { toast } from "sonner";
+
+import { Interviewer3D, type InterviewerHandle } from "@/components/interview/interviewer-3d";
+import { INTERVIEWERS, pickVoice, type InterviewerKey } from "@/components/interview/interviewers";
+import { Badge } from "@/components/ui/badge";
+import { Button, buttonClass } from "@/components/ui/button";
+import { Card, CardHeader } from "@/components/ui/card";
+import { Textarea } from "@/components/ui/input";
+import { Skeleton } from "@/components/ui/misc";
+import { ScoreRing } from "@/components/ui/score-ring";
+import { api } from "@/lib/api";
+import { cn } from "@/lib/utils";
+
+type Q = { id: string; q: string; jd_line: string; skill: string | null; kind: string; round: number; round_name: string; seconds?: number };
+type Score = { relevance: number; specificity: number; structure: number; score: number; tests: string; feedback: string[]; integrity_flags?: string[]; mode?: string };
+type Round = { index: number; name: string; kind: string; intro: string; total: number; answered: number; score: number | null };
+export type InterviewSession = {
+  id: string;
+  match_id: string;
+  questions: Q[];
+  answers: Record<string, string>;
+  scores: Record<string, Score>;
+  completed_at: string | null;
+  status: "active" | "completed" | "terminated";
+  meta: { industry?: string; industry_name?: string; interviewer?: InterviewerKey; strict?: boolean; job?: { title: string; company: string } };
+  rounds: Round[];
+  integrity: { violations: number; max_violations: number; counts: Record<string, number>; flagged_answers: string[]; terminated_reason: string | null };
+  report: { score: number | null; verdict: string; answered: number; total: number };
+};
+
+type SR = {
+  start: () => void;
+  stop: () => void;
+  onresult: ((e: { resultIndex: number; results: ArrayLike<{ isFinal: boolean; 0: { transcript: string } }> }) => void) | null;
+  onend: (() => void) | null;
+  onerror: ((e: { error: string }) => void) | null;
+  lang: string;
+  continuous: boolean;
+  interimResults: boolean;
+};
+type IntegrityType = "tab_hidden" | "window_blur" | "fullscreen_exit" | "paste_blocked" | "copy_blocked" | "drop_blocked" | "shortcut_blocked" | "context_menu";
+
+const fmt = (s: number) => `${Math.floor(s / 60)}:${String(Math.max(0, s) % 60).padStart(2, "0")}`;
+
+export function InterviewRoom({ id }: { id: string }) {
+  const qc = useQueryClient();
+  const { data: s } = useQuery({ queryKey: ["interview", id], queryFn: () => api.get<InterviewSession>(`/interviews/${id}`) });
+  if (!s) return <Skeleton className="min-h-[60vh]" />;
+  return <Room s={s} setS={(x) => qc.setQueryData(["interview", id], x)} />;
+}
+
+function Room({ s, setS }: { s: InterviewSession; setS: (s: InterviewSession) => void }) {
+  const who: InterviewerKey = s.meta.interviewer ?? "female";
+  const iv = INTERVIEWERS[who];
+  const strict = s.meta.strict ?? false;
+  const head = useRef<InterviewerHandle>(null);
+  const [started, setStarted] = useState(Object.keys(s.answers).length > 0);
+  const [muted, setMuted] = useState(false);
+  const [speaking, setSpeaking] = useState(false);
+  const [feedback, setFeedback] = useState<{ q: Q; sc: Score } | null>(null);
+  const [warning, setWarning] = useState<string | null>(null);
+  const [fsLost, setFsLost] = useState(false);
+  const done = s.status !== "active" || Object.keys(s.scores).length >= s.questions.length;
+  const current = s.questions.find((q) => !s.scores[q.id]);
+
+  // ---- integrity (strict mode)
+  const report = useMutation({
+    mutationFn: (type: IntegrityType) => api.post<InterviewSession>(`/interviews/${s.id}/integrity`, { type, question_id: current?.id ?? null }),
+    onSuccess: (r) => setS(r),
+  });
+  const lastEvent = useRef<Record<string, number>>({});
+  const flag = useCallback(
+    (type: IntegrityType, message?: string) => {
+      if (!strict) return;
+      const now = Date.now();
+      // tab switches fire both visibilitychange and blur: count one leave per second
+      const leave = type === "tab_hidden" || type === "window_blur" || type === "fullscreen_exit";
+      const k = leave ? "leave" : type;
+      if (now - (lastEvent.current[k] ?? 0) < (leave ? 1500 : 3000)) return;
+      lastEvent.current[k] = now;
+      report.mutate(type);
+      if (message) setWarning(message);
+    },
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [strict, s.id, current?.id],
+  );
+  const live = started && !done;
+  useEffect(() => {
+    if (!live || !strict) return;
+    const onVis = () => document.hidden && flag("tab_hidden", "You left the interview tab.");
+    const onBlur = () => setTimeout(() => !document.hidden && flag("window_blur", "You switched to another window or app."), 150);
+    const onFs = () => {
+      if (!document.fullscreenElement) {
+        setFsLost(true);
+        flag("fullscreen_exit", "You exited full screen.");
+      } else setFsLost(false);
+    };
+    const onUnload = (e: BeforeUnloadEvent) => e.preventDefault();
+    document.addEventListener("visibilitychange", onVis);
+    window.addEventListener("blur", onBlur);
+    document.addEventListener("fullscreenchange", onFs);
+    window.addEventListener("beforeunload", onUnload);
+    return () => {
+      document.removeEventListener("visibilitychange", onVis);
+      window.removeEventListener("blur", onBlur);
+      document.removeEventListener("fullscreenchange", onFs);
+      window.removeEventListener("beforeunload", onUnload);
+    };
+  }, [live, strict, flag]);
+  useEffect(() => {
+    if (done && document.fullscreenElement) document.exitFullscreen().catch(() => {});
+  }, [done]);
+
+  // ---- the interviewer's voice
+  const speak = useCallback(
+    (text: string, then?: () => void) => {
+      if (muted || typeof speechSynthesis === "undefined") {
+        then?.();
+        return;
+      }
+      speechSynthesis.cancel();
+      const u = new SpeechSynthesisUtterance(text);
+      const v = pickVoice(iv);
+      if (v) {
+        u.voice = v;
+        u.lang = v.lang;
+      } else u.lang = "en-IN";
+      u.pitch = iv.pitch;
+      u.rate = 0.98;
+      u.onstart = () => {
+        setSpeaking(true);
+        head.current?.speakStart();
+      };
+      u.onboundary = (e) => e.name === "word" && head.current?.speakWord();
+      const end = () => {
+        setSpeaking(false);
+        head.current?.speakEnd();
+        then?.();
+      };
+      u.onend = end;
+      u.onerror = end;
+      speechSynthesis.speak(u);
+    },
+    [muted, iv],
+  );
+  useEffect(() => () => speechSynthesis?.cancel(), []);
+  useEffect(() => {
+    if (typeof speechSynthesis !== "undefined") speechSynthesis.getVoices(); // voices load asynchronously in Chrome
+  }, []);
+
+  const start = async () => {
+    if (strict) {
+      try {
+        if (!document.fullscreenEnabled) throw new Error("unsupported");
+        await document.documentElement.requestFullscreen({ navigationUI: "hide" });
+      } catch {
+        // Some browsers (iPhone Safari, in-app browsers) can't go full screen: the interview still runs, and
+        // leaving the tab or app is still recorded.
+        toast.warning("Full screen isn't available in this browser. Switching tabs or apps is still recorded.");
+      }
+    }
+    setStarted(true);
+  };
+
+  if (done) return <Report s={s} />;
+  if (!started) return <Intro s={s} onStart={start} />;
+
+  const round = s.rounds[current?.round ?? 0];
+  const firstOfRound = current && s.questions.find((q) => q.round === current.round)?.id === current.id;
+  return (
+    <div className="space-y-4">
+      {strict && (warning || fsLost) && (
+        <div role="alert" className="flex flex-wrap items-center gap-3 rounded-[var(--radius-card)] border border-[color-mix(in_oklab,var(--error)_40%,transparent)] bg-[color-mix(in_oklab,var(--error)_10%,transparent)] p-3 text-[13.5px]">
+          <ShieldAlert className="size-4 text-[var(--error)]" />
+          <span className="flex-1">
+            {warning} Warning {s.integrity.violations} of {s.integrity.max_violations}: at {s.integrity.max_violations} the interview ends.
+          </span>
+          {fsLost && document.fullscreenEnabled && (
+            <Button size="sm" onClick={() => document.documentElement.requestFullscreen().catch(() => {})}>
+              <Maximize /> Back to full screen
+            </Button>
+          )}
+          <Button size="sm" variant="ghost" onClick={() => setWarning(null)}>
+            Dismiss
+          </Button>
+        </div>
+      )}
+      <div className="flex flex-wrap items-center justify-between gap-2 text-[13px] text-text-2">
+        <div className="flex flex-wrap items-center gap-2">
+          {s.rounds.map((r) => (
+            <Badge key={r.index} tone={r.index === round?.index ? "accent" : r.answered === r.total ? "success" : "outline"}>
+              {r.answered === r.total && <Check />} {r.name}
+            </Badge>
+          ))}
+        </div>
+        <div className="flex items-center gap-2">
+          {strict ? (
+            <Badge tone="warning">
+              <ShieldCheck /> Strict mode
+            </Badge>
+          ) : (
+            <Badge tone="outline">Practice mode</Badge>
+          )}
+          <Button size="icon" variant="ghost" aria-label={muted ? "Turn interviewer voice on" : "Mute interviewer"} onClick={() => (setMuted((m) => !m), speechSynthesis?.cancel())}>
+            {muted ? <VolumeX className="size-4" /> : <Volume2 className="size-4" />}
+          </Button>
+        </div>
+      </div>
+      <div className="grid gap-5 lg:grid-cols-[minmax(0,440px)_minmax(0,1fr)]">
+        <div className="space-y-3">
+          <Interviewer3D ref={head} who={who} speaking={speaking} />
+          <p className="text-center text-[12px] text-text-3">
+            {s.meta.job?.title} · {s.meta.job?.company} · {s.meta.industry_name} interview
+          </p>
+        </div>
+        {feedback ? (
+          <FeedbackCard
+            f={feedback}
+            last={!current}
+            onNext={() => {
+              setFeedback(null);
+              head.current?.listen(false);
+            }}
+          />
+        ) : current ? (
+          <AnswerPanel
+            key={current.id}
+            s={s}
+            q={current}
+            roundIntro={firstOfRound ? round?.intro : undefined}
+            strict={strict}
+            speak={speak}
+            speaking={speaking}
+            head={head}
+            flag={flag}
+            onScored={(r, q) => {
+              setS(r);
+              const sc = r.scores[q.id];
+              setFeedback({ q, sc });
+              head.current?.nod();
+              speak(sc.score >= 4 ? "Good answer. Thank you." : sc.score >= 3 ? "Okay, thank you." : "Alright. Let's move on.");
+            }}
+          />
+        ) : null}
+      </div>
+    </div>
+  );
+}
+
+function Intro({ s, onStart }: { s: InterviewSession; onStart: () => void }) {
+  const iv = INTERVIEWERS[s.meta.interviewer ?? "female"];
+  const strict = s.meta.strict ?? false;
+  return (
+    <div className="grid gap-5 lg:grid-cols-[minmax(0,420px)_minmax(0,1fr)]">
+      <Interviewer3D who={iv.key} />
+      <Card className="space-y-4 p-5">
+        <div>
+          <div className="eyebrow text-cobalt-text">{s.meta.industry_name} interview</div>
+          <h1 className="font-display mt-1 text-[clamp(24px,3vw,32px)] leading-tight">
+            {s.meta.job?.title} at {s.meta.job?.company}
+          </h1>
+          <p className="mt-2 text-[14px] text-text-2">
+            {iv.name}, {iv.role.toLowerCase()}, will take you through {s.rounds.length} rounds and {s.questions.length} questions, like the real process for this kind of role. Answer by typing or speaking.
+          </p>
+        </div>
+        <ol className="space-y-1.5">
+          {s.rounds.map((r) => (
+            <li key={r.index} className="flex items-center justify-between gap-2 rounded-[var(--radius-control)] border border-border px-3 py-2 text-[13.5px]">
+              <span>
+                {r.index + 1}. {r.name}
+              </span>
+              <span className="text-text-3">{r.total} questions</span>
+            </li>
+          ))}
+        </ol>
+        {strict ? (
+          <div className="space-y-2 rounded-[var(--radius-card)] border border-[color-mix(in_oklab,var(--your-turn-fill)_40%,transparent)] bg-[color-mix(in_oklab,var(--your-turn-fill)_8%,transparent)] p-4 text-[13px]">
+            <div className="flex items-center gap-2 font-semibold">
+              <ShieldCheck className="size-4" /> Strict mode, as in a proctored interview
+            </div>
+            <ul className="list-disc space-y-1 pl-5 text-text-2">
+              <li>The interview runs in full screen.</li>
+              <li>Switching tab, window or app, or leaving full screen, is recorded. The 3rd time ends the interview.</li>
+              <li>Paste, copy, drag-and-drop and right-click are disabled in the answer box.</li>
+              <li>Answers that weren't typed or spoken here (no keystrokes, or impossibly fast) don't count.</li>
+            </ul>
+            <p className="text-[12px] text-text-3">A web page can't stop you using another device, so these checks detect and record rather than block everything. Your report shows each event.</p>
+          </div>
+        ) : (
+          <p className="text-[13px] text-text-2">Practice mode: no proctoring. Switch to strict mode from the job page for a real-interview feel.</p>
+        )}
+        <div className="flex flex-wrap gap-2">
+          <Button variant="primary" size="lg" onClick={onStart}>
+            {strict ? <Maximize /> : <ArrowRight />} {strict ? "Enter full screen and start" : "Start interview"}
+          </Button>
+          <Link href={`/jobs/${s.match_id}`} className={buttonClass({ size: "lg", variant: "ghost" })}>
+            Not now
+          </Link>
+        </div>
+        <p className="text-[12px] text-text-3">Voice uses your browser's speech recognition and speech synthesis. No audio is recorded or uploaded; only your answer text is saved.</p>
+      </Card>
+    </div>
+  );
+}
+
+function AnswerPanel({
+  s,
+  q,
+  roundIntro,
+  strict,
+  speak,
+  speaking,
+  head,
+  flag,
+  onScored,
+}: {
+  s: InterviewSession;
+  q: Q;
+  roundIntro?: string;
+  strict: boolean;
+  speak: (t: string, then?: () => void) => void;
+  speaking: boolean;
+  head: React.RefObject<InterviewerHandle | null>;
+  flag: (t: IntegrityType, m?: string) => void;
+  onScored: (r: InterviewSession, q: Q) => void;
+}) {
+  const [text, setText] = useState("");
+  const [interim, setInterim] = useState("");
+  const [listening, setListening] = useState(false);
+  const [left, setLeft] = useState(q.seconds ?? 150);
+  const [ready, setReady] = useState(false);
+  const meta = useRef({ keystrokes: 0, voice_chars: 0, pastes_blocked: 0, started: 0, typed: false, spoke: false });
+  const rec = useRef<SR | null>(null);
+  const textRef = useRef("");
+  textRef.current = text;
+
+  const submit = useMutation({
+    mutationFn: (answer: string) => {
+      const m = meta.current;
+      return api.post<InterviewSession>(`/interviews/${s.id}/answer`, {
+        question_id: q.id,
+        answer,
+        meta: { mode: m.spoke && m.typed ? "mixed" : m.spoke ? "voice" : "typed", keystrokes: m.keystrokes, voice_chars: m.voice_chars, active_ms: m.started ? Date.now() - m.started : 0, pastes_blocked: m.pastes_blocked },
+      });
+    },
+    onSuccess: (r) => onScored(r, q),
+    onError: (e: Error) => toast.error(e.message),
+  });
+
+  // Ask the question (with the round intro first), then start the clock.
+  useEffect(() => {
+    const say = `${roundIntro ? `${roundIntro} ` : ""}${q.q}`;
+    speak(say, () => {
+      setReady(true);
+      meta.current.started = Date.now();
+      head.current?.listen(true);
+    });
+    return () => rec.current?.stop();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [q.id]);
+  useEffect(() => {
+    if (!ready || submit.isPending || submit.isSuccess) return;
+    if (left <= 0) {
+      rec.current?.stop();
+      toast("Time's up. Your answer so far was submitted.");
+      submit.mutate(textRef.current.trim() || "(No answer given in time)");
+      return;
+    }
+    const t = setTimeout(() => setLeft((x) => x - 1), 1000);
+    return () => clearTimeout(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [ready, left]);
+
+  const block = (type: IntegrityType, what: string) => (e: ClipboardEvent | DragEvent | React.MouseEvent) => {
+    if (!strict) return;
+    e.preventDefault();
+    if (type === "paste_blocked") meta.current.pastes_blocked++;
+    toast.error(`${what} is disabled during a strict interview`);
+    flag(type);
+  };
+  const onKeyDown = (e: KeyboardEvent<HTMLTextAreaElement>) => {
+    if (strict && (e.metaKey || e.ctrlKey) && ["v", "c", "x"].includes(e.key.toLowerCase())) {
+      e.preventDefault();
+      if (e.key.toLowerCase() === "v") meta.current.pastes_blocked++;
+      toast.error("Copy and paste are disabled during a strict interview");
+      flag("shortcut_blocked");
+    }
+  };
+  // Typing is counted from input events, not key presses: phone keyboards report keys as "Unidentified", but
+  // every character (or autocorrected word) arrives as a small input event. A single insert of more than 25
+  // characters is text dropped in from elsewhere (a paste that slipped through, an autofill or a script), so it
+  // doesn't count as typing.
+  const onInput = (e: React.FormEvent<HTMLTextAreaElement>) => {
+    const ne = e.nativeEvent as InputEvent;
+    const kind = ne.inputType ?? "";
+    if (kind.startsWith("delete") || kind === "insertLineBreak") meta.current.keystrokes++;
+    else if (kind.startsWith("insert") && !kind.startsWith("insertFrom")) {
+      const n = (ne.data ?? "").length;
+      if (n <= 25) meta.current.keystrokes += Math.max(1, n);
+    }
+    meta.current.typed = true;
+    if (meta.current.keystrokes % 40 === 0) head.current?.nod();
+  };
+  const toggleMic = () => {
+    const W = window as unknown as { SpeechRecognition?: new () => SR; webkitSpeechRecognition?: new () => SR };
+    const Ctor = W.SpeechRecognition ?? W.webkitSpeechRecognition;
+    if (!Ctor) return toast("Voice answers need Chrome or Edge. Type your answer instead.");
+    if (listening) return rec.current?.stop();
+    const r = new Ctor();
+    r.lang = "en-IN";
+    r.continuous = true;
+    r.interimResults = true;
+    r.onresult = (e) => {
+      let fin = "";
+      let mid = "";
+      for (let i = e.resultIndex; i < e.results.length; i++) {
+        const res = e.results[i];
+        if (res.isFinal) fin += res[0].transcript;
+        else mid += res[0].transcript;
+      }
+      if (fin) {
+        meta.current.voice_chars += fin.length + 1;
+        meta.current.spoke = true;
+        setText((t) => `${t}${t && !t.endsWith(" ") ? " " : ""}${fin.trim()}`);
+        head.current?.nod();
+      }
+      setInterim(mid);
+    };
+    r.onerror = (e) => e.error === "not-allowed" && toast.error("Allow microphone access to answer by voice");
+    r.onend = () => {
+      setListening(false);
+      setInterim("");
+    };
+    rec.current = r;
+    r.start();
+    setListening(true);
+  };
+  const idx = s.questions.findIndex((x) => x.id === q.id);
+  const total = q.seconds ?? 150;
+
+  return (
+    <Card className="flex flex-col">
+      <div className="space-y-3 p-5">
+        <div className="flex flex-wrap items-center justify-between gap-2 text-[12.5px] text-text-3">
+          <span>
+            Question {idx + 1} of {s.questions.length} · {q.round_name}
+          </span>
+          <span className={cn("num inline-flex items-center gap-1", ready && left <= 20 && "text-[var(--error)]")}>
+            <Clock className="size-3.5" /> {ready ? fmt(left) : fmt(total)}
+          </span>
+        </div>
+        <p className="text-[18px] leading-relaxed font-medium" aria-live="polite">
+          {q.q}
+        </p>
+        <p className="text-[12.5px] text-text-3">Tests: {q.jd_line}</p>
+        <div className="h-1 overflow-hidden rounded-full bg-elevated-2">
+          <div className="h-full bg-cobalt transition-[width] duration-1000 ease-linear" style={{ width: `${ready ? (left / total) * 100 : 100}%` }} />
+        </div>
+      </div>
+      <div className="space-y-3 border-t border-border p-5">
+        <Textarea
+          value={text}
+          onChange={(e) => setText(e.target.value)}
+          onKeyDown={onKeyDown}
+          onInput={onInput}
+          onPaste={block("paste_blocked", "Pasting")}
+          onDrop={block("drop_blocked", "Dropping text")}
+          onCopy={block("copy_blocked", "Copying")}
+          onCut={block("copy_blocked", "Cutting")}
+          onContextMenu={block("context_menu", "Right-click")}
+          rows={8}
+          spellCheck={false}
+          autoComplete="off"
+          disabled={!ready}
+          placeholder={ready ? "Type your answer, or press Speak and answer out loud…" : "Listen to the question…"}
+          aria-label="Your answer"
+        />
+        {interim && <p className="text-[13px] text-text-3 italic">{interim}…</p>}
+        <div className="flex flex-wrap items-center gap-2">
+          <Button onClick={toggleMic} aria-pressed={listening} disabled={!ready}>
+            {listening ? <MicOff /> : <Mic />} {listening ? "Stop speaking" : "Speak"}
+          </Button>
+          <Button
+            variant="primary"
+            loading={submit.isPending}
+            disabled={!text.trim() || !ready}
+            onClick={() => {
+              rec.current?.stop();
+              submit.mutate(text.trim());
+            }}
+          >
+            Submit answer <ArrowRight />
+          </Button>
+          {!ready && !speaking && (
+            <Button variant="ghost" onClick={() => (setReady(true), (meta.current.started = Date.now()))}>
+              Skip to answering
+            </Button>
+          )}
+          <span className="text-[12px] text-text-3">{text.split(/\s+/).filter(Boolean).length} words</span>
+        </div>
+      </div>
+    </Card>
+  );
+}
+
+function FeedbackCard({ f, last, onNext }: { f: { q: Q; sc: Score }; last: boolean; onNext: () => void }) {
+  const { sc } = f;
+  return (
+    <Card className="space-y-4 p-5">
+      <div className="flex items-center gap-4">
+        <ScoreRing score={sc.score * 20} size={64} stroke={5} label={false} />
+        <div>
+          <div className="num text-[22px] font-semibold">{sc.score}/5</div>
+          <div className="text-[12.5px] text-text-3">
+            Relevance {sc.relevance} · specificity {sc.specificity} · structure {sc.structure}
+          </div>
+        </div>
+      </div>
+      {!!sc.integrity_flags?.length && (
+        <p className="flex gap-2 text-[13px] text-[var(--error)]">
+          <AlertTriangle className="size-4 shrink-0" /> {sc.integrity_flags.join(". ")}.
+        </p>
+      )}
+      <ul className="space-y-1.5 text-[13.5px] text-text-2">
+        {sc.feedback.map((x) => (
+          <li key={x}>· {x}</li>
+        ))}
+      </ul>
+      <p className="text-[12px] text-text-3">This question tested: {sc.tests}</p>
+      <Button variant="primary" onClick={onNext}>
+        {last ? "See my report" : "Next question"} <ArrowRight />
+      </Button>
+    </Card>
+  );
+}
+
+const EVENT_LABEL: Record<string, string> = {
+  tab_hidden: "Left the tab",
+  window_blur: "Switched window or app",
+  fullscreen_exit: "Left full screen",
+  paste_blocked: "Paste blocked",
+  copy_blocked: "Copy blocked",
+  drop_blocked: "Drop blocked",
+  shortcut_blocked: "Shortcut blocked",
+  context_menu: "Right-click blocked",
+};
+
+function Report({ s }: { s: InterviewSession }) {
+  const router = useRouter();
+  const apply = useMutation({
+    mutationFn: (ids: string[]) => api.post<{ added: string[] }>(`/interviews/${s.id}/apply-skills`, { question_ids: ids }),
+    onSuccess: (r) => toast.success(r.added.length ? `Added ${r.added.join(", ")} and re-scored the job` : "Nothing strong enough to add yet"),
+  });
+  const retake = useMutation({
+    mutationFn: () => api.post<InterviewSession>("/interviews", { match_id: s.match_id, interviewer: s.meta.interviewer ?? "female", strict: s.meta.strict ?? true }),
+    onSuccess: (r) => router.push(`/interview/${r.id}`),
+    onError: (e: Error) => toast.error(e.message),
+  });
+  const strong = s.questions.filter((x) => x.skill && (s.scores[x.id]?.score ?? 0) >= 4 && !s.scores[x.id]?.integrity_flags?.length).map((x) => x.id);
+  const terminated = s.status === "terminated";
+  const events = Object.entries(s.integrity.counts);
+  return (
+    <div className="space-y-4">
+      <Card className="p-5">
+        <div className="flex flex-wrap items-center gap-5">
+          {s.report.score != null ? <ScoreRing score={Math.round(s.report.score * 20)} size={96} stroke={7} /> : <ScoreRing score={0} size={96} stroke={7} />}
+          <div className="min-w-0 flex-1">
+            <div className="eyebrow text-cobalt-text">{s.meta.industry_name} interview report</div>
+            <h1 className="font-display mt-1 text-[clamp(22px,3vw,30px)] leading-tight">{terminated ? "Interview ended" : s.report.verdict}</h1>
+            <p className="mt-1 text-[13.5px] text-text-2">
+              {s.meta.job?.title} at {s.meta.job?.company} · {s.report.answered} of {s.report.total} answered{s.report.score != null ? ` · average ${s.report.score}/5` : ""}
+            </p>
+          </div>
+        </div>
+        {terminated && s.integrity.terminated_reason && (
+          <p className="mt-4 flex gap-2 rounded-[var(--radius-card)] border border-[color-mix(in_oklab,var(--error)_40%,transparent)] p-3 text-[13.5px] text-[var(--error)]">
+            <ShieldAlert className="size-4 shrink-0" /> {s.integrity.terminated_reason}
+          </p>
+        )}
+        <div className="mt-5 flex flex-wrap gap-2">
+          <Button variant="primary" onClick={() => retake.mutate()} loading={retake.isPending}>
+            <RotateCcw /> Retake with new questions
+          </Button>
+          {!!strong.length && (
+            <Button onClick={() => apply.mutate(strong)} loading={apply.isPending}>
+              Add the skills I showed to my profile
+            </Button>
+          )}
+          <Link href={`/jobs/${s.match_id}`} className={buttonClass({ variant: "ghost" })}>
+            Back to the job
+          </Link>
+        </div>
+      </Card>
+
+      <div className="grid gap-4 lg:grid-cols-2">
+        <Card>
+          <CardHeader title="Rounds" />
+          <ul className="divide-y divide-border">
+            {s.rounds.map((r) => (
+              <li key={r.index} className="flex items-center justify-between gap-3 px-5 py-3 text-[13.5px]">
+                <span>{r.name}</span>
+                <span className="num text-text-2">
+                  {r.score != null ? `${r.score}/5` : "—"} · {r.answered}/{r.total}
+                </span>
+              </li>
+            ))}
+          </ul>
+        </Card>
+        <Card>
+          <CardHeader title="Integrity" description={s.meta.strict ? "Strict mode was on." : "Practice mode: not proctored."} />
+          <div className="space-y-2 p-5 pt-3 text-[13.5px]">
+            {!events.length ? (
+              <p className="flex items-center gap-2 text-[var(--done)]">
+                <ShieldCheck className="size-4" /> No events. You stayed in the interview throughout.
+              </p>
+            ) : (
+              events.map(([k, n]) => (
+                <div key={k} className="flex justify-between">
+                  <span className="text-text-2">{EVENT_LABEL[k] ?? k}</span>
+                  <span className="num">{n}</span>
+                </div>
+              ))
+            )}
+            {!!s.integrity.flagged_answers.length && <p className="text-[var(--error)]">{s.integrity.flagged_answers.length} answer(s) didn't count: not typed or spoken in the interview.</p>}
+          </div>
+        </Card>
+      </div>
+
+      <Card>
+        <CardHeader title="Every answer" description="What each question tested, your score, and how to improve." />
+        <div className="divide-y divide-border">
+          {s.questions.map((q, i) => {
+            const sc = s.scores[q.id];
+            return (
+              <details key={q.id} className="group px-5 py-3">
+                <summary className="flex cursor-pointer items-center justify-between gap-3 text-[13.5px]">
+                  <span className="min-w-0">
+                    <span className="text-text-3">{i + 1}.</span> {q.q}
+                  </span>
+                  <Badge tone={!sc ? "outline" : sc.score >= 4 ? "success" : sc.score >= 3 ? "accent" : "warning"} className="num shrink-0">
+                    {sc ? `${sc.score}/5` : "Skipped"}
+                  </Badge>
+                </summary>
+                <div className="mt-2 space-y-2 text-[13px]">
+                  <p className="text-text-3">Tests: {q.jd_line}</p>
+                  {s.answers[q.id] && <p className="rounded-[var(--radius-control)] bg-elevated p-3 whitespace-pre-line">{s.answers[q.id]}</p>}
+                  {sc?.integrity_flags?.map((f) => (
+                    <p key={f} className="text-[var(--error)]">
+                      {f}
+                    </p>
+                  ))}
+                  {sc?.feedback.map((f) => (
+                    <p key={f} className="text-text-2">
+                      · {f}
+                    </p>
+                  ))}
+                </div>
+              </details>
+            );
+          })}
+        </div>
+      </Card>
+    </div>
+  );
+}

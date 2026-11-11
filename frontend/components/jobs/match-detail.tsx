@@ -7,9 +7,11 @@ import { toast } from "sonner";
 
 import { AgentAvatar } from "@/components/agents/agent-avatar";
 import { ResumeDiff } from "@/components/approvals/resume-diff";
+import { ApplyDialog } from "@/components/jobs/apply-dialog";
 import { QualityGate } from "@/components/jobs/quality-gate";
 import { MatchRow, SkillChips, STAGE_META } from "@/components/match-row";
 import { RecipientCard } from "@/components/recipient-card";
+import { ResumeCompare } from "@/components/resume/resume-compare";
 import { RecipientField, SendActions } from "@/components/send-actions";
 import { Badge } from "@/components/ui/badge";
 import { Button, buttonClass } from "@/components/ui/button";
@@ -17,8 +19,8 @@ import { Card, CardHeader } from "@/components/ui/card";
 import { Textarea } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/misc";
 import { ScoreBar, ScoreRing } from "@/components/ui/score-ring";
-import { reserveTab, sendTo, SOURCE_LABEL } from "@/lib/compose";
-import { isActive, useApply, useEditDraft, useEvidence, useInsights, useMatch, useOverview, usePrepare, useSetOutcome, useSimilar, useUpdateMatch } from "@/lib/queries";
+import { SOURCE_LABEL } from "@/lib/compose";
+import { isActive, useEditDraft, useEvidence, useInsights, useMatch, useOverview, usePrepare, useSetOutcome, useSimilar, useUpdateMatch } from "@/lib/queries";
 import type { Match, Outcome, Stage } from "@/lib/types";
 import { ago, cn, salary } from "@/lib/utils";
 
@@ -118,13 +120,13 @@ export function MatchDetail({ id, compact = false }: { id: string; compact?: boo
   const { data: similar } = useSimilar(id);
   const update = useUpdateMatch();
   const editDraft = useEditDraft();
-  const applyMut = useApply();
   const prepare = usePrepare();
   const { data: overview } = useOverview();
   const busy = isActive(overview?.last_run);
   const [to, setTo] = useState("");
   const [notes, setNotes] = useState("");
   const [showAll, setShowAll] = useState(false);
+  const [applyOpen, setApplyOpen] = useState(false);
 
   useEffect(() => setNotes(m?.notes ?? ""), [m?.notes]);
   const lastDraft = m?.drafts.at(-1);
@@ -134,19 +136,6 @@ export function MatchDetail({ id, compact = false }: { id: string; compact?: boo
 
   const { job } = m;
 
-  // Company ATSs have no public "submit" API: open the real application page with the tailored
-  // bullets on the clipboard, and record the application here.
-  const applyNow = () => {
-    const tab = reserveTab();
-    const bullets = m.tailored?.bullets.map((b) => `• ${b.rewritten}`).join("\n");
-    if (bullets) navigator.clipboard?.writeText(bullets).catch(() => {});
-    const go = () => {
-      sendTo(tab, job.url);
-      if (bullets) toast.message("Tailored bullets copied", { description: "Paste them into the application form." });
-    };
-    if (m.stage === "applied") return go();
-    applyMut.mutate(m.id, { onSuccess: go, onError: () => tab?.close() });
-  };
   const pay = salary(job.salary_min, job.salary_max);
   const draft = m.drafts.at(-1);
   const preparing = busy && overview?.last_run?.trigger === "prepare";
@@ -196,15 +185,14 @@ export function MatchDetail({ id, compact = false }: { id: string; compact?: boo
             </div>
           </div>
           <div className="flex flex-col gap-2 @2xl/md:w-48">
+            <Button variant="primary" className="h-11 w-full md:h-9" onClick={() => setApplyOpen(true)}>
+              {m.drafts.some((d) => d.status === "sent") ? "Application sent" : "Apply now"} <ArrowUpRight />
+            </Button>
+            <ApplyDialog m={m} open={applyOpen} onOpenChange={setApplyOpen} />
             {job.url && (
-              <>
-                <Button variant="primary" className="h-11 w-full md:h-9" onClick={applyNow} loading={applyMut.isPending}>
-                  {m.stage === "applied" ? "Open application" : "Apply now"} <ArrowUpRight />
-                </Button>
-                <a href={job.url} target="_blank" rel="noreferrer" className="text-center text-[12.5px] text-text-3 hover:text-text">
-                  View posting only
-                </a>
-              </>
+              <a href={job.url} target="_blank" rel="noreferrer" className="text-center text-[12.5px] text-text-3 hover:text-text">
+                View posting only
+              </a>
             )}
             <div className="flex items-center justify-center" role="group" aria-label="Rate this match">
               {[1, 2, 3, 4, 5].map((n) => (
@@ -334,6 +322,8 @@ export function MatchDetail({ id, compact = false }: { id: string; compact?: boo
           </Card>
 
           <QualityGate m={m} />
+
+          <ResumeCompare matchId={m.id} />
 
           <Card>
             <CardHeader

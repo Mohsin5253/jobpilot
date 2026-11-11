@@ -2,9 +2,9 @@
 
 import { use } from "react";
 
-import { InterviewRunner } from "@/components/growth";
+import { InterviewRoom } from "@/components/interview/interview-room";
 
 export default function InterviewPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = use(params);
-  return <InterviewRunner id={id} />;
+  return <InterviewRoom id={id} />;
 }

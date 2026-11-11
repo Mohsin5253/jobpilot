@@ -23,7 +23,7 @@ import {
   Search,
   Settings,
   Sparkles,
-  Sun, IndianRupee, CreditCard } from "lucide-react";
+  Sun, IndianRupee, CreditCard, FileText } from "lucide-react";
 import Link from "next/link";
 import { useQueryClient } from "@tanstack/react-query";
 import { usePathname, useRouter } from "next/navigation";
@@ -71,6 +71,7 @@ const NAV_KEYS: Record<string, Key> = {
 const NAV: NavItem[] = [
   { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
   { href: "/jobs", label: "Matches", icon: Briefcase },
+  { href: "/resume", label: "Resume & ATS", icon: FileText },
   { href: "/approvals", label: "Approvals", icon: Inbox, badge: "approvals" },
   {
     href: "/skills",

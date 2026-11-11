@@ -21,6 +21,8 @@ LIMITS: dict[str, tuple[int, int]] = {
     "whatsapp": (5, 60 * 60),
     "rights": (10, 24 * 60 * 60),
     "scam_check": (30, 60 * 60),
+    "resume_tools": (60, 60 * 60),
+    "interview": (30, 60 * 60),
 }
 
 

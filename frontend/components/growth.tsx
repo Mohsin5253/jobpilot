@@ -1,29 +1,30 @@
 "use client";
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Check, GitBranch, Mic, MicOff, Target } from "lucide-react";
-import Link from "next/link";
+import { Check, GitBranch, Mic, Target } from "lucide-react";
 import { useRouter } from "next/navigation";
-import { useEffect, useRef, useState } from "react";
+import { useState } from "react";
 import { toast } from "sonner";
 
+import { AgentAvatar } from "@/components/agents/agent-avatar";
+import { INTERVIEWERS, type InterviewerKey } from "@/components/interview/interviewers";
 import { Badge } from "@/components/ui/badge";
-import { Button, buttonClass } from "@/components/ui/button";
+import { Button } from "@/components/ui/button";
 import { Card, CardHeader } from "@/components/ui/card";
-import { Input, Textarea } from "@/components/ui/input";
-import { Skeleton } from "@/components/ui/misc";
+import { Input, Switch } from "@/components/ui/input";
 import { api } from "@/lib/api";
+import { cn } from "@/lib/utils";
 
-type Q = { id: string; q: string; jd_line: string; skill: string | null; kind: string };
-type Score = { relevance: number; specificity: number; structure: number; score: number; tests: string; feedback: string[] };
-type Session = { id: string; match_id: string; questions: Q[]; answers: Record<string, string>; scores: Record<string, Score>; completed_at: string | null };
+type Session = { id: string };
 type Gap = { id: string; skill: string; status: string; repo_url: string | null; before_score: number | null; after_score: number | null; spec: { title: string; why: string; deadline_hours: number; steps: string[]; accepted_if: string[] } };
 
 /** On a job page: practise for this job, and close a near-miss gap with a 48-hour project. */
 export function GrowthPanel({ matchId }: { matchId: string }) {
   const router = useRouter();
+  const [who, setWho] = useState<InterviewerKey>("female");
+  const [strict, setStrict] = useState(true);
   const start = useMutation({
-    mutationFn: () => api.post<Session>("/interviews", { match_id: matchId }),
+    mutationFn: () => api.post<Session>("/interviews", { match_id: matchId, interviewer: who, strict }),
     onSuccess: (s) => router.push(`/interview/${s.id}`),
     onError: (e: Error) => toast.error(e.message),
   });
@@ -31,10 +32,35 @@ export function GrowthPanel({ matchId }: { matchId: string }) {
   return (
     <div className="grid gap-4 lg:grid-cols-2">
       <Card>
-        <CardHeader icon={<Mic className="size-4" />} title="Mock interview for this job" description="8-12 questions from this job description and your projects. Type or speak; each answer is scored against the line it tests." />
-        <div className="p-5">
+        <CardHeader icon={<Mic className="size-4" />} title="Mock interview for this job" description="The real rounds for this kind of role (screening, technical or case, project, HR), with questions from this job description and your projects. Answer by typing or speaking." />
+        <div className="space-y-4 p-5 pt-3">
+          <div className="grid grid-cols-2 gap-3" role="radiogroup" aria-label="Interviewer">
+            {(Object.values(INTERVIEWERS) as (typeof INTERVIEWERS)[InterviewerKey][]).map((iv) => (
+              <button
+                key={iv.key}
+                type="button"
+                role="radio"
+                aria-checked={who === iv.key}
+                onClick={() => setWho(iv.key)}
+                className={cn("flex items-center gap-3 rounded-[var(--radius-card)] border p-2.5 text-left transition-colors", who === iv.key ? "border-[var(--cobalt)] bg-cobalt-subtle" : "border-border hover:border-border-strong")}
+              >
+                <AgentAvatar agent={iv.agent} size={44} decorative />
+                <span className="min-w-0">
+                  <span className="block text-[13.5px] font-medium">{iv.name}</span>
+                  <span className="block text-[12px] text-text-3">{iv.role} · {iv.key === "female" ? "female voice" : "male voice"}</span>
+                </span>
+              </button>
+            ))}
+          </div>
+          <div className="flex items-start justify-between gap-3 rounded-[var(--radius-card)] border border-border p-3">
+            <div>
+              <div className="text-[13.5px] font-medium">Strict mode</div>
+              <p className="text-[12.5px] text-text-3">Full screen, no switching tabs or apps (3 strikes ends it), paste and copy disabled, like a proctored interview.</p>
+            </div>
+            <Switch checked={strict} onChange={setStrict} label="Strict mode" />
+          </div>
           <Button variant="primary" onClick={() => start.mutate()} loading={start.isPending}>
-            Start practice
+            Start interview with {INTERVIEWERS[who].name}
           </Button>
         </div>
       </Card>
@@ -97,116 +123,6 @@ function GapItem({ g, matchId }: { g: Gap; matchId: string }) {
         </a>
       )}
       <span className="sr-only">{matchId}</span>
-    </div>
-  );
-}
-
-type SR = { start: () => void; stop: () => void; onresult: ((e: { results: ArrayLike<ArrayLike<{ transcript: string }>> }) => void) | null; onend: (() => void) | null; lang: string; continuous: boolean; interimResults: boolean };
-
-/** One question at a time; voice uses the browser's own speech recognition (nothing is recorded or uploaded). */
-export function InterviewRunner({ id }: { id: string }) {
-  const qc = useQueryClient();
-  const { data: s } = useQuery({ queryKey: ["interview", id], queryFn: () => api.get<Session>(`/interviews/${id}`) });
-  const [i, setI] = useState(0);
-  const [text, setText] = useState("");
-  const [listening, setListening] = useState(false);
-  const rec = useRef<SR | null>(null);
-  const answer = useMutation({
-    mutationFn: (b: { question_id: string; answer: string }) => api.post<Session>(`/interviews/${id}/answer`, b),
-    onSuccess: (r) => qc.setQueryData(["interview", id], r),
-    onError: (e: Error) => toast.error(e.message),
-  });
-  const apply = useMutation({
-    mutationFn: (ids: string[]) => api.post<{ added: string[] }>(`/interviews/${id}/apply-skills`, { question_ids: ids }),
-    onSuccess: (r) => toast.success(r.added.length ? `Added ${r.added.join(", ")} and re-scored the job` : "Nothing strong enough to add yet"),
-  });
-  useEffect(() => () => rec.current?.stop(), []);
-  if (!s) return <Skeleton className="h-64" />;
-  const q = s.questions[i];
-  const sc = q ? s.scores[q.id] : undefined;
-  const toggleMic = () => {
-    const W = window as unknown as { SpeechRecognition?: new () => SR; webkitSpeechRecognition?: new () => SR };
-    const Ctor = W.SpeechRecognition ?? W.webkitSpeechRecognition;
-    if (!Ctor) return toast("Voice isn’t supported in this browser. Type your answer instead.");
-    if (listening) return rec.current?.stop();
-    const r = new Ctor();
-    r.lang = "en-IN";
-    r.continuous = true;
-    r.interimResults = false;
-    r.onresult = (e) => setText((t) => `${t} ${Array.from(e.results).map((x) => x[0].transcript).join(" ")}`.trim());
-    r.onend = () => setListening(false);
-    rec.current = r;
-    r.start();
-    setListening(true);
-  };
-  const strong = s.questions.filter((x) => x.skill && (s.scores[x.id]?.score ?? 0) >= 4).map((x) => x.id);
-  return (
-    <div className="mx-auto max-w-2xl space-y-4">
-      <div className="flex items-center justify-between text-[13px] text-text-2">
-        <span>
-          Question {Math.min(i + 1, s.questions.length)} of {s.questions.length}
-        </span>
-        <Link href={`/jobs/${s.match_id}`} className="hover:underline">
-          Back to the job
-        </Link>
-      </div>
-      {q ? (
-        <Card>
-          <div className="space-y-4 p-5">
-            <p className="text-[17px] leading-relaxed font-medium">{q.q}</p>
-            <p className="text-[12.5px] text-text-3">Tests: “{q.jd_line}”</p>
-            <Textarea value={text} onChange={(e) => setText(e.target.value)} rows={6} placeholder="Your answer…" />
-            <div className="flex flex-wrap gap-2">
-              <Button onClick={toggleMic} aria-pressed={listening}>
-                {listening ? <MicOff /> : <Mic />} {listening ? "Stop" : "Speak"}
-              </Button>
-              <Button variant="primary" loading={answer.isPending} disabled={!text.trim()} onClick={() => answer.mutate({ question_id: q.id, answer: text })}>
-                Score my answer
-              </Button>
-              {sc && (
-                <Button
-                  variant="ghost"
-                  onClick={() => {
-                    setI(i + 1);
-                    setText("");
-                  }}
-                >
-                  Next question
-                </Button>
-              )}
-            </div>
-            {sc && (
-              <div className="rounded-[var(--radius-card)] border border-border p-4 text-[13.5px]">
-                <div className="num font-semibold">
-                  {sc.score}/5 · relevance {sc.relevance} · specificity {sc.specificity} · structure {sc.structure}
-                </div>
-                <ul className="mt-2 space-y-1 text-text-2">
-                  {sc.feedback.map((f) => (
-                    <li key={f}>· {f}</li>
-                  ))}
-                </ul>
-              </div>
-            )}
-          </div>
-        </Card>
-      ) : (
-        <Card>
-          <div className="space-y-3 p-5">
-            <p className="text-[16px] font-semibold">Session complete</p>
-            <p className="text-[13.5px] text-text-2">
-              Average {(Object.values(s.scores).reduce((a, x) => a + x.score, 0) / Math.max(1, Object.keys(s.scores).length)).toFixed(1)}/5 across {Object.keys(s.scores).length} answers.
-            </p>
-            {!!strong.length && (
-              <Button variant="primary" loading={apply.isPending} onClick={() => apply.mutate(strong)}>
-                Add the skills I showed to my profile
-              </Button>
-            )}
-            <Link href={`/jobs/${s.match_id}`} className={buttonClass({})}>
-              Back to the job
-            </Link>
-          </div>
-        </Card>
-      )}
     </div>
   );
 }

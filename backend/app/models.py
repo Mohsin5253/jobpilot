@@ -383,6 +383,11 @@ class InterviewSession(Base):
     questions: Mapped[list[dict[str, Any]]] = mapped_column(JSONB)
     answers: Mapped[dict[str, Any]] = mapped_column(JSONB, default=dict, server_default="{}")
     scores: Mapped[dict[str, Any]] = mapped_column(JSONB, default=dict, server_default="{}")
+    # {industry, industry_name, interviewer: male|female, strict, rounds: [{name, kind, intro}]}
+    meta: Mapped[dict[str, Any]] = mapped_column(JSONB, default=dict, server_default="{}")
+    # {events: [{type, at, q}], violations, terminated_reason}: focus losses, blocked pastes, etc.
+    integrity: Mapped[dict[str, Any]] = mapped_column(JSONB, default=dict, server_default="{}")
+    status: Mapped[str] = mapped_column(String(20), default="active", server_default="active")  # active | completed | terminated
     created_at: Mapped[datetime] = _now_col()
     completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
