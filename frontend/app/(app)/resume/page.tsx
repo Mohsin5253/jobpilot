@@ -7,6 +7,7 @@ import { Suspense, useEffect, useState } from "react";
 import { AtsReportView } from "@/components/resume/ats-report";
 import { AtsTarget, emptyTarget, targetBody, type Target } from "@/components/resume/ats-target";
 import { ResumeBuilder } from "@/components/resume/builder";
+import { RestructureResume } from "@/components/resume/restructure";
 import { ResumeDropzone } from "@/components/resume-dropzone";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
@@ -55,6 +56,10 @@ function ResumeStudio() {
             <Card className="space-y-3 p-5">
               <p className="text-[14px]">Upload your resume to see its ATS score, or build one from scratch in the Resume builder tab.</p>
               <ResumeDropzone />
+              <div className="flex flex-wrap items-center gap-2 border-t border-border pt-3">
+                <span className="text-[13px] text-text-2">Resume badly formatted?</span>
+                <RestructureResume hasResume={false} onOpenInBuilder={openInBuilder} />
+              </div>
             </Card>
           ) : (
             <>
@@ -65,7 +70,10 @@ function ResumeStudio() {
                     Score against this job
                   </Button>
                 )}
-                {profile.resume_filename && <p className="text-[12.5px] text-text-3">Checking {profile.resume_filename}, including how its file parses.</p>}
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  {profile.resume_filename ? <p className="text-[12.5px] text-text-3">Checking {profile.resume_filename}, including how its file parses.</p> : <span />}
+                  <RestructureResume hasResume onOpenInBuilder={openInBuilder} />
+                </div>
               </Card>
               {check.error && <p className="text-[13px] text-[var(--error)]">{(check.error as Error).message}</p>}
               {check.isPending && !check.data ? <Skeleton className="min-h-80" /> : check.data && <AtsReportView r={check.data} jobTitle={target.title} jobDescription={target.description} improve={{ target: targetBody(target), onOpenInBuilder: openInBuilder }} />}

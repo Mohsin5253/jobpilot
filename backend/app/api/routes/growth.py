@@ -17,6 +17,7 @@ from typing import Literal
 
 import httpx
 from fastapi import APIRouter, HTTPException
+from fastapi.responses import Response
 from pydantic import BaseModel, Field
 from sqlalchemy import func, select
 
@@ -527,13 +528,7 @@ async def submit_code(session_id: str, body: CodeIn, user: RealUserDep, session:
     return _session_out(s)
 
 
-@router.get("/interviews/{session_id}/report")
-async def full_report(session_id: str, user: UserDep, session: SessionDep) -> dict:
-    """Every round against the field's norms at your level: strengths, gaps, improvements, coding verdicts, and an
-    overall practice signal. The AI-written summary is generated once and kept."""
-    s = await session.get(InterviewSession, session_id)
-    if s is None or s.user_id != user.id:
-        raise HTTPException(404, "No such session")
+async def _report(s: InterviewSession, user, session) -> dict:
     rep = interview_report.build(s)
     if s.completed_at and not (s.meta or {}).get("report_ai") and s.scores:
         ai = await interview_report.narrative(rep, user.id)
@@ -545,6 +540,49 @@ async def full_report(session_id: str, user: UserDep, session: SessionDep) -> di
     if started and s.completed_at:
         rep["minutes_used"] = round((s.completed_at - datetime.fromisoformat(started)).total_seconds() / 60)
     return rep
+
+
+@router.get("/interviews/{session_id}/report")
+async def full_report(session_id: str, user: UserDep, session: SessionDep) -> dict:
+    """Every round against the field's norms at your level: strengths, gaps, improvements, coding verdicts, and an
+    overall practice signal. The AI-written summary is generated once and kept."""
+    s = await session.get(InterviewSession, session_id)
+    if s is None or s.user_id != user.id:
+        raise HTTPException(404, "No such session")
+    return await _report(s, user, session)
+
+
+@router.get("/interviews/{session_id}/report/download")
+async def download_report(session_id: str, user: UserDep, session: SessionDep, format: Literal["pdf", "docx"] = "pdf") -> Response:
+    """The whole interview in one document (PDF or Word): the interviewer's evaluation (1-5 matrix, strengths, concerns,
+    recommendation), every question with your answer, score and how to answer it (with a sample answer), and a
+    self-assessment with the follow-up checklist. Each part starts on a new page. The answer guides are written once
+    per finished interview and kept."""
+    from app.services import interview_report_doc
+    from app.services.interview_answers import build_guides
+
+    s = await session.get(InterviewSession, session_id)
+    if s is None or s.user_id != user.id:
+        raise HTTPException(404, "No such session")
+    if not s.scores:
+        raise HTTPException(409, "Answer at least one question first: the report covers what you answered.")
+    rep = await _report(s, user, session)
+    guides = (s.meta or {}).get("answer_guides")
+    if not guides or set(guides) != {q["id"] for q in s.questions}:
+        await hit("interview_report", str(user.id))
+        profile = await _profile(session, user.id)
+        guides = await build_guides(s, ResumeData.model_validate((profile.resume if profile else None) or {}), user.id)
+        if s.completed_at:
+            s.meta = {**(s.meta or {}), "answer_guides": guides}
+            await session.commit()
+    profile = await _profile(session, user.id)
+    candidate = (user.name or "").strip() or (ResumeData.model_validate((profile.resume if profile else None) or {}).name or "").strip()
+    data = interview_report_doc.compose(s, rep, guides, candidate)
+    if format == "pdf":
+        content, mime = interview_report_doc.render_pdf(data), "application/pdf"
+    else:
+        content, mime = interview_report_doc.render_docx(data), "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+    return Response(content, media_type=mime, headers={"Content-Disposition": f'attachment; filename="{interview_report_doc.filename(data, format)}"'})
 
 
 @router.get("/interviews/trends/{industry}")

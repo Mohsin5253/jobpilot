@@ -138,10 +138,11 @@ def view_from_doc(doc, resume: ResumeData) -> ResumeView:
         for i, sec in enumerate(sections):
             bullets += [(f"{kind[:4].lower()}{i}.b{j}", b) for j, b in enumerate(sec.bullets) if b.strip()]
     bullets += [(f"add{i}", a) for i, a in enumerate(doc.additional) if a.strip()]
-    headers = [f"{s.heading} {s.meta}" for _, secs in doc.body_sections() for s in secs]
-    narrative = "\n".join([doc.summary, *headers, *(t for _, t in bullets)])
+    headers = [f"{s.title_line} {s.meta}" for _, secs in doc.body_sections() for s in secs]
+    stacks = [f"Tech: {s.tech}" for _, secs in doc.body_sections() for s in secs if s.tech]
+    narrative = "\n".join([doc.summary, *headers, *(t for _, t in bullets), *stacks])
     skills = [*doc.key_skills, *doc.other_skills]
-    text = "\n".join([doc.name, doc.contact, narrative, "Skills: " + ", ".join(skills), *doc.education])
+    text = "\n".join([doc.name, doc.contact, narrative, "Skills: " + ", ".join(skills), *doc.education, *doc.certifications])
     return ResumeView(
         text=text,
         narrative=narrative,

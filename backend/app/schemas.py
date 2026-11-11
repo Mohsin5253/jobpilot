@@ -10,9 +10,11 @@ from pydantic import BaseModel, ConfigDict, EmailStr, Field
 class ExperienceItem(BaseModel):
     title: str = ""
     organization: str = ""
+    location: str = ""
     start: str = ""
     end: str = ""
     bullets: list[str] = Field(default_factory=list)
+    tech: list[str] = Field(default_factory=list, description="The role's tech stack, when the resume lists one")
 
 
 class ProjectItem(BaseModel):
@@ -27,6 +29,13 @@ class EducationItem(BaseModel):
     start: str = ""
     end: str = ""
     details: str = ""
+
+
+class SkillGroup(BaseModel):
+    """A labelled skills line, e.g. "Languages: Java, Python"."""
+
+    name: str = ""
+    items: list[str] = Field(default_factory=list)
 
 
 class AdditionalSkill(BaseModel):
@@ -44,9 +53,11 @@ class ResumeData(BaseModel):
     links: list[str] = Field(default_factory=list)
     summary: str = ""
     skills: list[str] = Field(default_factory=list)
+    skill_groups: list[SkillGroup] = Field(default_factory=list, description="Skills as the resume groups them (Languages, Tools…)")
     experience: list[ExperienceItem] = Field(default_factory=list)
     projects: list[ProjectItem] = Field(default_factory=list)
     education: list[EducationItem] = Field(default_factory=list)
+    certifications: list[str] = Field(default_factory=list, description="Certifications, awards, achievements and positions, one per line")
     additional: list[AdditionalSkill] = Field(default_factory=list)
 
     def bullet_index(self) -> list[tuple[str, str]]:
@@ -61,9 +72,10 @@ class ResumeData(BaseModel):
 
     def embedding_text(self) -> str:
         parts = [self.summary, "Skills: " + ", ".join(self.skills)]
-        parts += [f"{e.title} at {e.organization}. " + " ".join(e.bullets) for e in self.experience]
+        parts += [f"{e.title} at {e.organization}. " + " ".join(e.bullets) + (f" Tech: {', '.join(e.tech)}." if e.tech else "") for e in self.experience]
         parts += [f"Project {p.name} ({', '.join(p.tech)}). " + " ".join(p.bullets) for p in self.projects]
         parts += [f"{a.skill}: {a.details}" for a in self.additional]
+        parts += self.certifications
         return "\n".join(p for p in parts if p.strip())
 
 

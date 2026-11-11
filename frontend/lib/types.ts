@@ -50,7 +50,8 @@ export interface AdminMetrics {
   pro_requests: { email: string; name: string; requested_at: string }[];
 }
 
-export interface Experience { title: string; organization: string; start: string; end: string; bullets: string[] }
+export interface Experience { title: string; organization: string; location?: string; start: string; end: string; bullets: string[]; tech?: string[] }
+export interface SkillGroup { name: string; items: string[] }
 export interface Project { name: string; tech: string[]; bullets: string[] }
 export interface Education { school: string; degree: string; start: string; end: string; details: string }
 
@@ -64,9 +65,11 @@ export interface Resume {
   links: string[];
   summary: string;
   skills: string[];
+  skill_groups?: SkillGroup[];
   experience: Experience[];
   projects: Project[];
   education: Education[];
+  certifications?: string[];
   additional: AdditionalSkill[];
 }
 

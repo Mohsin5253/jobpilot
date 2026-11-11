@@ -113,6 +113,8 @@ class Settings(BaseSettings):
     llm_provider: Literal["groq", "anthropic"] = "groq"
     llm_mode: Literal["auto", "on", "offline"] = "auto"
     groq_api_key: str | None = None
+    # Speech-to-text for spoken interview answers: the full large-v3 is the most accurate; whisper-large-v3-turbo is faster/cheaper.
+    stt_model: str = "whisper-large-v3"
     anthropic_api_key: str | None = None
     fast_model: str = ""  # scoring / parsing; empty = provider default (PROVIDER_MODELS)
     smart_model: str = ""  # writing (tailor + outreach); empty = provider default

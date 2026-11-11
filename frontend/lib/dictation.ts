@@ -4,8 +4,10 @@
  * Dictation for spoken interview answers, built for accuracy:
  * - Live: the browser's speech recognition (en-IN) shows words as you speak, and restarts itself after pauses
  *   (Chrome ends a session after a few seconds of silence) so long answers aren't cut off.
- * - Final: the same speech is recorded and, when you stop, transcribed by Whisper large-v3-turbo on the server,
- *   which is much better with Indian English and technical terms. Its text replaces the live draft.
+ * - Final: the same speech is recorded (64 kbps Opus, no noise suppression, which clips soft consonants) and, when you
+ *   stop, transcribed by Whisper large-v3 on the server, which is much better with Indian English and technical terms.
+ *   Its text replaces the live draft, unless it came back much shorter than what was heard live (a dropped stretch),
+ *   in which case the live words are kept.
  * - Without the server model (or if it fails), the live transcript is kept, tidied (capitals, full stop, "I").
  * Audio is only sent for transcription; nothing is stored.
  */
@@ -34,13 +36,21 @@ export type MicState = "unknown" | "granted" | "denied" | "unsupported";
 export async function requestMic(): Promise<MicState> {
   if (typeof navigator === "undefined" || !navigator.mediaDevices?.getUserMedia) return "unsupported";
   try {
-    const stream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true } });
+    const stream = await navigator.mediaDevices.getUserMedia({ audio: AUDIO });
     stream.getTracks().forEach((t) => t.stop());
     return "granted";
   } catch {
     return "denied";
   }
 }
+
+// Echo cancellation stops the interviewer's voice leaking in; noise suppression is off because it clips soft
+// consonants, and Whisper copes with background noise far better than with missing sounds.
+const AUDIO: MediaTrackConstraints = { echoCancellation: true, noiseSuppression: false, autoGainControl: true, channelCount: 1 };
+
+const words = (t: string) => t.split(/\s+/).filter(Boolean).length;
+
+export type TranscriptSource = "whisper" | "browser";
 
 export function tidy(text: string): string {
   let t = text.replace(/\s+/g, " ").trim();
@@ -57,8 +67,9 @@ function pickMime(): string | undefined {
   return ["audio/webm;codecs=opus", "audio/webm", "audio/mp4", "audio/ogg;codecs=opus"].find((m) => MediaRecorder.isTypeSupported(m));
 }
 
-export function useDictation({ hint, onLive, onFinal }: { hint: string; onLive: (text: string) => void; onFinal: (text: string, source: "whisper" | "browser") => void }) {
+export function useDictation({ hint, onLive, onFinal }: { hint: string; onLive: (text: string) => void; onFinal: (text: string, source: TranscriptSource) => void }) {
   const [listening, setListening] = useState(false);
+  const [source, setSource] = useState<TranscriptSource | null>(null);
   const [transcribing, setTranscribing] = useState(false);
   const [level, setLevel] = useState(0);
   const [error, setError] = useState<string | null>(null);
@@ -91,13 +102,14 @@ export function useDictation({ hint, onLive, onFinal }: { hint: string; onLive: 
 
   const start = useCallback(async () => {
     setError(null);
+    setSource(null);
     if (!navigator.mediaDevices?.getUserMedia) {
       setError("This browser can't use the microphone. Type your answer instead.");
       return;
     }
     let s: MediaStream;
     try {
-      s = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true } });
+      s = await navigator.mediaDevices.getUserMedia({ audio: AUDIO });
     } catch {
       setError("Microphone blocked. Allow it from the icon in the address bar, or type your answer.");
       return;
@@ -131,7 +143,7 @@ export function useDictation({ hint, onLive, onFinal }: { hint: string; onLive: 
     const mime = pickMime();
     if (mime) {
       chunks.current = [];
-      const mr = new MediaRecorder(s, { mimeType: mime, audioBitsPerSecond: 32000 });
+      const mr = new MediaRecorder(s, { mimeType: mime, audioBitsPerSecond: 64000 });
       mr.ondataavailable = (e) => e.data.size && chunks.current.push(e.data);
       mr.start(1000);
       media.current = mr;
@@ -201,7 +213,11 @@ export function useDictation({ hint, onLive, onFinal }: { hint: string; onLive: 
         fd.set("audio", blob, `answer.${blob.type.includes("mp4") ? "m4a" : blob.type.includes("ogg") ? "ogg" : "webm"}`);
         fd.set("hint", cb.current.hint.slice(0, 500));
         const r = await api.post<{ text: string }>("/stt", fd);
-        if (r.text.trim()) {
+        // Whisper occasionally skips a stretch after a long pause; if it heard far fewer words than the live captions
+        // did, the live words are the safer record.
+        const dropped = words(live) >= 12 && words(r.text) < 0.6 * words(live);
+        if (r.text.trim() && !dropped) {
+          setSource("whisper");
           cb.current.onFinal(tidy(r.text), "whisper");
           return;
         }
@@ -211,9 +227,10 @@ export function useDictation({ hint, onLive, onFinal }: { hint: string; onLive: 
         setTranscribing(false);
       }
     }
+    setSource(live.trim() ? "browser" : null);
     if (live.trim()) cb.current.onFinal(tidy(live), "browser");
     else cb.current.onFinal("", "browser");
   }, [cleanup]);
 
-  return { listening, transcribing, level, error, start, stop };
+  return { listening, transcribing, level, error, source, start, stop };
 }

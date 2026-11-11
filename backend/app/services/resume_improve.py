@@ -80,13 +80,22 @@ BULLET_SYSTEM = """You improve resume bullets for applicant tracking systems and
 - You may use the target job's wording for things the bullet already shows.
 Return the bullets in the same order and the same count."""
 
-SUMMARY_SYSTEM = """Write a resume summary for a student applying to internships or entry-level roles: 2-3 sentences, 30-60
-words, no first person, no clichés (hardworking, passionate, team player). Use ONLY the facts provided: degree, college,
-skills, projects and experience. Name the target field. Never invent results, numbers, tools or experience."""
+SUMMARY_SYSTEM = """Write a resume summary: 2-3 sentences, 30-60 words, no first person, no clichés (hardworking, passionate,
+team player). Pitch it at the candidate's real level: a student or fresher seeks internships or entry-level roles; someone with
+years of full-time work is described by their role and employers, not as a student. Use ONLY the facts provided: degree,
+college, skills, projects and experience. Name the target field. Never invent results, numbers, years, tools or experience."""
 
 
 def template_summary(resume: ResumeData, industry: str, top_skills: list[str]) -> str:
     edu = resume.education[0] if resume.education else None
+    working = [e for e in resume.experience if e.title and not re.search(r"\bintern|trainee|apprentice", e.title, re.I)]
+    if len(working) >= 2 or any(re.search(r"present|current", e.end, re.I) for e in working):
+        orgs = list(dict.fromkeys(e.organization for e in working if e.organization))[:3]
+        line = f"{working[0].title}" + (f" with experience at {', '.join(orgs)}" if orgs else "")
+        line += f", working with {', '.join(top_skills[:4])}." if top_skills else "."
+        if edu and (edu.degree or edu.school):
+            line += f" {' from '.join(x for x in (edu.degree, edu.school) if x)}."
+        return line + f" Seeking {INDUSTRIES[industry].name.lower()} roles."
     who = f"{edu.degree} student at {edu.school}" if edu and edu.degree and edu.school else f"{edu.degree or edu.school} student" if edu else "Student"
     work = [p.name for p in resume.projects if p.name][:2]
     exp = [" at ".join(x for x in (e.title, e.organization) if x) for e in resume.experience if e.title or e.organization][:1]
@@ -99,6 +108,25 @@ def template_summary(resume: ResumeData, industry: str, top_skills: list[str]) -
         parts.append(f"Built projects such as {' and '.join(work)}.")
     parts.append(f"Seeking {INDUSTRIES[industry].name.lower()} internship and entry-level roles.")
     return " ".join(parts)
+
+
+async def write_summary(resume: ResumeData, industry: str, job_title: str, user_id) -> tuple[str, bool]:
+    """(summary, written by AI). Only the resume's own facts; anything else falls back to the template."""
+    top = [s for s in resume.skills if s.lower() not in ("communication", "teamwork")][:6]
+    allowed = set(resume.skills) | set(extract_skills(resume.embedding_text()))
+    try:
+        facts = (
+            f"Target field: {INDUSTRIES[industry].name}" + (f" ({job_title})" if job_title else "") + "\n"
+            f"Education: {'; '.join(f'{e.degree} {e.school} {e.start}-{e.end} {e.details}'.strip() for e in resume.education) or 'n/a'}\n"
+            f"Skills: {', '.join(top)}\nExperience: {'; '.join(f'{e.title} at {e.organization} ({e.start}-{e.end})' for e in resume.experience) or 'none'}\n"
+            f"Projects: {'; '.join(p.name for p in resume.projects) or 'none'}\nCurrent summary: {resume.summary or '(none)'}"
+        )
+        res = await get_llm().structured(agent="tailor", tier="fast", schema=Summary, ctx=CallContext(user_id=user_id), max_tokens=400, system=SUMMARY_SYSTEM, prompt=facts)
+        if not check_freeform(res.summary, allowed) and 15 <= len(res.summary.split()) <= 90 and "[" not in res.summary:
+            return res.summary.strip(), True
+    except (LLMUnavailable, LLMOutputError):
+        pass
+    return template_summary(resume, industry, top), False
 
 
 async def improve(resume: ResumeData, industry_key: str | None, job_title: str, job_description: str, confirmed: list[str], user_id, raw_text: str | None = None, filename: str | None = None) -> dict:
@@ -164,22 +192,8 @@ async def improve(resume: ResumeData, industry_key: str | None, job_title: str, 
     # 3) Summary: written from the resume's own facts when missing or the wrong length.
     words = len(new.summary.split())
     if not new.summary.strip() or not 20 <= words <= 90:
-        top = [s for s in new.skills if not s.lower() in ("communication", "teamwork")][:6]
-        allowed = {s for s in new.skills} | set(extract_skills(new.embedding_text()))
-        summary = ""
-        try:
-            facts = (
-                f"Target field: {INDUSTRIES[industry].name}" + (f" ({job_title})" if job_title else "") + "\n"
-                f"Education: {'; '.join(f'{e.degree} {e.school} {e.details}'.strip() for e in new.education) or 'n/a'}\n"
-                f"Skills: {', '.join(top)}\nExperience: {'; '.join(f'{e.title} at {e.organization}' for e in new.experience) or 'none'}\n"
-                f"Projects: {'; '.join(p.name for p in new.projects) or 'none'}\nCurrent summary: {new.summary or '(none)'}"
-            )
-            res = await get_llm().structured(agent="tailor", tier="fast", schema=Summary, ctx=CallContext(user_id=user_id), max_tokens=400, system=SUMMARY_SYSTEM, prompt=facts)
-            if not check_freeform(res.summary, allowed) and 15 <= len(res.summary.split()) <= 90 and "[" not in res.summary:
-                summary, ai_used = res.summary.strip(), True
-        except (LLMUnavailable, LLMOutputError):
-            pass
-        summary = summary or template_summary(new, industry, top)
+        summary, used = await write_summary(new, industry, job_title, user_id)
+        ai_used = ai_used or used
         changes.append({"section": "Summary", "before": new.summary, "after": summary, "why": "Recruiters skim the summary first; this one names your field and strongest skills, from your own resume."})
         new.summary = summary
 

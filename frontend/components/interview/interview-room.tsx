@@ -556,6 +556,11 @@ function AnswerPanel({
           aria-label="Your answer"
           className={cn(dictation.listening && "border-[var(--cobalt)]")}
         />
+        {!dictation.listening && !dictation.transcribing && dictation.source && (
+          <p className="text-[12px] text-text-3" aria-live="polite">
+            {dictation.source === "whisper" ? "✓ Transcribed word for word by Whisper. Check it and fix any word before you submit." : "Live captions only (the accurate transcriber wasn't available). Read it through and fix any misheard word before you submit."}
+          </p>
+        )}
         {(dictation.listening || dictation.transcribing || dictation.error) && (
           <div className="flex items-center gap-2 text-[12.5px]" aria-live="polite">
             {dictation.listening && (

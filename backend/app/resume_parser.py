@@ -3,8 +3,7 @@
 import io
 import re
 
-from app.llm import CallContext, LLMOutputError, LLMUnavailable, get_llm
-from app.logging import log
+from app.llm import CallContext
 from app.schemas import EducationItem, ExperienceItem, ProjectItem, ResumeData
 from app.skills import canonicalize, extract_skills
 
@@ -37,28 +36,14 @@ def extract_text(filename: str, data: bytes) -> str:
     return text
 
 
-SYSTEM = """You convert resumes into structured JSON.
-Copy content faithfully: keep every bullet's wording, numbers and technologies exactly as written.
-Do not summarize, merge, improve or invent anything. If a field is absent, leave it empty.
-Put coursework/research/hackathon work with its own bullets under projects."""
-
-
 async def structure_resume(text: str, ctx: CallContext) -> ResumeData:
-    try:
-        data = await get_llm().structured(
-            agent="resume_parser",
-            tier="smart",
-            system=SYSTEM,
-            prompt=f"<resume>\n{text[:30000]}\n</resume>",
-            schema=ResumeData,
-            ctx=ctx,
-        )
-    except (LLMUnavailable, LLMOutputError) as exc:
-        log.info("resume.heuristic_parse", reason=str(exc)[:200])
-        data = heuristic_parse(text)
+    """Layout-aware: icon glyphs and line-break damage repaired, roles split into title/company/location/dates, stacks
+    and certifications in their own fields (see services.resume_restructure). AI first, offline parser as fallback."""
+    from app.services.resume_restructure import restructure
+
+    data, _ = await restructure(text, ctx)
     # Skills listed anywhere in the resume count, normalized to the shared lexicon.
-    merged = list(dict.fromkeys([*(canonicalize(x) for x in data.skills if x.strip()), *extract_skills(text)]))
-    data.skills = merged
+    data.skills = list(dict.fromkeys([*(x for x in data.skills if x.strip()), *(canonicalize(x) for x in data.skills if x.strip()), *extract_skills(text)]))
     return data
 
 

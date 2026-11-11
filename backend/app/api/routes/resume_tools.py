@@ -4,7 +4,7 @@ ATS-friendly PDF/DOCX of whatever is in the builder, and bullet rewrites that ne
 import uuid
 from typing import Literal
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, File, HTTPException, UploadFile
 from fastapi.responses import Response
 from pydantic import BaseModel, Field
 from sqlalchemy import select
@@ -192,3 +192,44 @@ async def ai_improve(body: ImproveIn, user: UserDep, session: SessionDep) -> dic
     from app.services.resume_improve import improve
 
     return await improve(resume, body.industry, title, desc, body.confirmed_keywords, user.id, raw, filename)
+
+
+@router.post("/resume/restructure")
+async def restructure_resume(user: UserDep, session: SessionDep, file: UploadFile | None = File(default=None), industry: str | None = None) -> dict:
+    """Your resume rebuilt into a proper structure (contact, summary, grouped skills, roles with title · company ·
+    location · dates and their stack, projects, education, certifications) from your own words. Uses the file you
+    send, or the resume you uploaded. Returns the structure, what was fixed, and any line that didn't fit, so you can
+    check it; nothing is saved until you save it."""
+    from app.resume_parser import MAX_RESUME_BYTES, UnsupportedResume, extract_text
+    from app.services.resume_improve import write_summary
+    from app.services.resume_restructure import restructure
+
+    await hit("resume_tools", str(user.id))
+    p = await _profile(session, user.id)
+    base = ResumeData.model_validate((p.resume if p else None) or {})
+    filename = p.resume_filename if p else None
+    if file is not None:
+        data = await file.read(MAX_RESUME_BYTES + 1)
+        if len(data) > MAX_RESUME_BYTES:
+            raise HTTPException(413, "Resume must be under 5 MB")
+        try:
+            text = extract_text(file.filename or "resume", data)
+        except UnsupportedResume as exc:
+            raise HTTPException(422, str(exc)) from exc
+        filename = file.filename
+    elif p is not None and p.resume_text:
+        text = p.resume_text
+    else:
+        raise HTTPException(409, "Upload your resume first (Settings → Resume), or choose a file here")
+    from app.resume_parser import heuristic_parse
+
+    # "Before" is the resume as a generic ATS parser reads it.
+    before = ats.score(ats.view_from_resume(base if file is None else heuristic_parse(text), text, filename), industry, "", "")
+    resume, report = await restructure(text, CallContext(user_id=user.id), base=base if file is None else None)
+    field = before["industry"]
+    if not resume.summary.strip():
+        resume.summary, used = await write_summary(resume, field, "", user.id)
+        report["notes"].insert(0, "Added a 2-3 line summary written from your own resume" + (" (AI, checked against your resume)." if used else "."))
+        report["sections"].insert(1, "Summary")
+    after = ats.score(ats.view_from_resume(resume), field, "", "")
+    return {"resume": resume.model_dump(), **report, "before": before["score"], "after": after["score"], "industry": field}

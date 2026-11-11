@@ -16,9 +16,9 @@ import { TagInput } from "@/components/ui/tag-input";
 import { api } from "@/lib/api";
 import type { AtsReport } from "@/lib/ats-types";
 import { useSaveProfile } from "@/lib/queries";
-import type { Resume } from "@/lib/types";
+import type { Resume, SkillGroup } from "@/lib/types";
 
-const blank: Resume = { name: "", email: "", phone: "", location: "", links: [], summary: "", skills: [], experience: [], projects: [], education: [], additional: [] };
+const blank: Resume = { name: "", email: "", phone: "", location: "", links: [], summary: "", skills: [], skill_groups: [], experience: [], projects: [], education: [], certifications: [], additional: [] };
 const lines = (s: string) => s.split("\n").map((l) => l.replace(/^[•\-*]\s*/, "").trim()).filter(Boolean);
 
 export async function download(resume: Resume, format: "pdf" | "docx") {
@@ -116,8 +116,11 @@ export function ResumeBuilder({ initial, target, setTarget }: { initial: Resume 
 
         <Card>
           <CardHeader title="Skills" description="Only tools and skills you've really used. Show the important ones in a bullet too." />
-          <div className="p-5 pt-3">
-            <TagInput value={r.skills} onChange={(v) => set("skills", v)} placeholder="Python, SQL, Figma…" />
+          <div className="space-y-3 p-5 pt-3">
+            <SkillGroupsField value={r.skill_groups ?? []} onChange={(v) => set("skill_groups", v)} />
+            <Field label="All skills" hint="What ATS searches match on. Anything not in a group above prints under “Other”.">
+              <TagInput value={r.skills} onChange={(v) => set("skills", v)} placeholder="Python, SQL, Figma…" />
+            </Field>
           </div>
         </Card>
 
@@ -126,7 +129,7 @@ export function ResumeBuilder({ initial, target, setTarget }: { initial: Resume 
           description="Internships, freelance, college clubs, part-time work. One bullet per line: action verb, what you did, the result."
           items={r.experience}
           onChange={(v) => set("experience", v)}
-          make={() => ({ title: "", organization: "", start: "", end: "", bullets: [] })}
+          make={() => ({ title: "", organization: "", location: "", start: "", end: "", bullets: [], tech: [] })}
           render={(e, upd) => (
             <div className="grid gap-3 sm:grid-cols-2">
               <Field label="Role">
@@ -134,6 +137,12 @@ export function ResumeBuilder({ initial, target, setTarget }: { initial: Resume 
               </Field>
               <Field label="Organisation">
                 <Input value={e.organization} onChange={(ev) => upd({ ...e, organization: ev.target.value })} />
+              </Field>
+              <Field label="Location" hint="City, or Remote">
+                <Input value={e.location ?? ""} onChange={(ev) => upd({ ...e, location: ev.target.value })} placeholder="Bengaluru" />
+              </Field>
+              <Field label="Tech used" hint="Printed on its own line under the bullets">
+                <TagInput value={e.tech ?? []} onChange={(v) => upd({ ...e, tech: v })} placeholder="Java, AWS" />
               </Field>
               <Field label="Start">
                 <Input value={e.start} onChange={(ev) => upd({ ...e, start: ev.target.value })} placeholder="Jun 2025" />
@@ -184,12 +193,19 @@ export function ResumeBuilder({ initial, target, setTarget }: { initial: Resume 
               <Field label="End">
                 <Input value={e.end} onChange={(ev) => upd({ ...e, end: ev.target.value })} placeholder="2026" />
               </Field>
-              <Field label="Details" className="sm:col-span-2" hint="CGPA, relevant coursework, certifications">
-                <Input value={e.details} onChange={(ev) => upd({ ...e, details: ev.target.value })} placeholder="CGPA 8.4 · DBMS, OS, Computer Networks" />
+              <Field label="Details" className="sm:col-span-2" hint="One per line: CGPA, relevant coursework">
+                <Textarea value={e.details} rows={2} onChange={(ev) => upd({ ...e, details: ev.target.value })} placeholder={"CGPA: 8.4/10\nRelevant coursework: DBMS, OS, Computer Networks"} />
               </Field>
             </div>
           )}
         />
+
+        <Card>
+          <CardHeader title="Certifications & awards" description="Certificates, hackathon wins, scholarships, positions of responsibility. One per line." />
+          <div className="p-5 pt-3">
+            <LinesField value={r.certifications ?? []} onChange={(v) => set("certifications", v)} placeholder={"AWS Certified Cloud Practitioner (2025)\nWinner, Smart India Hackathon 2024"} />
+          </div>
+        </Card>
       </div>
 
       <div className="space-y-4 lg:sticky lg:top-4 lg:self-start">
@@ -225,6 +241,60 @@ export function ResumeBuilder({ initial, target, setTarget }: { initial: Resume 
         )}
       </div>
     </div>
+  );
+}
+
+function LinesField({ value, onChange, placeholder }: { value: string[]; onChange: (v: string[]) => void; placeholder?: string }) {
+  const [text, setText] = useState(value.join("\n"));
+  useEffect(() => {
+    if (lines(text).join("\n") !== value.join("\n")) setText(value.join("\n"));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [value]);
+  return (
+    <Textarea
+      value={text}
+      rows={Math.max(2, value.length + 1)}
+      aria-label="One per line"
+      onChange={(e) => {
+        setText(e.target.value);
+        onChange(lines(e.target.value));
+      }}
+      placeholder={placeholder}
+    />
+  );
+}
+
+const groupText = (g: SkillGroup[]) => g.map((x) => (x.name ? `${x.name}: ` : "") + x.items.join(", ")).join("\n");
+const parseGroups = (t: string): SkillGroup[] =>
+  t
+    .split("\n")
+    .map((l) => l.trim())
+    .filter(Boolean)
+    .map((l) => {
+      const m = /^([^:]{1,40}):\s*(.*)$/.exec(l);
+      const items = (m ? m[2] : l).split(/,|;/).map((x) => x.trim()).filter(Boolean);
+      return { name: m ? m[1].trim() : "", items };
+    })
+    .filter((g) => g.items.length);
+
+function SkillGroupsField({ value, onChange }: { value: SkillGroup[]; onChange: (v: SkillGroup[]) => void }) {
+  const [text, setText] = useState(groupText(value));
+  useEffect(() => {
+    if (groupText(parseGroups(text)) !== groupText(value)) setText(groupText(value));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [value]);
+  return (
+    <Field label="Skill groups" hint="One line per group, as it prints: “Languages: Java, Python”">
+      <Textarea
+        value={text}
+        rows={Math.max(2, value.length + 1)}
+        onChange={(e) => {
+          setText(e.target.value);
+          onChange(parseGroups(e.target.value));
+        }}
+        placeholder={"Languages: Java, Python, SQL\nFrameworks: React, Spring Boot\nTools: Git, Docker, AWS"}
+      />
+    </Field>
   );
 }
 
