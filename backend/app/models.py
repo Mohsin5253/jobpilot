@@ -154,6 +154,7 @@ class Job(Base):
     dedupe_key: Mapped[str | None] = mapped_column(String(300), index=True)
     skills: Mapped[list[str]] = mapped_column(JSONB, default=list)
     track: Mapped[str] = mapped_column(String(20), default="technical")  # technical | non_technical
+    org_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("organizations.id", ondelete="CASCADE"), index=True)  # posted by a college: its students only
     posted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), index=True)
     fetched_at: Mapped[datetime] = _now_col()
     # Refreshed every time a source still lists the posting; stale = closed / filled.
@@ -792,7 +793,10 @@ class Organization(Base):
     id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=uuid.uuid4)
     name: Mapped[str] = mapped_column(String(200))
     slug: Mapped[str] = mapped_column(String(80), unique=True)
-    invite_code: Mapped[str] = mapped_column(String(20), unique=True)
+    invite_code: Mapped[str] = mapped_column(String(20), unique=True)  # for students: shared openly, like a group link
+    domain: Mapped[str | None] = mapped_column(String(120))  # staff emails must end with @domain when set
+    staff_code_hash: Mapped[str | None] = mapped_column(String(64))  # HMAC-SHA256 of the staff code; the code itself is never stored
+    staff_code_set_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     created_at: Mapped[datetime] = _now_col()
 
 
@@ -803,7 +807,8 @@ class OrgMember(Base):
     id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=uuid.uuid4)
     org_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("organizations.id", ondelete="CASCADE"), index=True)
     user_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"))
-    role: Mapped[str] = mapped_column(String(20), default="student")  # student | officer
+    role: Mapped[str] = mapped_column(String(20), default="student")  # student | tpo | hod | teacher
+    department: Mapped[str] = mapped_column(String(120), default="", server_default="")  # HOD / teacher scope (a branch)
     joined_at: Mapped[datetime] = _now_col()
 
 
@@ -839,3 +844,46 @@ class DriveStatus(Base):
     status: Mapped[str] = mapped_column(String(20), default="interested")  # interested | registered | in_rounds | selected | rejected | skipped
     round_index: Mapped[int] = mapped_column(Integer, default=0)
     updated_at: Mapped[datetime] = _now_col(onupdate=func.now())
+
+
+class CampusPlacement(Base):
+    """One student's pipeline for one job, run by the placement cell: an AI match proposal (or a staff / student
+    entry), approved by staff, then through the rounds to placed. Row-level security hides students who don't share."""
+
+    __tablename__ = "campus_placements"
+    __table_args__ = (UniqueConstraint("org_id", "user_id", "job_id", name="uq_placement_student_job"), Index("ix_placement_org_stage", "org_id", "stage"))
+
+    id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=uuid.uuid4)
+    org_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("organizations.id", ondelete="CASCADE"), index=True)
+    user_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    job_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("jobs.id", ondelete="CASCADE"))
+    drive_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("campus_drives.id", ondelete="CASCADE"))
+    company: Mapped[str] = mapped_column(String(200))
+    title: Mapped[str] = mapped_column(String(300))
+    # proposed | shortlisted | round_1 | technical | hr | placed | rejected | dismissed | withdrawn
+    stage: Mapped[str] = mapped_column(String(20), default="proposed", server_default="proposed")
+    source: Mapped[str] = mapped_column(String(24), default="ai_recommended", server_default="ai_recommended")  # ai_recommended | staff_posted | student
+    match_score: Mapped[float | None] = mapped_column(Float)
+    reasoning: Mapped[dict[str, Any]] = mapped_column(JSONB, default=dict, server_default="{}")  # why the AI proposed it
+    feedback: Mapped[str] = mapped_column(Text, default="", server_default="")
+    history: Mapped[list[dict[str, Any]]] = mapped_column(JSONB, default=list, server_default="[]")  # [{stage, at, by, note}]
+    decided_by: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"))
+    decided_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    created_at: Mapped[datetime] = _now_col()
+    updated_at: Mapped[datetime] = _now_col(onupdate=func.now())
+
+
+class CampusLead(Base):
+    """A college asking for a placement-cell workspace from the pricing page."""
+
+    __tablename__ = "campus_leads"
+
+    id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=uuid.uuid4)
+    college: Mapped[str] = mapped_column(String(200))
+    name: Mapped[str] = mapped_column(String(200))
+    email: Mapped[str] = mapped_column(String(320))
+    role: Mapped[str] = mapped_column(String(60), default="", server_default="")
+    students: Mapped[int | None] = mapped_column(Integer)
+    plan: Mapped[str] = mapped_column(String(30), default="", server_default="")
+    message: Mapped[str] = mapped_column(Text, default="", server_default="")
+    created_at: Mapped[datetime] = _now_col()

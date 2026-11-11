@@ -24,7 +24,7 @@ from app.services.usage import usage_for
 from app.llm import CallContext, LLMOutputError, LLMUnavailable, get_llm
 from app.models import Job, JobMatch, Notification, Profile, Stage
 from app.schemas import ResumeData
-from app.skills import role_digest, skill_overlap
+from app.skills import adjacent, role_digest, skill_overlap
 from app.services.events import publish
 
 W_SEMANTIC, W_SKILLS, W_LLM = 0.25, 0.25, 0.50
@@ -109,10 +109,14 @@ def level_factor(title: str, description: str) -> float:
     return 1.0
 
 
-def explain(strengths: list[str], gaps: list[str]) -> str:
+def explain(strengths: list[str], gaps: list[str], near: list[tuple[str, str]] | None = None) -> str:
     parts = []
     if strengths:
         parts.append("Strong: " + ", ".join(strengths[:5]) + ".")
+    if near:
+        parts.append("Close: " + ", ".join(f"{have} for {want}" for want, have in near[:3]) + ".")
+    near_wanted = {w for w, _ in near or []}
+    gaps = [g for g in gaps if g not in near_wanted]
     if gaps:
         parts.append("Missing: " + ", ".join(gaps[:4]) + ".")
     return " ".join(parts) or "Little overlap with the listed requirements."
@@ -210,11 +214,11 @@ async def run_matcher(state: PipelineState) -> dict:
                 score = blend(r["semantic"], r["skills"], review.fit_score) * level_factor(r["job"].title, r["job"].description)
                 strengths = list(dict.fromkeys([*r["strengths"], *review.strengths]))[:8]
                 gaps = list(dict.fromkeys([*r["gaps"], *review.gaps]))[:8]
-                explanation = f"{explain(r['strengths'], r['gaps'])} {review.explanation}".strip()
+                explanation = f"{explain(r['strengths'], r['gaps'], adjacent(resume.skills, r['job'].skills or []))} {review.explanation}".strip()
             else:
                 score = blend(r["semantic"], r["skills"], None) * level_factor(r["job"].title, r["job"].description)
                 strengths, gaps = r["strengths"], r["gaps"]
-                explanation = explain(strengths, gaps)
+                explanation = explain(strengths, gaps, adjacent(resume.skills, r["job"].skills or []))
             values.append(
                 {
                     "id": uuid.uuid4(),

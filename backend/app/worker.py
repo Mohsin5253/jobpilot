@@ -65,6 +65,7 @@ class Worker:
             self.scheduler.add_job(keep_awake_ping, "interval", minutes=10, id="keep-awake", replace_existing=True, max_instances=1)
         self.scheduler.add_job(enqueue_scheduled_runs, "cron", minute=0, id="daily-runs", replace_existing=True)
         self.scheduler.add_job(follow_up_sweep, "cron", minute=15, id="follow-ups", replace_existing=True)
+        self.scheduler.add_job(campus_proposals, "cron", minute=25, id="campus-proposals", replace_existing=True, max_instances=1)
         # Researcher: re-run the agents for each user every research_interval_hours (checked twice an hour).
         self.scheduler.add_job(enqueue_research_runs, "cron", minute="5,35", id="research", replace_existing=True)
         # Shared ingestion: every minute each worker fetches a slice of the due boards / feeds / searches (once for
@@ -97,6 +98,18 @@ class Worker:
             t.cancel()
         await close_graph()
         log.info("worker.stopped", worker=self.id)
+
+
+async def campus_proposals() -> None:
+    """Hourly: strong new matches of students who share with their college become proposals for its placement cell."""
+    from app.services.placement import run_proposals_all
+
+    try:
+        n = await run_proposals_all()
+        if n:
+            log.info("campus.proposals", proposed=n)
+    except Exception:
+        log.exception("campus.proposals_failed")
 
 
 async def keep_awake_ping() -> None:

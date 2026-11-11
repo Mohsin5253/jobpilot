@@ -33,6 +33,11 @@ async def shared_candidates(user_id: uuid.UUID, prefs, profile_vec: list[float],
     ]
     if since:
         filters.append(Job.fetched_at > since)
+    # Jobs a college posted are for its own students only.
+    from app.models import OrgMember
+
+    mine = select(OrgMember.org_id).where(OrgMember.user_id == user_id).scalar_subquery()
+    filters.append(or_(Job.org_id.is_(None), Job.org_id == mine))
     async with session_scope() as s:
         # Nearest first via the HNSW index, then this user's exact filters in Python.
         rows = (

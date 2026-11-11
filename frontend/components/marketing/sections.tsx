@@ -13,6 +13,7 @@ import { StatusPill } from "@/components/ui/status-dot";
 import type { AgentKey } from "@/config/agents";
 import { useStartDemo } from "@/lib/demo";
 import { cn } from "@/lib/utils";
+import { CAMPUS_PER_STUDENT_INR } from "@/lib/campus-pricing";
 
 // The one place the plan numbers live. Payments aren't live yet: Pro is switched on by hand during the beta.
 const FREE_SENDS_DEFAULT = 5;
@@ -20,7 +21,6 @@ const FREE_SENDS_MAX = 10;
 const PRO_INR = 299;
 const WEEK_PASS_INR = 79;
 const YEAR_PASS_INR = 2499;
-const CAMPUS_PILOT_COLLEGES = 3;
 
 export function Reveal({ children, delay = 0, className }: { children: ReactNode; delay?: number; className?: string }) {
   const reduce = useReducedMotion();
@@ -676,17 +676,17 @@ export function Pricing() {
     },
     {
       name: "Campus",
-      price: "Custom",
-      note: "per college",
+      price: `₹${CAMPUS_PER_STUDENT_INR}`,
+      note: "per student / year for a whole college · free pilot for one season",
       items: [
-        { t: `Free pilot for ${CAMPUS_PILOT_COLLEGES} colleges` },
-        { t: "Cohort dashboard for placement cells" },
-        { t: "Automatic eligibility checks" },
+        { t: "TPO, HOD and faculty accounts with department scope" },
+        { t: "Live placement pipeline, round by round" },
+        { t: "AI job matches your staff approve" },
         { t: "Student data shared only with consent" },
       ],
       cta: (
-        <Link href="/register" className={buttonClass({ size: "lg", className: "w-full" })}>
-          Ask for a college workspace
+        <Link href="/campus-pricing" className={buttonClass({ size: "lg", className: "w-full" })}>
+          See campus plans
         </Link>
       ),
     },
@@ -750,8 +750,12 @@ export function Campus() {
             "Round-by-round prep for aptitude, coding, technical and HR",
             "Internship-to-PPO tracking",
             "A cohort dashboard for officers; student rows only with their consent",
+            "TPO, HOD and faculty roles; AI job matches staff approve",
           ]}
         />
+        <Link href="/campus-pricing" className={buttonClass({ variant: "secondary", className: "mt-6" })}>
+          Campus plans and pricing <ArrowRight />
+        </Link>
       </div>
       <Reveal>
         <div className="panel p-5 md:p-6" role="img" aria-label="Example campus drive">

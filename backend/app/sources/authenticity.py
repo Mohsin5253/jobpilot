@@ -17,7 +17,7 @@ import httpx
 
 from app.sources.base import Posting
 
-FIRST_PARTY = {"greenhouse", "lever", "ashby", "career_page", "demo"}  # the employer's own system
+FIRST_PARTY = {"greenhouse", "lever", "ashby", "career_page", "demo", "campus"}  # the employer's own system
 
 _SCAM = re.compile(
     r"registration fee|security deposit|refundable deposit|pay (a |the )?(fee|amount)|processing fee|"

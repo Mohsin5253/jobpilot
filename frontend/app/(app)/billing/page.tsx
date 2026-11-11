@@ -3,6 +3,8 @@
 import { Suspense } from "react";
 
 import { PlansAndPayments } from "@/components/billing";
+import { CampusPlans } from "@/components/marketing/campus-pricing";
+import { Card, CardHeader } from "@/components/ui/card";
 import { PageHeader, Skeleton } from "@/components/ui/misc";
 import { useMe } from "@/lib/queries";
 
@@ -19,6 +21,15 @@ export default function BillingPage() {
       <Suspense fallback={<Skeleton className="h-96" />}>
         <PlansAndPayments />
       </Suspense>
+      <Card id="campus">
+        <CardHeader title="For colleges" description="Placement-cell plans: TPO, HOD and faculty accounts, a live placement pipeline and AI job matches your staff approve. Invoiced yearly to the college; students don't pay." />
+        <div className="space-y-3 p-5 pt-3">
+          <CampusPlans compact onPick={(plan) => (window.location.href = `/campus-pricing?plan=${plan}#enquire`)} />
+          <a href="/campus-pricing" className="inline-block text-[13px] font-medium text-cobalt-text">
+            Compare campus plans in full →
+          </a>
+        </div>
+      </Card>
     </div>
   );
 }

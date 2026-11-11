@@ -218,7 +218,7 @@ async def leave_college(user: RealUserDep, session: SessionDep) -> None:
 
 
 async def officer(user: UserDep, session: SessionDep) -> OrgMember:
-    m = (await session.execute(select(OrgMember).where(OrgMember.user_id == user.id, OrgMember.role == "officer"))).scalar_one_or_none()
+    m = (await session.execute(select(OrgMember).where(OrgMember.user_id == user.id, OrgMember.role.in_(["officer", "tpo", "hod", "teacher"])))).scalar_one_or_none()
     if m is None:
         raise HTTPException(403, "For placement-cell officers only")
     return m
@@ -253,9 +253,13 @@ async def college_dashboard(member: OfficerDep, session: SessionDep) -> dict:
         ).scalars().all()
         scoped_matches = (await scoped.execute(select(JobMatch).where(JobMatch.user_id.in_([p.user_id for p in visible]), JobMatch.applied_at.is_not(None)))).unique().scalars().all() if visible else []
     users_by_id = {u.id: u for u, _ in students}
+    from app.services.placement import in_department
+
     for p in visible:
         u = users_by_id.get(p.user_id)
         if u is None or u.id not in sharing:  # belt and braces: the app checks too
+            continue
+        if not in_department(member, p.academics):  # HODs and teachers: their department only
             continue
         mine = [m for m in scoped_matches if m.user_id == u.id]
         per_student.append(
@@ -290,6 +294,10 @@ async def college_dashboard(member: OfficerDep, session: SessionDep) -> dict:
 
 @router.post("/college/drives", status_code=status.HTTP_201_CREATED)
 async def post_drive(body: DriveIn, member: OfficerDep, session: SessionDep) -> dict:
+    from app.services.placement import can
+
+    if not can(member, "drives"):
+        raise HTTPException(403, "Teachers can view drives; a TPO or HOD posts them")
     d = CampusDrive(org_id=member.org_id, **{**body.model_dump(mode="json"), "register_by": body.register_by})
     session.add(d)
     await session.flush()

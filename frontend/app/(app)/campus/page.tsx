@@ -8,6 +8,7 @@ import Link from "next/link";
 import { useState, type FormEvent } from "react";
 
 import { DriveForm } from "@/components/drive-form";
+import { MyPlacements } from "@/components/placement-cell";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardHeader } from "@/components/ui/card";
@@ -186,6 +187,7 @@ export default function CampusPage() {
         <StatCard label="Selected" value={s.selected} />
         <StatCard label="Off-campus" value={s.off_campus_applied} />
       </div>
+      <MyPlacements />
 
       {adding && (
         <Card className="p-5">

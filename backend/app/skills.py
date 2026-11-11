@@ -161,14 +161,59 @@ def canonicalize(skill: str) -> str:
     return hits[0] if hits else skill.strip()
 
 
+# A skills taxonomy: tools in one family are close substitutes, so a PyTorch developer is a partial match for a
+# TensorFlow role (they share the concepts and learn the other quickly). Names are this module's canonical forms.
+SKILL_FAMILIES: dict[str, set[str]] = {
+    "deep learning frameworks": {"PyTorch", "TensorFlow", "Keras", "JAX"},
+    "classical ML": {"scikit-learn", "XGBoost", "LightGBM"},
+    "LLM tooling": {"LangChain", "LlamaIndex", "Hugging Face", "OpenAI API", "LLMs", "RAG"},
+    "frontend frameworks": {"React", "Angular", "Vue", "Svelte", "Next.js"},
+    "Node backends": {"Node.js", "Express", "NestJS"},
+    "Python web": {"Django", "Flask", "FastAPI"},
+    "JVM languages": {"Java", "Kotlin", "Scala"},
+    "systems languages": {"C++", "C", "Rust", "Go"},
+    "relational databases": {"PostgreSQL", "MySQL", "SQL Server", "Oracle", "SQLite"},
+    "NoSQL": {"MongoDB", "DynamoDB", "Cassandra", "Redis", "Firebase"},
+    "cloud": {"AWS", "GCP", "Azure"},
+    "containers": {"Docker", "Kubernetes"},
+    "CI/CD": {"CI/CD", "GitHub Actions", "Jenkins", "GitLab"},
+    "BI tools": {"Tableau", "Power BI", "Looker"},
+    "mobile": {"Android", "iOS", "Flutter", "React Native", "Swift"},
+    "big data": {"Spark", "Hadoop", "Hive", "Kafka", "Airflow"},
+    "design tools": {"Figma", "Adobe XD", "Sketch"},
+}
+_FAMILY_OF: dict[str, str] = {m.lower(): fam for fam, members in SKILL_FAMILIES.items() for m in members}
+ADJACENT_CREDIT = 0.6
+
+
+def adjacent(resume_skills: list[str], job_skills: list[str]) -> list[tuple[str, str]]:
+    """(job skill, the candidate's sibling skill) for job skills they lack but have a close substitute for."""
+    have = {s.lower() for s in resume_skills}
+    by_family: dict[str, str] = {}
+    for s in resume_skills:
+        fam = _FAMILY_OF.get(s.lower())
+        if fam:
+            by_family.setdefault(fam, s)
+    out = []
+    for j in job_skills:
+        if j.lower() in have:
+            continue
+        fam = _FAMILY_OF.get(j.lower())
+        if fam and fam in by_family:
+            out.append((j, by_family[fam]))
+    return out
+
+
 def skill_overlap(resume_skills: list[str], job_skills: list[str]) -> tuple[list[str], list[str], float]:
-    """(strengths, gaps, 0-100 coverage of the job's skills)."""
+    """(strengths, gaps, 0-100 coverage of the job's skills). A gap the candidate has a close substitute for (same
+    family in the taxonomy) still counts as a gap, but earns partial coverage."""
     have = {s.lower() for s in resume_skills}
     strengths = [s for s in job_skills if s.lower() in have]
     gaps = [s for s in job_skills if s.lower() not in have]
     if not job_skills:
         return [], [], 50.0
-    return strengths, gaps, 100.0 * len(strengths) / len(job_skills)
+    near = len(adjacent(resume_skills, job_skills))
+    return strengths, gaps, 100.0 * (len(strengths) + ADJACENT_CREDIT * near) / len(job_skills)
 
 
 # A heading-like line that starts the part of a posting describing the job ("Requirements",

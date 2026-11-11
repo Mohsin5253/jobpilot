@@ -122,7 +122,7 @@ async def list_orgs(_: AdminDep, session: SessionDep) -> list[dict]:
     out = []
     for o in rows:
         n = (await session.execute(select(func.count()).where(OrgMember.org_id == o.id, OrgMember.role == "student"))).scalar_one()
-        officers = (await session.execute(select(User.email).join(OrgMember, OrgMember.user_id == User.id).where(OrgMember.org_id == o.id, OrgMember.role == "officer"))).scalars().all()
+        officers = (await session.execute(select(User.email).join(OrgMember, OrgMember.user_id == User.id).where(OrgMember.org_id == o.id, OrgMember.role.in_(["officer", "tpo"])))).scalars().all()
         out.append({"id": str(o.id), "name": o.name, "invite_code": o.invite_code, "students": n, "officers": officers})
     return out
 
@@ -154,8 +154,8 @@ async def add_officer(org_id: str, body: OfficerIn, _: AdminDep, session: Sessio
         raise HTTPException(404, "College or account not found")
     member = (await session.execute(select(OrgMember).where(OrgMember.user_id == user.id))).scalar_one_or_none()
     if member:
-        member.org_id, member.role = org.id, "officer"
+        member.org_id, member.role = org.id, "tpo"
     else:
-        session.add(OrgMember(org_id=org.id, user_id=user.id, role="officer"))
+        session.add(OrgMember(org_id=org.id, user_id=user.id, role="tpo"))
     await session.commit()
     return {"college": org.name, "officer": user.email}

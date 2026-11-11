@@ -1,41 +1,77 @@
 "use client";
 
-import { Building2, Copy, Plus } from "lucide-react";
+import { Copy, Plus } from "lucide-react";
 import { useState } from "react";
 import { toast } from "sonner";
 
 import { AlumniUpload, CircularImport } from "@/components/campus-v2";
 import { DriveForm } from "@/components/drive-form";
+import { CampusJobs, PipelineBoard, StaffJoin, StaffPanel, StudentAudit, useStaffMe } from "@/components/placement-cell";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardHeader } from "@/components/ui/card";
-import { EmptyState, PageHeader, Skeleton } from "@/components/ui/misc";
+import { PageHeader, Skeleton } from "@/components/ui/misc";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useAddDrive, useCollege, useDeleteDrive } from "@/lib/queries";
-import { ago } from "@/lib/utils";
 
 export default function CollegePage() {
   const { data: d, isLoading, error } = useCollege();
+  const me = useStaffMe();
   const add = useAddDrive(true);
   const del = useDeleteDrive(true);
   const [adding, setAdding] = useState(false);
-  if (error) return <EmptyState icon={<Building2 className="size-5" />} title="For placement officers" description="Ask the JobPilot team to add you as your college’s placement officer." />;
-  if (isLoading || !d) return <Skeleton agent="pilot" className="min-h-96" />;
+  const [tab, setTab] = useState("pipeline");
+  if (error || me.error)
+    return (
+      <div className="space-y-6">
+        <PageHeader eyebrow="Placement cell" title="College staff" description="For TPOs, heads of department and faculty running placements." />
+        <StaffJoin />
+      </div>
+    );
+  if (isLoading || !d || !me.data) return <Skeleton agent="pilot" className="min-h-96" />;
   const c = d.cohort;
+  const m = me.data;
+  const canDrives = m.permissions.includes("drives");
   return (
     <div className="space-y-6">
       <PageHeader
-        eyebrow="Placement cell"
+        eyebrow={`Placement cell · ${m.label}${m.department && m.role !== "tpo" ? ` · ${m.department}` : ""}`}
         title={d.college.name}
         description={`${d.students} students · ${d.sharing} sharing their progress · ${d.active_7d} active this week`}
         action={
           <div className="flex gap-2">
-            <Button onClick={() => (navigator.clipboard.writeText(d.college.invite_code), toast.success("Invite code copied"))}>
-              <Copy className="size-4" /> Code {d.college.invite_code}
+            <Button onClick={() => (navigator.clipboard.writeText(d.college.invite_code), toast.success("Student invite code copied"))}>
+              <Copy className="size-4" /> Student code {d.college.invite_code}
             </Button>
-            <Button variant="primary" onClick={() => setAdding(true)}><Plus className="size-4" /> Post a drive</Button>
+            {canDrives && (
+              <Button variant="primary" onClick={() => (setTab("overview"), setAdding(true))}>
+                <Plus className="size-4" /> Post a drive
+              </Button>
+            )}
           </div>
         }
       />
+      <Tabs value={tab} onValueChange={setTab}>
+        <TabsList>
+          <TabsTrigger value="pipeline">Pipeline & approvals</TabsTrigger>
+          <TabsTrigger value="students">Students</TabsTrigger>
+          <TabsTrigger value="jobs">Jobs</TabsTrigger>
+          <TabsTrigger value="overview">Drives & cohort</TabsTrigger>
+          <TabsTrigger value="staff">Staff</TabsTrigger>
+        </TabsList>
+        <TabsContent value="pipeline" className="mt-4">
+          <PipelineBoard me={m} />
+        </TabsContent>
+        <TabsContent value="students" className="mt-4">
+          <StudentAudit />
+        </TabsContent>
+        <TabsContent value="jobs" className="mt-4">
+          <CampusJobs me={m} />
+        </TabsContent>
+        <TabsContent value="staff" className="mt-4">
+          <StaffPanel me={m} />
+        </TabsContent>
+        <TabsContent value="overview" className="mt-4 space-y-6">
       <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
         {[
           ["Applications", c?.applied ?? 0],
@@ -74,7 +110,7 @@ export default function CollegePage() {
                     {x.eligible_students} eligible · {Object.entries(x.statuses ?? {}).map(([k, v]) => `${v} ${k.replace("_", " ")}`).join(" · ") || "no responses yet"}
                   </div>
                 </div>
-                <Button size="sm" variant="ghost" onClick={() => del.mutate(x.id)}>Remove</Button>
+                {canDrives && <Button size="sm" variant="ghost" onClick={() => del.mutate(x.id)}>Remove</Button>}
               </div>
             ))}
           </div>
@@ -92,33 +128,8 @@ export default function CollegePage() {
         </Card>
       </div>
 
-      <Card>
-        <CardHeader title="Students sharing their progress" description="Only students who opted in are listed; everyone counts in the totals above." />
-        <div className="overflow-x-auto p-5">
-          <table className="w-full text-[13px]">
-            <thead className="text-left text-[11.5px] tracking-wide text-subtle uppercase">
-              <tr>
-                {["Student", "Branch", "CGPA", "Applied", "Interviews", "Offers", "PPO", "Last active"].map((h) => <th key={h} className="pb-2 font-medium">{h}</th>)}
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-border">
-              {d.per_student.map((s) => (
-                <tr key={s.email}>
-                  <td className="py-2"><div className="font-medium">{s.name}</div><div className="text-[11.5px] text-subtle">{s.email}</div></td>
-                  <td className="py-2">{s.branch || "—"}</td>
-                  <td className="py-2 font-mono">{s.cgpa ?? "—"}</td>
-                  <td className="py-2 font-mono">{s.applications}</td>
-                  <td className="py-2 font-mono">{s.interviews}</td>
-                  <td className="py-2 font-mono">{s.offers}</td>
-                  <td className="py-2 font-mono">{s.ppo}</td>
-                  <td className="py-2 text-subtle">{s.last_active ? ago(s.last_active) : "—"}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-          {d.per_student.length === 0 && <p className="pt-3 text-[13px] text-subtle">No students have opted in yet.</p>}
-        </div>
-      </Card>
+        </TabsContent>
+      </Tabs>
     </div>
   );
 }

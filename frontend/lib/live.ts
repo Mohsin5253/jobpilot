@@ -52,6 +52,8 @@ export function useLiveUpdates() {
     });
     // A finished run can change the open job too (Prepare application: tailored resume, draft, ATS comparison).
     es.addEventListener("run_updated", () => refresh("overview", "runs", "drafts", "matches", "match", "ats-compare"));
+    // The placement cell: a proposal arrived, a student moved a round, staff changed.
+    es.addEventListener("campus_update", () => refresh("college", "college-pipeline", "college-students", "college-staff", "college-jobs", "campus-placements", "notifications", "matches"));
 
     return () => {
       es.close();
