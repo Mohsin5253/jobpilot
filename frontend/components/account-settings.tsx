@@ -7,6 +7,7 @@ import { useRouter } from "next/navigation";
 import { useEffect, useState, type FormEvent } from "react";
 import { toast } from "sonner";
 
+import { usePaymentSync } from "@/components/billing";
 import { Badge } from "@/components/ui/badge";
 import { Button, buttonClass } from "@/components/ui/button";
 import { Card, CardHeader } from "@/components/ui/card";
@@ -207,6 +208,7 @@ function Meter({ label, used, limit, format = (n: number) => String(n) }: { labe
 export function PlanCard() {
   const { data: me } = useMe();
   const { data: u } = useUsage();
+  usePaymentSync();
   if (!u) return <Skeleton className="h-48" />;
   return (
     <Card id="plan">

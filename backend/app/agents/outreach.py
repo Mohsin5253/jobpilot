@@ -47,6 +47,37 @@ invented, no claims about the recipient. Sign off with the candidate's first nam
 version under 300 characters."""
 
 
+# What hiring teams in each field look for in a first email from an intern or fresher (used by the AI draft and the
+# template): the proof to point to and the tone.
+OUTREACH_NORMS = {
+    "software": "Lead with one shipped project and its tech stack; link the GitHub repo or a live demo; mention DSA/coding profile only if strong.",
+    "data_science": "Lead with one model or analysis and its metric (accuracy, F1, uplift); link the notebook, repo or Kaggle; name the libraries actually used.",
+    "data_analytics": "Lead with a dashboard or analysis and the business decision it informed; name SQL/Excel/Power BI where used.",
+    "product": "Lead with a product insight or teardown and a metric you'd move; show user empathy and structured thinking, briefly.",
+    "design": "Lead with the portfolio link and one case study's outcome; keep it visual-first and short.",
+    "marketing": "Lead with a campaign or content result in numbers (reach, CTR, followers, leads); link the work.",
+    "finance": "Lead with relevant coursework or certifications (CA/CFA/NISM) and one analysis; keep it formal and precise.",
+    "consulting": "Lead with a case-competition result or structured project; crisp, formal, one clear ask.",
+    "sales": "Lead with a result in numbers (targets, leads, revenue); confident and brief, ask for a short call.",
+    "hr": "Lead with recruiting, events or people-ops experience; warm, professional tone.",
+    "core_engineering": "Lead with a lab, final-year project or internship with tools used (CAD, MATLAB, PLC); mention certifications if any.",
+    "operations": "Lead with a process you improved and its measurable effect; practical tone.",
+}
+
+
+def _industry(job) -> str:
+    from app.services.ats import detect_industry
+
+    return detect_industry(job.title, job.description or "")[0]
+
+
+def _proof_url(resume: ResumeData, industry: str) -> str:
+    from app.ats_lexicon import INDUSTRIES
+
+    hints = INDUSTRIES[industry].proof_links if industry in INDUSTRIES else ()
+    return next((link for link in resume.links if any(h in link.lower() for h in hints)), "")
+
+
 def _first_name(resume: ResumeData) -> str:
     return (resume.name or "").split(" ")[0] or "there"
 
@@ -70,7 +101,11 @@ def template_draft(resume: ResumeData, match: JobMatch, bullets: list[dict], rec
     ]
     if strengths:
         lines.append(f"I work with {strengths}" + (f", most recently: {proof[0].lower() + proof[1:]}." if proof else "."))
+    url = _proof_url(resume, _industry(job))
+    if url:
+        lines.append(f"You can see my work here: {url}")
     lines += [
+        "I've attached my resume, tailored for this role.",
         f"I'd appreciate a quick chat about how I could contribute to {job.company}'s team.",
         "",
         "Thanks,",
@@ -147,6 +182,8 @@ async def draft_one(match: JobMatch, resume: ResumeData, resume_text: str, ctx: 
         if recipient and recipient.kind == "person" and recipient.first_name
         else f"Recipient: the {job.company} hiring team\n"
     )
+    industry = _industry(job)
+    url = _proof_url(resume, industry)
     try:
         out = await get_llm().structured(
             agent="outreach",
@@ -154,6 +191,9 @@ async def draft_one(match: JobMatch, resume: ResumeData, resume_text: str, ctx: 
             system=SYSTEM,
             prompt=(
                 to_line
+                + f"Field norms for this email: {OUTREACH_NORMS.get(industry, OUTREACH_NORMS['software'])}\n"
+                + (f"Proof-of-work link to include: {url}\n" if url else "")
+                + "Mention that the resume (tailored for this role) is attached.\n"
                 + f"Candidate: {resume.name}\n"
                 f"Education: {'; '.join(f'{e.degree} {e.school}'.strip() for e in resume.education) or 'n/a'}\n"
                 f"Relevant experience (already tailored, factual):\n"

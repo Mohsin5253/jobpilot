@@ -139,6 +139,53 @@ async def tailor_one(match: JobMatch, resume: ResumeData, resume_text: str, ctx:
     return bullets, report, model
 
 
+class TargetedSummary(BaseModel):
+    summary: str = Field(description="2-3 sentences, 30-60 words, aimed at this role")
+
+
+SUMMARY_SYSTEM = """Write the summary at the top of a resume tailored to one job, for a student or fresher. 2-3 sentences, 30-60
+words, no first person, no clichés. Name the role. Use ONLY facts from the resume given (degree, college, skills,
+projects, experience) and lead with the ones this job asks for. Never invent tools, numbers, results or experience."""
+
+
+async def targeted_summary(match: JobMatch, resume: ResumeData, resume_text: str, ctx: CallContext) -> str:
+    """A summary aimed at this job, from the resume's own facts. Checked like any rewrite: a summary naming a tool
+    the resume doesn't show is replaced by the rule-based one."""
+    from app.services.ats import detect_industry
+    from app.services.resume_improve import template_summary
+
+    job = match.job
+    wanted = {s.lower() for s in [*(job.skills or []), *match.strengths]}
+    top = sorted(resume.skills, key=lambda s: 0 if s.lower() in wanted else 1)[:6]
+    fallback = template_summary(resume, detect_industry(job.title, job.description or "")[0], top).replace("Seeking", f"Applying for the {job.title} role; seeking", 1)
+    if not (resume.skills or resume.experience or resume.projects):
+        return resume.summary or ""
+    try:
+        out = await get_llm().structured(
+            agent="tailor",
+            tier="fast",
+            system=SUMMARY_SYSTEM,
+            prompt=(
+                f"Job: {job.title} at {job.company}\nWhat it asks for: {', '.join((job.skills or [])[:10]) or role_digest(job.description, 600)}\n"
+                f"Education: {'; '.join(f'{e.degree} {e.school}'.strip() for e in resume.education) or 'n/a'}\nSkills: {', '.join(resume.skills)}\n"
+                f"Experience: {'; '.join(f'{e.title} at {e.organization}' for e in resume.experience) or 'none'}\nProjects: {'; '.join(p.name for p in resume.projects) or 'none'}\n"
+                f"Current summary: {resume.summary or '(none)'}"
+            ),
+            schema=TargetedSummary,
+            ctx=ctx,
+            max_tokens=400,
+        )
+        text = out.summary.strip()
+        allowed = resume_skillset(resume, resume_text)
+        from app.agents.guard import check_freeform
+
+        if text and "[" not in text and 15 <= len(text.split()) <= 90 and not check_freeform(text, allowed):
+            return text
+    except (LLMUnavailable, LLMOutputError):
+        pass
+    return fallback
+
+
 async def run_tailor(state: PipelineState) -> dict:
     async with agent_step(state, "tailor") as step:
         profile, resume, _ = await load_profile(state["user_id"])
@@ -147,12 +194,17 @@ async def run_tailor(state: PipelineState) -> dict:
             matches = (await s.execute(select(JobMatch).where(JobMatch.id.in_(ids)))).scalars().all()
 
         results = await asyncio.gather(*(tailor_one(m, resume, profile.resume_text, ctx_of(state), profile.evidence) for m in matches))
+        summaries = await asyncio.gather(*(targeted_summary(m, resume, profile.resume_text, ctx_of(state)) for m in matches))
         rows, reverted = [], 0
-        for m, (bullets, report, model) in zip(matches, results):
-            if not bullets:
+        has_resume = bool(resume.skills or resume.summary or resume.experience or resume.projects)
+        for m, (bullets, report, model), summary in zip(matches, results, summaries):
+            if not bullets and not has_resume:
                 continue
+            # A resume without bullet points still gets a tailored version (job's skills first, sections in the
+            # job's order), so Outreach drafts the application instead of the run ending with nothing.
             reverted += sum(b["reverted"] for b in bullets)
-            rows.append({"id": uuid.uuid4(), "match_id": m.id, "bullets": bullets, "guard_report": report, "model": model})
+            # The job-targeted summary rides in the guard report (it was checked by the same guard).
+            rows.append({"id": uuid.uuid4(), "match_id": m.id, "bullets": bullets, "guard_report": {**report, "summary": summary}, "model": model})
         if rows:
             async with session_scope() as s:
                 stmt = insert(TailoredResume).values(rows)

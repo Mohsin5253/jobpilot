@@ -51,11 +51,58 @@ const PRO_FEATURES = [
   "10× the AI budget for scoring and tailoring",
 ];
 
-export const inr = (n: number) => `₹${n.toLocaleString("en-IN")}`;
+export const inr = (n: number | null | undefined) => (typeof n === "number" && Number.isFinite(n) ? `₹${n.toLocaleString("en-IN")}` : "—");
+
+// The server's prices win; these only fill gaps while an older API version is still deploying (they match its defaults).
+const FALLBACK_PRICES: Record<string, number> = { week_pass: 79, pro_monthly: 299, year_pass: 2499 };
+const pricesOf = (cfg: PayConfig) => ({ ...FALLBACK_PRICES, ...(cfg.prices ?? {}) });
 const fmtDate = (iso: string) => new Date(iso).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" });
 
 export function usePayConfig() {
   return useQuery({ queryKey: ["pay-config"], queryFn: () => api.get<PayConfig>("/payments/config") });
+}
+
+type SyncResult = { changed: string[]; plan: string; plan_expires_at: string | null; subscribed: boolean };
+const PAID_LABEL: Record<string, string> = { week_pass_paid: "Week Pass", pro_month_paid: "1 month of Pro", year_pass_paid: "Year Pass", pro_active: "Pro" };
+
+/**
+ * Asks the server to check Razorpay for this student's recent payments, so a purchase shows up even if Razorpay's
+ * webhook was missed. Runs when Billing or Settings opens; after a return from Razorpay (?paid=) it keeps checking
+ * for about a minute until the plan is active.
+ */
+export function usePaymentSync({ waitForPaid = false }: { waitForPaid?: boolean } = {}) {
+  const qc = useQueryClient();
+  const { data: me } = useMe();
+  const ran = useRef(false);
+  useEffect(() => {
+    if (!me || me.is_demo || ran.current) return;
+    ran.current = true;
+    let stop = false;
+    const refresh = () => ["me", "pay-config", "usage", "payments"].forEach((k) => qc.invalidateQueries({ queryKey: [k] }));
+    (async () => {
+      for (let i = 0; i < (waitForPaid ? 12 : 1) && !stop; i++) {
+        try {
+          const r = await api.post<SyncResult>("/payments/sync");
+          if (r.changed.length) {
+            toast.success(`${r.changed.map((c) => PAID_LABEL[c] ?? "Your plan").join(", ")} is active. Thank you!`);
+            refresh();
+            return;
+          }
+          if (r.plan === "pro") {
+            if (waitForPaid) refresh();
+            return;
+          }
+        } catch {
+          return; // payments not configured, or offline: the page already shows the current plan
+        }
+        await new Promise((res) => setTimeout(res, 5000));
+      }
+      if (waitForPaid) toast("Still waiting for Razorpay to confirm. If you were charged, your plan will update shortly; reopen this page in a minute.");
+    })();
+    return () => {
+      stop = true;
+    };
+  }, [me, qc, waitForPaid]);
 }
 
 /** A single-use Razorpay UPI QR for a fixed amount, shown in place. Polls until Razorpay confirms the payment. */
@@ -166,14 +213,16 @@ export function PlansAndPayments() {
   const [busy, setBusy] = useState<string | null>(null);
   const [scan, setScan] = useState<string | null>(null);
   const [confirm, setConfirm] = useState(false);
+  const [showTiers, setShowTiers] = useState(false);
+  usePaymentSync({ waitForPaid: !!params.get("paid") });
 
   useEffect(() => {
-    if (params.get("paid")) toast.success("Payment received. Your plan updates within a minute of Razorpay confirming it.");
+    if (params.get("paid")) toast.message("Checking your payment with Razorpay…");
     if (want) document.getElementById(`tier-${want === "pro" ? "monthly" : want}`)?.scrollIntoView({ behavior: "smooth", block: "center" });
   }, [params, want]);
 
   if (!cfg || !me) return <Skeleton className="h-96" />;
-  const p = cfg.prices;
+  const p = pricesOf(cfg);
   const tiers: Tier[] = [
     { id: "week_pass", name: "Week Pass", icon: Zap, price: p.week_pass, per: "once", length: "7 days of Pro", renews: "Never renews", bestFor: "A placement week or a deadline sprint", perDay: inr(Math.round(p.week_pass / 7)) },
     {
@@ -266,7 +315,18 @@ export function PlansAndPayments() {
         </Card>
       )}
 
+      {/* Already on Pro: buying again is tucked away (to extend, or switch to a longer pass). */}
+      {isPro && !showTiers && !want && (
+        <div className="flex flex-wrap items-center justify-between gap-3 rounded-[var(--radius-card)] border border-border p-4 text-[13.5px] text-text-2">
+          <span>Your Pro is active, so there's nothing to buy. Passes bought now add to the time you have left.</span>
+          <Button size="sm" variant="ghost" onClick={() => setShowTiers(true)}>
+            Extend or change your plan
+          </Button>
+        </div>
+      )}
+
       {/* The three ways to get Pro */}
+      {(!isPro || showTiers || want) && (
       <div className="grid gap-4 lg:grid-cols-3">
         {tiers.map((t) => {
           const highlighted = want === t.id || (want === "pro" && t.id === "monthly");
@@ -332,6 +392,7 @@ export function PlansAndPayments() {
           );
         })}
       </div>
+      )}
 
       {/* Side by side */}
       <Card>
@@ -429,7 +490,7 @@ export function UpgradeBanner() {
   const { data: me } = useMe();
   const { data: cfg } = usePayConfig();
   if (!me || me.is_demo || me.plan !== "free" || !cfg) return null;
-  const p = cfg.prices;
+  const p = pricesOf(cfg);
   return (
     <div className="mb-5 flex flex-wrap items-center justify-between gap-3 rounded-[var(--radius-card)] border border-[color-mix(in_oklab,var(--cobalt)_35%,transparent)] bg-cobalt-subtle px-4 py-3">
       <div className="text-[13.5px]">

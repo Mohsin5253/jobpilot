@@ -6,6 +6,7 @@ import { Field, Input, Textarea } from "@/components/ui/input";
 import { Segmented } from "@/components/ui/misc";
 import { api } from "@/lib/api";
 import { useMatches } from "@/lib/queries";
+import type { Match } from "@/lib/types";
 
 export type Target = { kind: "field" | "match" | "paste"; industry: string; matchId: string; title: string; description: string };
 
@@ -25,6 +26,9 @@ const selectCls = "h-9 w-full rounded-[var(--radius-control)] border border-bord
 export function AtsTarget({ value, onChange }: { value: Target; onChange: (t: Target) => void }) {
   const { data: industries } = useQuery({ queryKey: ["ats-industries"], queryFn: () => api.get<{ key: string; name: string }[]>("/ats/industries"), staleTime: Infinity });
   const { data: matches } = useMatches({ limit: 60, sort: "score" });
+  // A job opened from its own page may not be in the top 60: load it so the dropdown can show it.
+  const listed = !value.matchId || !!matches?.items.some((m) => m.id === value.matchId);
+  const { data: picked } = useQuery({ queryKey: ["match", value.matchId], queryFn: () => api.get<Match>(`/matches/${value.matchId}`), enabled: !!matches && !listed });
   return (
     <div className="space-y-3">
       <Segmented
@@ -51,6 +55,11 @@ export function AtsTarget({ value, onChange }: { value: Target; onChange: (t: Ta
           <Field label="Job">
             <select className={selectCls} value={value.matchId} onChange={(e) => onChange({ ...value, matchId: e.target.value })} aria-label="Job">
               <option value="">Choose a job…</option>
+              {!listed && picked && (
+                <option value={picked.id}>
+                  {picked.job.title} · {picked.job.company}
+                </option>
+              )}
               {matches?.items.map((m) => (
                 <option key={m.id} value={m.id}>
                   {m.job.title} · {m.job.company}

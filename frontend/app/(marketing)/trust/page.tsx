@@ -72,7 +72,7 @@ const TOC = [
 const SUBPROCESSORS: [string, string, string][] = [
   ["Render", "Runs the API, the agents and the Postgres database", "Singapore"],
   ["Vercel", "Hosts the website", "Global edge network"],
-  ["Groq", "AI model provider: reads your resume and job descriptions to score fit and write drafts", "United States"],
+  ["Groq", "AI model provider: reads your resume and job descriptions to score fit and write drafts, reviews interview code, and transcribes spoken interview answers (audio is not stored)", "United States"],
   ["Adzuna, JSearch, Hunter.io", "Job listings and public company contacts. They receive search terms and company names, never your resume", "Various"],
   ["GitHub, Codeforces", "Public profile data for your proof page. They receive only the handle you link", "United States, Russia"],
   ["Our transactional email provider", "Password resets and match alerts", "Depends on the provider"],

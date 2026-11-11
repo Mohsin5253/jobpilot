@@ -8,9 +8,11 @@ import { toast } from "sonner";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardHeader } from "@/components/ui/card";
+import { AiImprove } from "@/components/resume/ai-improve";
 import { ScoreBar, ScoreRing } from "@/components/ui/score-ring";
 import { api } from "@/lib/api";
 import type { AtsCheck, AtsReport, BulletRewrite } from "@/lib/ats-types";
+import type { Resume } from "@/lib/types";
 import { cn } from "@/lib/utils";
 
 const GRADE_TONE = { Excellent: "success", Good: "accent", Fair: "warning", "Needs work": "danger" } as const;
@@ -47,7 +49,19 @@ function CheckIcon({ s }: { s: AtsCheck["status"] }) {
 }
 
 /** The full report: score parts, gaps, ranked improvements, keywords, every check, and bullets to fix. */
-export function AtsReportView({ r, onUseBullet, jobTitle, jobDescription }: { r: AtsReport; onUseBullet?: (id: string, text: string) => void; jobTitle?: string; jobDescription?: string }) {
+export function AtsReportView({
+  r,
+  onUseBullet,
+  jobTitle,
+  jobDescription,
+  improve,
+}: {
+  r: AtsReport;
+  onUseBullet?: (id: string, text: string) => void;
+  jobTitle?: string;
+  jobDescription?: string;
+  improve?: { target: Record<string, unknown>; resume?: Resume; onOpenInBuilder?: (r: Resume) => void };
+}) {
   const hard = r.keywords.missing.filter((k) => !k.soft);
   const [showPass, setShowPass] = useState(false);
   const failing = r.checks.filter((c) => c.status !== "pass");
@@ -56,6 +70,12 @@ export function AtsReportView({ r, onUseBullet, jobTitle, jobDescription }: { r:
     <div className="space-y-4">
       <Card className="p-5">
         <ScoreHeader r={r} />
+        {improve && (
+          <div className="mt-4 flex flex-wrap items-center gap-3 rounded-[var(--radius-card)] border border-[color-mix(in_oklab,var(--cobalt)_30%,transparent)] bg-cobalt-subtle p-3">
+            <AiImprove report={r} target={improve.target} resume={improve.resume} onOpenInBuilder={improve.onOpenInBuilder} />
+            <span className="text-[12.5px] text-text-2">Applies these fixes to your resume, adds the keywords you confirm, and gives you a clean PDF or Word file.</span>
+          </div>
+        )}
         <div className="mt-5 grid gap-3 sm:grid-cols-2">
           {r.breakdown.map((b) => (
             <ScoreBar key={b.key} label={`${b.label} · ${b.weight}%`} value={b.score} hint={`${b.points} of ${b.weight} points`} />

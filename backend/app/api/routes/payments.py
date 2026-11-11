@@ -9,6 +9,7 @@ from app.api.deps import RealUserDep, SessionDep, UserDep
 from app.config import settings
 from app.models import Payment
 from app.services import payments as pay
+from app.services.ratelimit import hit
 
 router = APIRouter(tags=["payments"])
 
@@ -78,7 +79,20 @@ async def qr_status(payment_id: str, user: UserDep, session: SessionDep) -> dict
     p = await session.get(Payment, payment_id)
     if p is None or p.user_id != user.id:
         raise HTTPException(404, "No such payment")
+    if p.status == "created":  # don't wait for the webhook: ask Razorpay whether this QR was paid
+        await pay.sync_user(session, user, only=p)
+        await session.commit()
     return {"status": p.status, "plan": user.plan, "plan_expires_at": user.plan_expires_at.isoformat() if user.plan_expires_at else None}
+
+
+@router.post("/payments/sync")
+async def sync(user: RealUserDep, session: SessionDep) -> dict:
+    """Checks Razorpay for this student's recent checkouts and applies any that were paid (in case a webhook was
+    missed). Called by the Billing and Settings pages and after returning from Razorpay."""
+    await hit("payments_sync", str(user.id))
+    changed = await pay.sync_user(session, user)
+    await session.commit()
+    return {"changed": changed, "plan": user.plan, "plan_expires_at": user.plan_expires_at.isoformat() if user.plan_expires_at else None, "subscribed": bool(user.razorpay_subscription_id)}
 
 
 @router.post("/payments/cancel")

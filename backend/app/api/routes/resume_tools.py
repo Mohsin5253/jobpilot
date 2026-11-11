@@ -165,3 +165,30 @@ async def improve_bullet(body: BulletIn, user: UserDep, session: SessionDep) -> 
     except (LLMUnavailable, LLMOutputError):
         pass
     return out
+
+
+class ImproveIn(ScoreIn):
+    confirmed_keywords: list[str] = Field(default_factory=list, max_length=30, description="Missing keywords the student confirms they have used")
+
+
+@router.post("/resume/ai-improve")
+async def ai_improve(body: ImproveIn, user: UserDep, session: SessionDep) -> dict:
+    """Applies the report's fixes to the resume itself: stronger bullets (facts kept), a summary from the resume's own
+    facts, confirmed keywords added to Skills, skills ordered by what's searched for. Returns the improved resume and
+    every change; nothing is saved until the student saves it."""
+    await hit("resume_tools", str(user.id))
+    raw, filename = None, None
+    if body.resume is not None:
+        resume = body.resume
+    else:
+        p = await _profile(session, user.id)
+        if p is None or not (p.resume or p.resume_text):
+            raise HTTPException(409, "Upload your resume first, or build one in the Resume builder")
+        resume, raw, filename = ResumeData.model_validate(p.resume or {}), p.resume_text or None, p.resume_filename
+    title, desc = body.job_title, body.job_description
+    if body.match_id:
+        m = await _match(session, user.id, body.match_id)
+        title, desc = m.job.title, m.job.description
+    from app.services.resume_improve import improve
+
+    return await improve(resume, body.industry, title, desc, body.confirmed_keywords, user.id, raw, filename)

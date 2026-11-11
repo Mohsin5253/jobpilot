@@ -169,10 +169,10 @@ replicas is safe, with no Redis needed.
 
 ## Payments with Razorpay (optional)
 
-Pro (₹199/month by UPI AutoPay or card) and the Week Pass (₹49, 7 days) run on Razorpay's hosted pages, so no card or
+Pro (₹299/month by UPI AutoPay or card), the Week Pass (₹79, 7 days) and the Year Pass (₹2,499, 365 days) run on Razorpay's hosted pages, so no card or
 UPI details reach JobPilot. Until the keys are set, Settings shows "Request Pro" and admins switch Pro on by hand.
 
-1. Razorpay Dashboard → **Subscriptions → Plans** → create a monthly plan of ₹199. Note its `plan_...` id.
+1. Razorpay Dashboard → **Subscriptions → Plans** → create a monthly plan of ₹299 (it must match `PRICE_PRO_INR`, default 299). Note its `plan_...` id. If you had a ₹199 plan, create a new ₹299 one and update `RAZORPAY_PRO_PLAN_ID`; existing subscribers keep their old plan until they cancel.
 2. **Settings → API keys**: generate a key pair. **Settings → Webhooks**: URL `https://<api>/api/payments/webhook`,
    a secret, and the events `payment_link.paid`, `qr_code.credited`, `subscription.activated`, `subscription.charged`,
    `subscription.cancelled`, `subscription.halted`, `subscription.completed`, `payment.failed`.
@@ -187,7 +187,7 @@ UPI details reach JobPilot. Until the keys are set, Settings shows "Request Pro"
 Pro without renewal; any UPI app can scan it. Creating `upi_qr` codes through the API is an on-demand
 Razorpay feature: ask Razorpay Support to enable "QR Codes API (upi_qr)", even if the dashboard already lets you make QR codes by hand.
 
-Plans change only on verified webhooks, each event applied once. Cancelling keeps Pro until the paid period ends.
+Plans change on verified webhooks (each event applied once) and, as a safety net, when the student opens Billing or Settings: the API asks Razorpay for the status of their recent checkouts and applies any that were paid, so a missed webhook never leaves a paying student on Free. Cancelling keeps Pro until the paid period ends.
 
 ## Forwarded job-alert emails (optional)
 

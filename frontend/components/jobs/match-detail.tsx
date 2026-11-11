@@ -1,8 +1,9 @@
 "use client";
 
 import { ArrowUpRight, Check, CircleSlash, Copy, ExternalLink, FileDown, Globe2, MapPin, ShieldAlert, ShieldCheck, Sparkles, Star } from "lucide-react";
+import { useQueryClient } from "@tanstack/react-query";
 import Link from "next/link";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 
 import { AgentAvatar } from "@/components/agents/agent-avatar";
@@ -129,7 +130,19 @@ export function MatchDetail({ id, compact = false }: { id: string; compact?: boo
   const [applyOpen, setApplyOpen] = useState(false);
 
   useEffect(() => setNotes(m?.notes ?? ""), [m?.notes]);
-  const lastDraft = m?.drafts.at(-1);
+  const qc = useQueryClient();
+  const wasPreparing = useRef(false);
+  const preparingNow = isActive(overview?.last_run) && overview?.last_run?.trigger === "prepare";
+  useEffect(() => {
+    // When a Prepare run ends, reload this job so the tailored resume and draft appear without a refresh.
+    if (wasPreparing.current && !preparingNow) {
+      qc.invalidateQueries({ queryKey: ["match", id] });
+      qc.invalidateQueries({ queryKey: ["ats-compare", id] });
+    }
+    wasPreparing.current = preparingNow;
+  }, [preparingNow, id, qc]);
+  // The application email is the main draft; a referral request (if any) comes second.
+  const lastDraft = m ? ([...m.drafts].reverse().find((d) => d.kind !== "referral") ?? m.drafts.at(-1)) : undefined;
   useEffect(() => setTo(lastDraft?.to_email ?? ""), [lastDraft?.id, lastDraft?.to_email]);
 
   if (isLoading || !m) return <Skeleton agent="matcher" className="min-h-80" />;
@@ -137,8 +150,9 @@ export function MatchDetail({ id, compact = false }: { id: string; compact?: boo
   const { job } = m;
 
   const pay = salary(job.salary_min, job.salary_max);
-  const draft = m.drafts.at(-1);
+  const draft = lastDraft;
   const preparing = busy && overview?.last_run?.trigger === "prepare";
+  const lastRun = overview?.last_run;
 
   return (
     <div className="@container/md space-y-5">
@@ -276,6 +290,7 @@ export function MatchDetail({ id, compact = false }: { id: string; compact?: boo
                 <Button variant="primary" onClick={() => prepare.mutate(m.id)} loading={prepare.isPending || preparing} disabled={busy}>
                   <Sparkles /> Prepare application
                 </Button>
+                {!preparing && lastRun?.trigger === "prepare" && lastRun.status === "failed" && <p className="max-w-sm text-[12.5px] text-[var(--error)]">The last attempt failed: {lastRun.error ?? "unknown error"}. Try again, or check Agent runs.</p>}
               </div>
             ) : (
               <>

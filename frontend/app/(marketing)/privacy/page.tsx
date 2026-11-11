@@ -34,7 +34,7 @@ export default function PrivacyPage() {
         <h2>Who processes it for us</h2>
         <ul>
           <li>Hosting and database providers that run the service.</li>
-          <li>An AI model provider (currently Groq), which processes your resume and job descriptions through its API to score fit and write drafts.</li>
+          <li>An AI model provider (currently Groq), which processes your resume and job descriptions through its API to score fit and write drafts, reviews code you write in mock interviews, and transcribes answers you speak in mock interviews (the audio is sent only for transcription and isn't stored).</li>
           <li>Job and company-contact APIs. These receive search terms and company names, never your resume.</li>
           <li>Optional error monitoring, configured so it does not receive personal data.</li>
         </ul>

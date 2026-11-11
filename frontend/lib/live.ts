@@ -50,7 +50,8 @@ export function useLiveUpdates() {
         }),
       );
     });
-    es.addEventListener("run_updated", () => refresh("overview", "runs", "drafts", "matches"));
+    // A finished run can change the open job too (Prepare application: tailored resume, draft, ATS comparison).
+    es.addEventListener("run_updated", () => refresh("overview", "runs", "drafts", "matches", "match", "ats-compare"));
 
     return () => {
       es.close();

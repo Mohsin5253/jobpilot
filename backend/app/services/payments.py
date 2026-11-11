@@ -1,12 +1,14 @@
 """Payments (F12) through Razorpay's hosted pages: no card or UPI details ever touch JobPilot.
 
-* Pro, monthly: a Razorpay Subscription (UPI AutoPay or card) on a ₹199/month plan made in the dashboard.
+* Pro, monthly: a Razorpay Subscription (UPI AutoPay or card) on a ₹299/month plan made in the dashboard.
 * Week Pass: a one-time Payment Link for 7 days of Pro, no renewal.
 * "₹99 on first interview" (experimental, OUTCOME_PLAN_ENABLED): when the student records an interview with
   evidence, we send them a payment link. Nothing is ever charged automatically.
 
-Plans change only on verified webhooks (HMAC-SHA256 with RAZORPAY_WEBHOOK_SECRET), each event id at most once.
-Paid payments get a sequential, GST-ready invoice.
+Plans change on verified webhooks (HMAC-SHA256 with RAZORPAY_WEBHOOK_SECRET), each event id at most once, and on
+reconciliation (sync_user): when the student opens Billing or comes back from Razorpay, we ask Razorpay's API for the
+status of their recent payments, so a missing or misconfigured webhook never leaves a paid student on Free. Both
+paths are idempotent: a payment grants its days exactly once. Paid payments get a sequential, GST-ready invoice.
 """
 
 import hashlib
@@ -161,9 +163,10 @@ def invoice_for(p: Payment, user: User, number: str, now: datetime) -> dict:
     return inv
 
 
-async def _mark_paid(s: AsyncSession, p: Payment, payment_id: str | None, now: datetime) -> None:
+async def _mark_paid(s: AsyncSession, p: Payment, payment_id: str | None, now: datetime) -> bool:
+    """Marks a payment paid with its invoice. False if it already was (so its days are never granted twice)."""
     if p.status == "paid":
-        return
+        return False
     user = await s.get(User, p.user_id) if p.user_id else None
     p.status, p.razorpay_id, p.paid_at = "paid", payment_id, now
     seq = (await s.execute(text("SELECT nextval('invoice_seq')"))).scalar_one()
@@ -171,11 +174,58 @@ async def _mark_paid(s: AsyncSession, p: Payment, payment_id: str | None, now: d
     p.invoice_number = f"JP/{fy}-{str(fy + 1)[-2:]}/{seq:05d}"
     if user:
         p.invoice = invoice_for(p, user, p.invoice_number, now)
+    return True
 
 
 def _grant(user: User, until: datetime) -> None:
     user.plan = "pro"
     user.plan_expires_at = max(until, user.plan_expires_at or until)
+
+
+async def _grant_pass(s: AsyncSession, p: Payment, now: datetime) -> None:
+    user = await s.get(User, p.user_id) if p.user_id else None
+    if user and p.plan in QR_PLANS:  # every one-time pass: week, one month, year
+        _grant(user, max(now, user.plan_expires_at or now) + timedelta(days=QR_PLANS[p.plan][1]))
+
+
+async def sync_user(s: AsyncSession, user: User, now: datetime | None = None, only: Payment | None = None) -> list[str]:
+    """Asks Razorpay about this student's unpaid checkouts from the last 3 days and applies any that were paid.
+    Returns what changed. Safe to call often: it only reads from Razorpay, and grants are idempotent."""
+    if not settings.payments_enabled:
+        return []
+    now = now or datetime.now(UTC)
+    rows = [only] if only is not None else (
+        await s.execute(select(Payment).where(Payment.user_id == user.id, Payment.status == "created", Payment.created_at >= now - timedelta(days=3)).order_by(Payment.created_at.desc()).limit(10))
+    ).scalars().all()
+    changed: list[str] = []
+    for p in rows:
+        ref = p.razorpay_ref or ""
+        try:
+            if ref.startswith("plink_"):
+                link = await _call("GET", f"/payment_links/{ref}")
+                if link.get("status") == "paid":
+                    pay_id = next((x.get("payment_id") for x in link.get("payments") or [] if x.get("status") == "captured"), None)
+                    if await _mark_paid(s, p, pay_id, now):
+                        await _grant_pass(s, p, now)
+                        changed.append(f"{p.plan}_paid")
+            elif ref.startswith("qr_"):
+                pays = (await _call("GET", f"/payments/qr_codes/{ref}/payments")).get("items") or []
+                ok = next((x for x in pays if x.get("status") == "captured" and int(x.get("amount", 0)) == p.amount_inr * 100), None)
+                if ok and await _mark_paid(s, p, ok.get("id"), now):
+                    await _grant_pass(s, p, now)
+                    changed.append(f"{p.plan}_paid")
+            elif ref.startswith("sub_") and p.plan == "pro_monthly":
+                sub = await _call("GET", f"/subscriptions/{ref}")
+                if sub.get("status") in ("active", "authenticated") or int(sub.get("paid_count") or 0) > 0:
+                    user.razorpay_subscription_id = ref
+                    end = datetime.fromtimestamp(sub["current_end"], UTC) if sub.get("current_end") else now + timedelta(days=31)
+                    _grant(user, end)
+                    if int(sub.get("paid_count") or 0) > 0:
+                        await _mark_paid(s, p, None, now)
+                    changed.append("pro_active")
+        except Exception as exc:  # a failed lookup must never break Billing; the webhook still applies it later
+            log.warning("payments.sync_failed", ref_kind=ref.split("_")[0], error=type(exc).__name__)
+    return changed
 
 
 async def handle_webhook(event: dict, event_id: str) -> str:
@@ -193,10 +243,8 @@ async def handle_webhook(event: dict, event_id: str) -> str:
             p = (await s.execute(select(Payment).where(Payment.razorpay_ref == link.get("id")))).scalar_one_or_none()
             if p is None:
                 return "unknown"
-            await _mark_paid(s, p, pay.get("id"), now)
-            user = await s.get(User, p.user_id) if p.user_id else None
-            if user and p.plan in QR_PLANS:  # every one-time pass: week, one month, year
-                _grant(user, max(now, user.plan_expires_at or now) + timedelta(days=QR_PLANS[p.plan][1]))
+            if await _mark_paid(s, p, pay.get("id"), now):
+                await _grant_pass(s, p, now)
             return f"{p.plan}_paid"
         if name == "qr_code.credited":
             qr = payload.get("qr_code", {}).get("entity", {})
@@ -207,10 +255,8 @@ async def handle_webhook(event: dict, event_id: str) -> str:
             if pay.get("amount") is not None and int(pay["amount"]) != p.amount_inr * 100:
                 log.warning("razorpay.qr_amount_mismatch")
                 return "amount_mismatch"
-            await _mark_paid(s, p, pay.get("id"), now)
-            user = await s.get(User, p.user_id) if p.user_id else None
-            if user and p.plan in QR_PLANS:
-                _grant(user, max(now, user.plan_expires_at or now) + timedelta(days=QR_PLANS[p.plan][1]))
+            if await _mark_paid(s, p, pay.get("id"), now):
+                await _grant_pass(s, p, now)
             return f"{p.plan}_paid"
         if name in ("subscription.activated", "subscription.charged"):
             sub = payload.get("subscription", {}).get("entity", {})

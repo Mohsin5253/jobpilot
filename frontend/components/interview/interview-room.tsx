@@ -19,6 +19,7 @@ import { Textarea } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/misc";
 import { ScoreRing } from "@/components/ui/score-ring";
 import { api } from "@/lib/api";
+import { requestMic, useDictation, type MicState } from "@/lib/dictation";
 import { cn } from "@/lib/utils";
 
 type Q = { id: string; q: string; jd_line: string; skill: string | null; kind: string; round: number; round_name: string; seconds?: number; trend?: boolean; problem?: Problem };
@@ -65,16 +66,6 @@ export type InterviewSession = {
   report: { score: number | null; verdict: string; answered: number; total: number };
 };
 
-type SR = {
-  start: () => void;
-  stop: () => void;
-  onresult: ((e: { resultIndex: number; results: ArrayLike<{ isFinal: boolean; 0: { transcript: string } }> }) => void) | null;
-  onend: (() => void) | null;
-  onerror: ((e: { error: string }) => void) | null;
-  lang: string;
-  continuous: boolean;
-  interimResults: boolean;
-};
 type IntegrityType = "tab_hidden" | "window_blur" | "fullscreen_exit" | "paste_blocked" | "copy_blocked" | "drop_blocked" | "shortcut_blocked" | "context_menu";
 
 // The code editor (CodeMirror) loads only when a coding question starts.
@@ -310,6 +301,24 @@ function Room({ s, setS }: { s: InterviewSession; setS: (s: InterviewSession) =>
 function Intro({ s, onStart }: { s: InterviewSession; onStart: () => void }) {
   const iv = INTERVIEWERS[s.meta.interviewer ?? "female"];
   const strict = s.meta.strict ?? false;
+  const [mic, setMic] = useState<MicState>("unknown");
+  const [typeOnly, setTypeOnly] = useState(false);
+  useEffect(() => {
+    // Already allowed on an earlier visit? Then there's nothing to ask.
+    navigator.permissions
+      ?.query({ name: "microphone" as PermissionName })
+      .then((p) => {
+        if (p.state === "granted") setMic("granted");
+        else if (p.state === "denied") setMic("denied");
+      })
+      .catch(() => {});
+  }, []);
+  const askMic = async () => {
+    const r = await requestMic();
+    setMic(r);
+    if (r === "denied") toast.error("Microphone blocked. Allow it from the icon in the address bar, or continue and type your answers.");
+  };
+  const canStart = mic === "granted" || typeOnly || mic === "unsupported";
   return (
     <div className="grid gap-5 lg:grid-cols-[minmax(0,420px)_minmax(0,1fr)]">
       <Interviewer3D who={iv.key} />
@@ -329,7 +338,9 @@ function Intro({ s, onStart }: { s: InterviewSession; onStart: () => void }) {
               <span>
                 {r.index + 1}. {r.name}
               </span>
-              <span className="text-text-3">{r.total} questions</span>
+              <span className="text-text-3">
+                {r.total} question{r.total === 1 ? "" : "s"}
+              </span>
             </li>
           ))}
         </ol>
@@ -350,14 +361,41 @@ function Intro({ s, onStart }: { s: InterviewSession; onStart: () => void }) {
           <p className="text-[13px] text-text-2">Practice mode: no proctoring. Switch to strict mode from the job page for a real-interview feel.</p>
         )}
         <div className="flex flex-wrap gap-2">
-          <Button variant="primary" size="lg" onClick={onStart}>
+          <div className="w-full space-y-2 rounded-[var(--radius-card)] border border-border p-3">
+            <div className="flex flex-wrap items-center justify-between gap-2 text-[13.5px]">
+              <span className="flex items-center gap-2 font-medium">
+                <Mic className="size-4" /> Microphone
+                {mic === "granted" && <Badge tone="success">Allowed</Badge>}
+                {mic === "denied" && <Badge tone="danger">Blocked</Badge>}
+              </span>
+              {mic !== "granted" && (
+                <Button size="sm" onClick={askMic}>
+                  {mic === "denied" ? "Try again" : "Allow microphone"}
+                </Button>
+              )}
+            </div>
+            <p className="text-[12.5px] text-text-3">
+              {mic === "granted"
+                ? "Ready. Press Speak during any answer; your words appear in the answer box as you talk."
+                : mic === "unsupported"
+                  ? "This browser can't use a microphone, so you'll type your answers."
+                  : "Allow the microphone to answer out loud, like a real interview."}
+            </p>
+            {mic !== "granted" && mic !== "unsupported" && (
+              <label className="flex items-center gap-2 text-[12.5px] text-text-2">
+                <input type="checkbox" checked={typeOnly} onChange={(e) => setTypeOnly(e.target.checked)} className="size-4 accent-[var(--cobalt)]" />
+                Continue without the microphone (type every answer)
+              </label>
+            )}
+          </div>
+          <Button variant="primary" size="lg" onClick={onStart} disabled={!canStart}>
             {strict ? <Maximize /> : <ArrowRight />} {strict ? "Enter full screen and start" : "Start interview"}
           </Button>
           <Link href={`/jobs/${s.match_id}`} className={buttonClass({ size: "lg", variant: "ghost" })}>
             Not now
           </Link>
         </div>
-        <p className="text-[12px] text-text-3">Voice uses your browser's speech recognition and speech synthesis. No audio is recorded or uploaded; only your answer text is saved.</p>
+        <p className="text-[12px] text-text-3">When you speak, your words show live in the answer box; when you stop, the audio is transcribed accurately by our speech-to-text provider (Whisper on Groq) and not stored. Only your answer text is saved.</p>
       </Card>
     </div>
   );
@@ -385,14 +423,31 @@ function AnswerPanel({
   onScored: (r: InterviewSession, q: Q) => void;
 }) {
   const [text, setText] = useState("");
-  const [interim, setInterim] = useState("");
-  const [listening, setListening] = useState(false);
   const [left, setLeft] = useState(q.seconds ?? 150);
   const [ready, setReady] = useState(false);
   const meta = useRef({ keystrokes: 0, voice_chars: 0, pastes_blocked: 0, started: 0, typed: false, spoke: false });
-  const rec = useRef<SR | null>(null);
   const textRef = useRef("");
   textRef.current = text;
+  // Spoken text goes straight into the answer box: live words while speaking, then the accurate transcript.
+  const base = useRef("");
+  const join = (a: string, b: string) => (a.trim() && b.trim() ? `${a.trimEnd()} ${b.trim()}` : `${a}${b}`.trim());
+  const dictation = useDictation({
+    hint: `${q.q} ${q.jd_line} ${q.skill ?? ""}`,
+    onLive: (live) => setText(join(base.current, live)),
+    onFinal: (final) => {
+      setText(join(base.current, final));
+      if (final) {
+        meta.current.voice_chars += final.length + 1;
+        meta.current.spoke = true;
+        head.current?.nod();
+      }
+    },
+  });
+  const speakToggle = () => {
+    if (dictation.listening) return dictation.stop();
+    base.current = textRef.current;
+    dictation.start();
+  };
 
   const submit = useMutation({
     mutationFn: (answer: string) => {
@@ -415,15 +470,13 @@ function AnswerPanel({
       meta.current.started = Date.now();
       head.current?.listen(true);
     });
-    return () => rec.current?.stop();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [q.id]);
   useEffect(() => {
     if (!ready || submit.isPending || submit.isSuccess) return;
     if (left <= 0) {
-      rec.current?.stop();
       toast("Time's up. Your answer so far was submitted.");
-      submit.mutate(textRef.current.trim() || "(No answer given in time)");
+      (dictation.listening ? dictation.stop() : Promise.resolve()).then(() => submit.mutate(textRef.current.trim() || "(No answer given in time)"));
       return;
     }
     const t = setTimeout(() => setLeft((x) => x - 1), 1000);
@@ -460,40 +513,6 @@ function AnswerPanel({
     }
     meta.current.typed = true;
     if (meta.current.keystrokes % 40 === 0) head.current?.nod();
-  };
-  const toggleMic = () => {
-    const W = window as unknown as { SpeechRecognition?: new () => SR; webkitSpeechRecognition?: new () => SR };
-    const Ctor = W.SpeechRecognition ?? W.webkitSpeechRecognition;
-    if (!Ctor) return toast("Voice answers need Chrome or Edge. Type your answer instead.");
-    if (listening) return rec.current?.stop();
-    const r = new Ctor();
-    r.lang = "en-IN";
-    r.continuous = true;
-    r.interimResults = true;
-    r.onresult = (e) => {
-      let fin = "";
-      let mid = "";
-      for (let i = e.resultIndex; i < e.results.length; i++) {
-        const res = e.results[i];
-        if (res.isFinal) fin += res[0].transcript;
-        else mid += res[0].transcript;
-      }
-      if (fin) {
-        meta.current.voice_chars += fin.length + 1;
-        meta.current.spoke = true;
-        setText((t) => `${t}${t && !t.endsWith(" ") ? " " : ""}${fin.trim()}`);
-        head.current?.nod();
-      }
-      setInterim(mid);
-    };
-    r.onerror = (e) => e.error === "not-allowed" && toast.error("Allow microphone access to answer by voice");
-    r.onend = () => {
-      setListening(false);
-      setInterim("");
-    };
-    rec.current = r;
-    r.start();
-    setListening(true);
   };
   const idx = s.questions.findIndex((x) => x.id === q.id);
   const total = q.seconds ?? 150;
@@ -532,22 +551,36 @@ function AnswerPanel({
           spellCheck={false}
           autoComplete="off"
           disabled={!ready}
+          readOnly={dictation.listening || dictation.transcribing}
           placeholder={ready ? "Type your answer, or press Speak and answer out loud…" : "Listen to the question…"}
           aria-label="Your answer"
+          className={cn(dictation.listening && "border-[var(--cobalt)]")}
         />
-        {interim && <p className="text-[13px] text-text-3 italic">{interim}…</p>}
+        {(dictation.listening || dictation.transcribing || dictation.error) && (
+          <div className="flex items-center gap-2 text-[12.5px]" aria-live="polite">
+            {dictation.listening && (
+              <>
+                <span className="flex h-4 items-end gap-0.5" aria-hidden>
+                  {[0.55, 1, 0.75, 0.9, 0.6].map((k, i) => (
+                    <span key={i} className="w-1 rounded-full bg-[var(--cobalt)] transition-[height] duration-75" style={{ height: `${Math.max(3, dictation.level * k * 16)}px` }} />
+                  ))}
+                </span>
+                <span className="text-text-2">Listening… speak naturally; press Stop when you finish.</span>
+              </>
+            )}
+            {dictation.transcribing && <span className="text-text-2">Making the transcript accurate…</span>}
+            {dictation.error && <span className="text-[var(--your-turn)]">{dictation.error}</span>}
+          </div>
+        )}
         <div className="flex flex-wrap items-center gap-2">
-          <Button onClick={toggleMic} aria-pressed={listening} disabled={!ready}>
-            {listening ? <MicOff /> : <Mic />} {listening ? "Stop speaking" : "Speak"}
+          <Button onClick={speakToggle} aria-pressed={dictation.listening} disabled={!ready || dictation.transcribing} variant={dictation.listening ? "danger" : "secondary"}>
+            {dictation.listening ? <MicOff /> : <Mic />} {dictation.listening ? "Stop speaking" : "Speak"}
           </Button>
           <Button
             variant="primary"
             loading={submit.isPending}
-            disabled={!text.trim() || !ready}
-            onClick={() => {
-              rec.current?.stop();
-              submit.mutate(text.trim());
-            }}
+            disabled={!text.trim() || !ready || dictation.listening || dictation.transcribing}
+            onClick={() => submit.mutate(text.trim())}
           >
             Submit answer <ArrowRight />
           </Button>

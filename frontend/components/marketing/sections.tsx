@@ -17,9 +17,9 @@ import { cn } from "@/lib/utils";
 // The one place the plan numbers live. Payments aren't live yet: Pro is switched on by hand during the beta.
 const FREE_SENDS_DEFAULT = 5;
 const FREE_SENDS_MAX = 10;
-const PRO_INR = 199;
-const WEEK_PASS_INR = 49;
-const YEAR_PASS_INR = 1999;
+const PRO_INR = 299;
+const WEEK_PASS_INR = 79;
+const YEAR_PASS_INR = 2499;
 const CAMPUS_PILOT_COLLEGES = 3;
 
 export function Reveal({ children, delay = 0, className }: { children: ReactNode; delay?: number; className?: string }) {
@@ -410,6 +410,95 @@ export function Credibility() {
 
 /* ───────────────────── 5. Outcomes ───────────────────── */
 
+/* ───────────────────── Get interview-ready: resume & ATS, mock interviews, one-click apply ───────────────────── */
+
+export function InterviewReady() {
+  const cards = [
+    {
+      agent: "tailor" as AgentKey,
+      eyebrow: "Resume & ATS",
+      title: "See your resume the way an ATS does, then fix it in one click.",
+      points: [
+        "ATS score by industry: 12 fields, from software and data to marketing, finance and core engineering",
+        "Gap report, missing keywords and improvements ranked by points gained",
+        "Improve with AI: stronger bullets and a summary from your own facts, nothing invented",
+        "Clean one-page PDF or Word file with proper page breaks",
+      ],
+      preview: (
+        <div className="card flex flex-wrap items-center gap-x-4 gap-y-3 p-4">
+          <ScoreRing score={62} size={56} stroke={5} />
+          <ArrowRight className="size-4 text-text-3" />
+          <ScoreRing score={84} size={56} stroke={5} />
+          <div className="min-w-[180px] flex-1 text-[12.5px] text-text-2">
+            <div className="font-medium text-text">+22 for Data Analyst Intern</div>
+            <div>SQL and Power BI now shown in bullets · summary added</div>
+          </div>
+        </div>
+      ),
+    },
+    {
+      agent: "interviewer" as AgentKey,
+      eyebrow: "AI mock interviews",
+      title: "A real 30 to 60 minute interview for each job, with a coding round for tech roles.",
+      points: [
+        "A 3D interviewer (choose a male or female voice) runs the rounds your field really uses",
+        "Coding round in Python, JavaScript, Java or C++, judged by an AI code reviewer: correct or not, complexity, bugs, fixes",
+        "Answer out loud: accurate speech-to-text tuned for Indian English",
+        "A report on every round against your field's bar, with gaps and a 7-day plan",
+      ],
+      preview: (
+        <div className="card p-4 text-[12.5px]">
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="font-medium text-text">Code review · Valid Brackets</span>
+            <Badge tone="success">correct</Badge>
+          </div>
+          <div className="mt-1 text-text-3">7/7 tests passed · O(n) time, O(n) space · optimal</div>
+          <div className="mt-2 text-text-2">Coding round: Above bar · Project deep-dive: add one measurable result</div>
+        </div>
+      ),
+    },
+    {
+      agent: "outreach" as AgentKey,
+      eyebrow: "Apply in one click",
+      title: "Your tailored resume and a short email to the recruiter, sent when you say so.",
+      points: [
+        "Prepare application: a resume tailored to the job description and a draft written to your field's norms",
+        "See the uploaded and tailored versions side by side, with the ATS score for both",
+        "Send from your own Gmail with the PDF attached, after you confirm",
+      ],
+      preview: (
+        <div className="card p-4 text-[12.5px]">
+          <div className="flex items-center gap-2 font-medium text-text">
+            <Send className="size-3.5" /> To hr@acme.example
+          </div>
+          <div className="mt-1 text-text-3">Tailored resume (PDF) attached · ATS 70 (+8)</div>
+        </div>
+      ),
+    },
+  ];
+  return (
+    <Wrap id="interview-ready">
+      <SectionHead center eyebrow="Get interview-ready" title="From resume to offer: practise like it's real." sub="Everything between finding a job and getting the offer, built to Indian industry norms for interns and freshers." />
+      <div className="grid gap-4 lg:grid-cols-3">
+        {cards.map((c, i) => (
+          <Reveal key={c.eyebrow} delay={i * 0.06}>
+            <div className="card flex h-full flex-col gap-4 p-6">
+              <div className="flex items-center gap-3">
+                <AgentAvatar agent={c.agent} size={40} decorative />
+                <div className="eyebrow text-cobalt-text">{c.eyebrow}</div>
+              </div>
+              <h3 className="text-[19px] leading-snug font-semibold tracking-[-0.01em]">{c.title}</h3>
+              <Ticks className="text-[14px]" items={c.points} />
+              <div className="mt-auto">{c.preview}</div>
+            </div>
+          </Reveal>
+        ))}
+      </div>
+      <Sample>Sample numbers.</Sample>
+    </Wrap>
+  );
+}
+
 export function Outcomes() {
   const board: [string, number][] = [
     ["Applied", 12],
@@ -529,6 +618,8 @@ export function Pricing() {
         { t: "Scam and ghost-job checks on every posting" },
         { t: "Proof page and tracker" },
         { t: "Send from your own Gmail" },
+        { t: "Resume & ATS check, builder and AI improvement" },
+        { t: "AI mock interviews with a coding round" },
       ],
       cta: (
         <Link href="/register" className={buttonClass({ size: "lg", className: "w-full" })}>
@@ -542,11 +633,11 @@ export function Pricing() {
       note: `per month (UPI AutoPay or card), or ₹${YEAR_PASS_INR.toLocaleString("en-IN")} for a Year Pass`,
       items: [
         { t: "Everything in Free" },
-        { t: "Mock interviews for each job description", soon: true },
+        { t: "10× the AI budget: more tailoring, code reviews and interview feedback each day" },
+        { t: "Up to 50 tailored applications and 20 on-demand runs a day (Free: 10 and 3)" },
+        { t: "Referral finder" },
         { t: "Proof Link analytics", soon: true },
         { t: "Priority verification", soon: true },
-        { t: "Referral finder" },
-        { t: "10× the AI budget" },
       ],
       cta: (
         <Link href="/billing?plan=pro" className={buttonClass({ variant: "primary", size: "lg", className: "w-full" })}>
@@ -698,6 +789,14 @@ export function Faq({ costPerRun }: { costPerRun: string | null }) {
     ],
     ["Does it apply for me automatically?", "No, on purpose. The crew prepares everything and you approve each one. Emails go from your own address, and the extension fills forms but never submits."],
     ["How do you spot scam internships?", "Verifier checks every posting for fee demands, WhatsApp-only hiring, unnamed employers, personal-email recruiters, dead links and ghost-job signals. Postings that ask for money are blocked before they reach you."],
+    [
+      "How real are the mock interviews?",
+      "They follow the rounds your field actually uses (screening, technical or case, coding for tech roles, project, HR) and run 30, 45 or 60 minutes. Coding answers run in your browser against hidden tests, and an AI code reviewer says whether they're correct and how to improve. The report grades each round against the bar for interns or freshers. Questions refresh weekly from what's rising in real job postings.",
+    ],
+    [
+      "Is the ATS score accurate?",
+      "No ATS publishes its formula, so the score models how they work: whether your file parses, how well you match the job's keywords (weighted the way recruiters filter), the impact of your bullets, and what recruiters in your field expect. The same resume always gets the same score, and every point lost comes with the fix.",
+    ],
     ["Will it get my LinkedIn banned?", "No. JobPilot never logs in to or automates LinkedIn, or any other job board. It only gives you links, like an alumni search, that you open yourself."],
     ["Who does it email?", "Only people and inboxes a company lists publicly, or a contact provider that cites its sources. Never guessed addresses."],
     [

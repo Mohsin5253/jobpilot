@@ -14,6 +14,7 @@ import { PageHeader, Skeleton } from "@/components/ui/misc";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { api } from "@/lib/api";
 import type { AtsReport } from "@/lib/ats-types";
+import type { Resume } from "@/lib/types";
 import { useProfile } from "@/lib/queries";
 
 function ResumeStudio() {
@@ -22,13 +23,18 @@ function ResumeStudio() {
   const [target, setTarget] = useState<Target>(() => emptyTarget(params.get("match")));
   const [tab, setTab] = useState(params.get("tab") === "builder" ? "builder" : "check");
   const check = useMutation({ mutationFn: (body: object) => api.post<AtsReport>("/ats/score", body) });
+  const [draft, setDraft] = useState<{ resume: Resume; key: number } | null>(null);
+  const openInBuilder = (resume: Resume) => {
+    setDraft({ resume, key: Date.now() });
+    setTab("builder");
+  };
   const ready = target.kind !== "match" || !!target.matchId;
   const run = () => ready && check.mutate(targetBody(target));
   useEffect(() => {
     if (profile?.has_resume) run();
-    // Score once the profile loads and whenever the target changes.
+    // Score once the profile loads, when the resume is saved (e.g. after "Improve my resume"), and when the target changes.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [profile?.has_resume, JSON.stringify(target.kind === "paste" ? { ...target, description: "" } : target)]);
+  }, [profile?.has_resume, profile?.updated_at, JSON.stringify(target.kind === "paste" ? { ...target, description: "" } : target)]);
 
   return (
     <div className="space-y-5">
@@ -62,12 +68,12 @@ function ResumeStudio() {
                 {profile.resume_filename && <p className="text-[12.5px] text-text-3">Checking {profile.resume_filename}, including how its file parses.</p>}
               </Card>
               {check.error && <p className="text-[13px] text-[var(--error)]">{(check.error as Error).message}</p>}
-              {check.isPending && !check.data ? <Skeleton className="min-h-80" /> : check.data && <AtsReportView r={check.data} jobTitle={target.title} jobDescription={target.description} />}
+              {check.isPending && !check.data ? <Skeleton className="min-h-80" /> : check.data && <AtsReportView r={check.data} jobTitle={target.title} jobDescription={target.description} improve={{ target: targetBody(target), onOpenInBuilder: openInBuilder }} />}
             </>
           )}
         </TabsContent>
         <TabsContent value="builder" className="mt-4">
-          {isLoading ? <Skeleton className="min-h-80" /> : <ResumeBuilder initial={profile?.resume} target={target} setTarget={setTarget} />}
+          {isLoading ? <Skeleton className="min-h-80" /> : <ResumeBuilder key={draft?.key ?? "saved"} initial={draft?.resume ?? profile?.resume} target={target} setTarget={setTarget} />}
         </TabsContent>
       </Tabs>
     </div>

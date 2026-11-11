@@ -21,7 +21,7 @@ import type { Resume } from "@/lib/types";
 const blank: Resume = { name: "", email: "", phone: "", location: "", links: [], summary: "", skills: [], experience: [], projects: [], education: [], additional: [] };
 const lines = (s: string) => s.split("\n").map((l) => l.replace(/^[•\-*]\s*/, "").trim()).filter(Boolean);
 
-async function download(resume: Resume, format: "pdf" | "docx") {
+export async function download(resume: Resume, format: "pdf" | "docx") {
   const res = await fetch(`/api/resume/render?format=${format}`, { method: "POST", credentials: "include", headers: { "content-type": "application/json" }, body: JSON.stringify(resume) });
   if (!res.ok) throw new Error("Couldn't build the file");
   const name = /filename="([^"]+)"/.exec(res.headers.get("content-disposition") ?? "")?.[1] ?? `resume.${format}`;
@@ -219,7 +219,7 @@ export function ResumeBuilder({ initial, target, setTarget }: { initial: Resume 
           <details className="group">
             <summary className="cursor-pointer text-[13px] font-medium text-cobalt-text">Full report and bullet suggestions</summary>
             <div className="mt-3">
-              <AtsReportView r={report} onUseBullet={useBullet} jobTitle={target.title} jobDescription={target.description} />
+              <AtsReportView r={report} onUseBullet={useBullet} jobTitle={target.title} jobDescription={target.description} improve={{ target: targetBody(target), resume: r, onOpenInBuilder: (next) => setR({ ...blank, ...next }) }} />
             </div>
           </details>
         )}
