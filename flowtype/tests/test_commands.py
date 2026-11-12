@@ -41,3 +41,18 @@ def test_pipeline_command_mode_copies_the_selection_when_uia_cannot_read_it():
     inj = FakeInjector(selection="Hello")
     Pipeline(Config(), SpeechAt(), FakeASR(ok("translate to French")), inj, Store(":memory:"), llm=llm).run(speech_audio(), "hold", time.perf_counter(), command=True)
     assert "SELECTED TEXT:\nHello" in llm.calls[0][1]["content"] and inj.pasted == ["Bonjour"]
+
+
+def test_new_paragraph_said_first_survives_the_cleanup():
+    # found live: "New paragraph. Quick update..." pasted with no break, because the clean-up trimmed it
+    llm, inj = FakeLLM("Quick update on the release."), FakeInjector()
+    pipe = Pipeline(Config(), SpeechAt(), FakeASR(ok("New paragraph. Quick update on the release.")), inj, Store(":memory:"), llm=llm)
+    pipe.run(speech_audio(), "hold", time.perf_counter())
+    assert inj.pasted == ["\n\nQuick update on the release. "]
+    assert "New paragraph" not in llm.calls[0][-1]["content"]
+
+
+def test_new_line_said_alone_pastes_a_line_break():
+    llm, inj = FakeLLM("x"), FakeInjector()
+    Pipeline(Config(), SpeechAt(), FakeASR(ok("New line.")), inj, Store(":memory:"), llm=llm).run(speech_audio(), "hold", time.perf_counter())
+    assert inj.pasted == ["\n"] and llm.calls == []

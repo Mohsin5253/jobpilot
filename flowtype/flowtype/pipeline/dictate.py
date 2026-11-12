@@ -154,6 +154,12 @@ class Pipeline:
         style = detect_style(ctx.app if ctx else None, ctx.title if ctx else None, self.cfg.styles.apps)
         d.style = style.name
         text = apply_spoken_formatting(text)
+        # "New paragraph" said first or last is a break before/after the text; the clean-up would trim it away
+        body = text.strip("\n")
+        lead, trail = text[: len(text) - len(text.lstrip("\n"))], text[len(text.rstrip("\n")):]
+        if not body:
+            return text
+        text = body
         if self.cfg.llm.enabled and self.cfg.llm.mode == "polished" and self.llm is not None:
             r = cleanup(self.llm, text, known_terms, style, timeout_s=self.cfg.llm.budget_ms / 1000)
             text, d.llm_status, d.llm_reason, d.llm_ms, d.llm_model = r.text, r.status, r.reason or None, r.ms or None, r.model or None
@@ -163,7 +169,7 @@ class Pipeline:
         if snippets:
             text, used = expand(text, snippets)
             d.snippets_used = len(used)
-        return text
+        return lead + text.strip("\n") + trail if text.strip() else text
 
     # --- the whole dictation ------------------------------------------------------------------------------------
     def run(self, audio: np.ndarray, mode: str, key_up: float, focus: FocusProbe | None = None, postroll_ms: int | None = None,
@@ -174,17 +180,31 @@ class Pipeline:
         pasted = None
         try:
             ctx = focus_down.result(timeout=0.1) if focus_down else None
-            out = self.transcribe(audio, d, ctx, speculative)
+            early = focus.result(timeout=0) if focus is not None and getattr(focus, "done", False) else None
+            secret = next((i for i in (ctx, early) if i is not None and i.is_password), None)
+            if secret is not None and self.cfg.inject.refuse_password_fields:
+                # a password field at key-down (or already known at key-up): the audio never leaves this machine
+                d.status, d.app = "refused_password", secret.app
+                if speculative is not None:
+                    speculative.cancel()
+                out = None
+            else:
+                out = self.transcribe(audio, d, ctx, speculative)
             if out is not None:
                 text, known = out
                 up = focus.result(timeout=0.3) if focus else FocusInfo()
+                if up.is_password and self.cfg.inject.refuse_password_fields:
+                    out, text = None, ""  # moved into a password field while it transcribed: no clean-up, no paste
+                    d.status, d.app = "refused_password", up.app
                 where = up if up.app else (ctx or up)
-                if command:
+                if out is None:
+                    pass
+                elif command:
                     text = self._command(text, ctx, d)
                 else:
                     text = self.compose(text, known, where, d)
                 if text:
-                    pasted = self._paste(text, d, up, command)
+                    pasted = self._paste(text, d, up, command, key_up)
                 elif d.status == "pending":
                     d.status = "empty"
         except Exception as exc:  # never let one dictation kill the app
@@ -192,7 +212,8 @@ class Pipeline:
         finally:
             audio.fill(0)  # wipe the samples rather than wait for the garbage collector
             del audio
-            d.total_ms = _ms(key_up)
+            if d.total_ms is None:
+                d.total_ms = _ms(key_up)
             row_id = self.store.add_dictation(d, store_text=self.cfg.store.store_text)
         if pasted and self.cfg.learn.enabled and self.probe is not None:
             app = d.app
@@ -218,7 +239,7 @@ class Pipeline:
             d.status, d.error = "error", f"command: {r.reason}"
         return r.text
 
-    def _paste(self, text: str, d: Dictation, info: FocusInfo, command: bool) -> str | None:
+    def _paste(self, text: str, d: Dictation, info: FocusInfo, command: bool, key_up: float | None = None) -> str | None:
         d.context_ms, d.app = info.ms, info.app or d.app
         if info.is_password and self.cfg.inject.refuse_password_fields:
             d.status = "refused_password"
@@ -227,11 +248,14 @@ class Pipeline:
         out = text if command or text.endswith("\n") else text + " "
         t = time.perf_counter()
         try:
-            self.injector.paste(out)
+            sent = self.injector.paste(out)
         except InjectError as exc:
             d.status, d.error = "error", f"inject: {exc}"
             return None
-        d.inject_ms = _ms(t)
+        # The text shows up at the paste keystroke; the clipboard restore after it isn't latency you see
+        d.inject_ms = sent if isinstance(sent, int) and sent >= 0 else _ms(t)
+        if key_up is not None:
+            d.total_ms = int((t - key_up) * 1000) + d.inject_ms
         d.status, d.text, d.chars, d.words = "pasted", text, len(text), len(text.split())
         return out
 

@@ -70,8 +70,11 @@ def run_overlay(bus: OverlayBus, level_fn, stop_event, background) -> None:
             self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
             self.setAttribute(Qt.WidgetAttribute.WA_ShowWithoutActivating)
             self.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
+            # macOS hides tool windows whenever their app isn't active, and Flowtype is never the active app
+            self.setAttribute(Qt.WidgetAttribute.WA_MacAlwaysShowToolWindow)
             self.model = OverlayModel()
             self.resize(300, 44)
+            _no_activate(self)  # before the first show: a window joins its Spaces when it's first ordered in
             self.timer = QTimer(self)
             self.timer.timeout.connect(self.poll)
             self.timer.start(33)
@@ -121,6 +124,13 @@ def run_overlay(bus: OverlayBus, level_fn, stop_event, background) -> None:
 
     app = QApplication.instance() or QApplication(sys.argv[:1])
     app.setQuitOnLastWindowClosed(False)
+    if sys.platform == "darwin" and app.platformName() == "cocoa":
+        try:  # an accessory app: no Dock icon, and its panel can float over other apps' full-screen Spaces
+            import AppKit
+
+            AppKit.NSApp.setActivationPolicy_(AppKit.NSApplicationActivationPolicyAccessory)
+        except Exception:
+            pass
     _overlay = Overlay()  # keep a reference, or Qt garbage-collects the window
     signal.signal(signal.SIGINT, lambda *_: stop_event.set())
     threading.Thread(target=background, daemon=True, name="controller").start()
@@ -128,7 +138,11 @@ def run_overlay(bus: OverlayBus, level_fn, stop_event, background) -> None:
 
 
 def _no_activate(widget) -> None:
-    """Windows: WS_EX_NOACTIVATE | WS_EX_TOOLWINDOW, so clicking or showing it never steals focus."""
+    """Windows: WS_EX_NOACTIVATE | WS_EX_TOOLWINDOW, so clicking or showing it never steals focus. macOS: show on
+    every Space and over full-screen apps."""
+    if sys.platform == "darwin":
+        _mac_all_spaces(widget)
+        return
     if sys.platform != "win32":
         return
     try:
@@ -142,10 +156,47 @@ def _no_activate(widget) -> None:
         pass
 
 
-def available() -> bool:
-    try:
-        import PySide6  # noqa: F401
+unavailable_reason = ""
 
-        return True
+
+def available() -> bool:
+    global unavailable_reason
+    try:
+        import PySide6
     except ImportError:
+        unavailable_reason = "PySide6 isn't installed"
         return False
+    if sys.platform == "darwin" and _plugins_hidden(PySide6.__file__):
+        # Qt skips files with the macOS "hidden" flag and then aborts the whole process, so don't even try
+        unavailable_reason = "Qt's plugins carry the macOS hidden flag: run `chflags -R nohidden .venv`"
+        return False
+    return True
+
+
+def _plugins_hidden(pyside_init: str) -> bool:
+    import os
+    import stat
+
+    folder = os.path.join(os.path.dirname(pyside_init), "Qt", "plugins", "platforms")
+    try:
+        names = [n for n in os.listdir(folder) if n.endswith(".dylib")]
+        return bool(names) and all(os.stat(os.path.join(folder, n)).st_flags & stat.UF_HIDDEN for n in names)
+    except OSError:
+        return False
+
+
+def _mac_all_spaces(widget) -> None:
+    from PySide6.QtGui import QGuiApplication
+
+    if QGuiApplication.platformName() != "cocoa":
+        return  # offscreen/minimal: winId() isn't an NSView
+    try:
+        import AppKit
+        import objc
+
+        window = objc.objc_object(c_void_p=int(widget.winId())).window()
+        window.setCollectionBehavior_(AppKit.NSWindowCollectionBehaviorCanJoinAllSpaces | AppKit.NSWindowCollectionBehaviorFullScreenAuxiliary
+                                      | AppKit.NSWindowCollectionBehaviorStationary)
+        window.setHidesOnDeactivate_(False)
+    except Exception:
+        pass

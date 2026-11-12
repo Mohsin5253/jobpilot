@@ -191,14 +191,17 @@ def _mac_probe(full: bool = False) -> FocusInfo:
             return None if err else val
 
         app_el = AXUIElementCreateApplication(pid) if pid else None
+        if app_el is not None and pid not in _ax_enabled:
+            _enable_electron_ax(app_el, pid)
         win = attr(app_el, "AXFocusedWindow") if app_el is not None else None
         if win is not None:
             t = attr(win, "AXTitle")
             info.title = str(t) if t else None
-        el = attr(AXUIElementCreateSystemWide(), "AXFocusedUIElement")
+        # Ask the app first: Electron apps answer there once AXManualAccessibility is on, not system-wide
+        el = (attr(app_el, "AXFocusedUIElement") if app_el is not None else None) or attr(AXUIElementCreateSystemWide(), "AXFocusedUIElement")
         if el is None:
             global last_error
-            last_error = "Accessibility API returned nothing (is Accessibility permission granted?)"
+            last_error = "Accessibility permission isn't granted" if not _mac_trusted() else f"{info.app or 'the front app'} doesn't expose its text field"
             return info
         if str(attr(el, "AXSubrole") or "") == "AXSecureTextField":
             info.is_password = True
@@ -227,6 +230,38 @@ def _mac_probe(full: bool = False) -> FocusInfo:
     except Exception as exc:
         last_error = f"Accessibility: {type(exc).__name__}"
     return info
+
+
+_ax_enabled: set[int] = set()
+
+
+def _enable_electron_ax(app_el, pid: int) -> None:
+    """Electron apps (Slack, VS Code, Discord, Notion...) build their accessibility tree only when a client asks."""
+    try:
+        from ApplicationServices import AXUIElementSetAttributeValue
+
+        AXUIElementSetAttributeValue(app_el, "AXManualAccessibility", True)
+    except Exception:
+        pass
+    _ax_enabled.add(pid)
+
+
+def _mac_trusted() -> bool:
+    try:
+        from ApplicationServices import AXIsProcessTrusted
+
+        return bool(AXIsProcessTrusted())
+    except Exception:
+        return False
+
+
+def detection_problem() -> str | None:
+    """Why password fields can't be detected on this machine, or None when they can. Checked once at startup, so it
+    looks at the permission (macOS) rather than at whichever app happens to be in front."""
+    if sys.platform == "darwin":
+        return None if _mac_trusted() else "Accessibility permission isn't granted"
+    info = platform_probe()()
+    return None if info.is_password is not None else (last_error or "unsupported OS")
 
 
 def _mac_secure_input() -> bool | None:

@@ -61,7 +61,8 @@ def test_pipeline_learns_after_the_paste():
     inj = FakeInjector()
     scheduled = []
     field = {"text": ""}
-    probe = lambda full=False: FocusInfo(app="notepad.exe", is_password=False, field_text=field["text"])
+    def probe(full=False):
+        return FocusInfo(app="notepad.exe", is_password=False, field_text=field["text"])
     pipe = Pipeline(Config(), SpeechAt(), FakeASR(ok("Send it to Kavia by Friday.")), inj, store, probe=probe, schedule=lambda s, fn: scheduled.append((s, fn)))
     d = pipe.run(speech_audio(), "hold", time.perf_counter(), FocusProbe(lambda: FocusInfo(app="notepad.exe", is_password=False)))
     assert d.status == "pasted" and scheduled and scheduled[0][0] == 10.0
@@ -75,7 +76,8 @@ def test_pipeline_learns_after_the_paste():
 def test_learning_skips_another_app():
     store = Store(":memory:")
     scheduled = []
-    probe = lambda full=False: FocusInfo(app="chrome.exe", field_text="Send it to Kavya by Friday.")
+    def probe(full=False):
+        return FocusInfo(app="chrome.exe", field_text="Send it to Kavya by Friday.")
     pipe = Pipeline(Config(), SpeechAt(), FakeASR(ok("Send it to Kavia by Friday.")), FakeInjector(), store, probe=probe, schedule=lambda s, fn: scheduled.append(fn))
     pipe.run(speech_audio(), "hold", time.perf_counter(), FocusProbe(lambda: FocusInfo(app="notepad.exe", is_password=False)))
     scheduled[0]()

@@ -37,7 +37,7 @@ def test_context_terms_reach_the_bias_prompt_but_not_from_password_fields():
     asr2 = FakeASR(ok("hi"))
     pw = FocusProbe(lambda: FocusInfo(app="x", before_text="SecretName Hunter2", is_password=True))
     Pipeline(Config(), SpeechAt(), asr2, FakeInjector(), Store(":memory:")).run(speech_audio(), "hold", time.perf_counter(), focus_down=pw)
-    assert "SecretName" not in asr2.calls[0]["prompt"]
+    assert asr2.calls == []  # a password field at key-down: nothing is transcribed at all
 
 
 def test_context_can_be_turned_off():

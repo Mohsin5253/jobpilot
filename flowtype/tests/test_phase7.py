@@ -84,11 +84,11 @@ class InstantProbe:
         return self.info
 
 
-def make_controller(spec_factory=None):
+def make_controller(spec_factory=None, password=False):
     jobs, posts = [], []
     rec = FakeRecorder()
     pipe = Pipeline(Config(), SpeechAt(), FakeASR(ok("x")), FakeInjector(), Store(":memory:"))
-    ctl = Controller(Config(), rec, pipe, lambda: FocusInfo(app="notepad.exe"), lambda fn, *a, **k: jobs.append((a, k)),
+    ctl = Controller(Config(), rec, pipe, lambda: FocusInfo(app="notepad.exe", is_password=password), lambda fn, *a, **k: jobs.append((a, k)),
                      ui=type("U", (), {"recording": lambda *a, **k: None, "cancelled": lambda *a: None, "status": lambda *a: None})(),
                      post=lambda s, m: posts.append(s), spec_factory=spec_factory, focus_probe_cls=InstantProbe)
     return ctl, rec, jobs, posts
@@ -129,6 +129,16 @@ def test_controller_feeds_speculative_session():
         ctl.tick(t)
     ctl.handle(("release", 1.5))
     assert len(updates) == 3 and jobs[0][1]["speculative"] is not None
+
+
+def test_controller_streams_nothing_from_a_password_field():
+    made = []
+    ctl, _rec, jobs, _ = make_controller(spec_factory=lambda ctx: made.append(ctx), password=True)
+    ctl.handle(("press", 0.0, False))
+    for t in (0.4, 0.8, 1.2):
+        ctl.tick(t)
+    ctl.handle(("release", 1.5))
+    assert made == [] and jobs[0][1]["speculative"] is None
 
 
 def test_controller_tap_cancels():

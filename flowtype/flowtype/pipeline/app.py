@@ -113,7 +113,10 @@ class Controller:
             self._last_spec = now
             ready = self.focus_down is not None and (getattr(self.focus_down, "done", True) or now - self._started >= 1.0)
             if self.spec is None and ready:  # build the prompt once the key-down context is in (or give up after 1 s)
-                self.spec = self.spec_factory(self.focus_down.result(timeout=0))
+                ctx = self.focus_down.result(timeout=0)
+                if ctx.is_password and self.cfg.inject.refuse_password_fields:
+                    return  # never stream audio out from a password field
+                self.spec = self.spec_factory(ctx)
             if self.spec is not None:
                 self.spec.update(self.recorder.peek())
 
@@ -161,7 +164,9 @@ def run(cfg: Config) -> None:
     store = Store(data_dir() / "flowtype.db")
     if cfg.store.store_text and cfg.store.history_days > 0:
         store.purge_text(cfg.store.history_days)
-    vocab = lambda: [r["term"] for r in store.words()] + list(cfg.dictionary.words)
+    def vocab() -> list[str]:
+        return [r["term"] for r in store.words()] + list(cfg.dictionary.words)
+
     asr, primary, local = build_asr(cfg, vocab)
     llm = build_llm(cfg)
     vad = build_vad(cfg)
@@ -172,6 +177,8 @@ def run(cfg: Config) -> None:
     injecting = threading.Event()
     injector = ClipboardInjector(default_backend(), make_send_paste("v"), cfg.inject.restore_delay_ms, injecting, send_copy=make_send_paste("c"))
     use_overlay = cfg.ui.overlay and ov.available()
+    if cfg.ui.overlay and not use_overlay:
+        ui.status(f"⚠ no overlay ({ov.unavailable_reason}); status shows here instead")
     bus = ov.OverlayBus()
     probe = focus.platform_probe()
     pipeline = Pipeline(cfg, vad, asr, injector, store, notify=ui.status, llm=llm, probe=probe, on_state=bus.post if use_overlay else (lambda s, m: None))
@@ -188,8 +195,9 @@ def run(cfg: Config) -> None:
     listener.start()
     if not listener.trusted:
         ui.status("⚠ macOS hasn't allowed this app to read the keyboard: grant Input Monitoring and Accessibility (see README)")
-    if cfg.inject.refuse_password_fields and probe().is_password is None:
-        ui.status(f"⚠ password-field detection isn't working, so it can't refuse to paste into one ({focus.last_error or 'unsupported OS'})")
+    problem = focus.detection_problem() if cfg.inject.refuse_password_fields else None
+    if problem:
+        ui.status(f"⚠ password-field detection isn't working, so it can't refuse to paste into one ({problem})")
 
     worker = ThreadPoolExecutor(max_workers=1, thread_name_prefix="dictation")
     spec_pool = ThreadPoolExecutor(max_workers=2, thread_name_prefix="speculative")

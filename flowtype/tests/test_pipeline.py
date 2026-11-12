@@ -118,6 +118,37 @@ def test_password_field_is_refused():
     assert store.recent(1)[0]["text"] is None
 
 
+def test_password_field_at_key_down_never_reaches_the_asr():
+    # found live: the refusal used to come only at paste time, after the audio and the text had gone to Groq
+    asr = FakeASR(ok("hunter2"))
+    pipe, inj, _store = make(asr)
+    secret = FocusProbe(lambda: FocusInfo(app="python", is_password=True))
+    secret._done.wait(1)
+    d = pipe.run(speech_audio(), "hold", time.perf_counter(), FocusProbe(lambda: FocusInfo(app="python", is_password=False)), focus_down=secret)
+    assert d.status == "refused_password" and asr.calls == [] and inj.pasted == []
+
+
+def test_password_field_at_key_up_is_known_before_the_asr():
+    asr = FakeASR(ok("hunter2"))
+    pipe, inj, _store = make(asr)
+    up = FocusProbe(lambda: FocusInfo(app="python", is_password=True))
+    up._done.wait(1)
+    d = pipe.run(speech_audio(), "hold", time.perf_counter(), up)
+    assert d.status == "refused_password" and asr.calls == []
+
+
+def test_latency_stops_at_the_paste_keystroke_not_the_clipboard_restore():
+    class SlowRestore(FakeInjector):
+        def paste(self, text):
+            super().paste(text)
+            time.sleep(0.3)  # the restore wait after the keystroke
+            return 2
+
+    pipe = Pipeline(Config(), SpeechAt(), FakeASR(ok("Ship it.")), SlowRestore(), Store(":memory:"))
+    d = pipe.run(speech_audio(), "hold", time.perf_counter())
+    assert d.inject_ms == 2 and d.total_ms < 250
+
+
 def test_asr_failure_is_logged_not_raised():
     pipe, inj, store = make(FakeASR(ASRError("ReadTimeout")))
     d = pipe.run(speech_audio(), "hold", time.perf_counter())

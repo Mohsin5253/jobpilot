@@ -57,8 +57,9 @@ Flowtype.app if you use the packaged app, then restart it:
 - **Accessibility**: Privacy & Security → Accessibility. Flowtype needs it to send Cmd+V, to read the text around the
   cursor for context, and to detect password fields.
 
-While a password field has focus, macOS turns on Secure Input and Flowtype refuses to paste. Terminal's "Secure
-Keyboard Entry" setting does the same.
+While a password field has focus, macOS turns on Secure Input, and Flowtype then transcribes nothing, sends nothing and
+pastes nothing. Terminal's "Secure Keyboard Entry" setting does the same. Electron apps (Slack, VS Code, Discord,
+Notion) give context once Flowtype turns their accessibility tree on, which it does the first time each app has focus.
 
 ## Commands
 
@@ -161,6 +162,17 @@ Other live measurements:
 - **Local fallback** (faster-whisper `tiny`, CPU int8): about 140 ms per clip after a one-time load. It's fine on
   names and weak on Hinglish, which is why the default is `small`.
 
+Live end to end on macOS (2026-11-12): the real app with the hotkey, the mic (speech played through the
+MacBook speaker), the overlay and Cmd+V into TextEdit. Key-up to text on screen measured p50 **~900 ms**: post-roll
+~240, VAD ~15, ASR ~240, clean-up ~230, paste ~40.
+- Hold, hands-free (double-tap, then tap), Esc to cancel, a silent hold (nothing pasted) and command mode on a
+  selection all behaved as described.
+- A 19 s dictation with pauses came back 218 ms after key-up, because the chunks were transcribed during the pauses.
+- In a real macOS password field, nothing was transcribed, sent or pasted.
+- Correcting "Ishan" to "Ishaan" in the field after a paste taught the dictionary the new spelling, and the next
+  dictation used it.
+- The overlay shows over other apps' full-screen windows.
+
 ## Privacy
 
 - **Keys** live only in the OS keychain (`keyring`: Windows Credential Manager or macOS Keychain). They're never in
@@ -172,7 +184,8 @@ Other live measurements:
 - **Text** goes to Groq for the clean-up (the transcript and your dictionary terms). Set `llm.enabled = false` or
   `mode = "verbatim"` to keep it from the LLM.
 - **Context** (the text around the cursor) is used in memory only: just the extracted names and terms go into the
-  prompt, and none of it is stored. Password fields are never read.
+  prompt, and none of it is stored. Password fields are never read. Dictating into one sends nothing anywhere: it's
+  caught at key-down, before any audio is streamed.
 - **Data** is stored in one local SQLite file, `flowtype.db` in the data folder. By default it records timings,
   counts, status, the app, the style and the Edit Rate, but not what you said. `store_text = true` keeps history,
   which is erased after `history_days`. `flowtype history --erase` erases it now.
@@ -239,7 +252,7 @@ class LLMProvider(Protocol):
 python -m pytest
 ```
 
-There are 152 tests. Each file covers:
+There are 159 tests. Each file covers:
 
 - **prompt**: the token limit. It's fuzzed against Whisper's real tokenizer when that's cached, so a prompt can never
   exceed 224 tokens.
@@ -253,18 +266,21 @@ There are 152 tests. Each file covers:
 - **dictionary**: phonetic fixes and ordinary words left alone, snippets, learning from corrections, and Edit Rate.
 - **asr_chain**: the fallback and its circuit breaker, dual-engine choice, speculative chunk order, and the
   whole-clip fallback.
-- **commands**: spoken formatting, command mode with and without a readable selection.
+- **commands**: spoken formatting (including "new paragraph" said first, which the clean-up must not trim), command
+  mode with and without a readable selection.
 - **eval**: jiwer scoring, dataset and variants, A/B comparison, the bootstrap, and the ASR cache.
 - **phase7**: the overlay model and an offscreen Qt run, the controller (hold, tap, command, speculative feed),
   history and retention, the database migration, copy-selection, autostart on all three OSes, the debug panel's
   localhost guard, and the CLI.
-- **hotkey, audio, pipeline**: the state machine, pre-roll and post-roll, and the end-to-end pipeline with fakes.
+- **hotkey, audio, pipeline**: the state machine, pre-roll and post-roll, and the end-to-end pipeline with fakes,
+  including password fields caught before any audio is sent and latency measured to the paste keystroke.
 
 ## Troubleshooting
 
-- **`ModuleNotFoundError: flowtype` on macOS**: something on the system (seen with a project on the Desktop) can set
-  the "hidden" flag on the venv's `.pth` files, and current Python releases skip hidden `.pth` files. Fix:
-  `chflags nohidden .venv/lib/python3.*/site-packages/*.pth`, or keep the project outside synced folders.
+- **`ModuleNotFoundError: flowtype`, or "Could not find the Qt platform plugin "cocoa"" on macOS**: something on
+  the system (seen with a project on the Desktop) can set the "hidden" flag on every file in the venv. Python skips
+  hidden `.pth` files and Qt skips hidden plugins. Fix: `chflags -R nohidden .venv`, or keep the project outside
+  synced folders. Flowtype checks for the Qt case and shows status in the console rather than crash.
 - **Nothing happens on the hotkey (macOS)**: grant Input Monitoring to the app you launched from, then restart it.
 - **Text appears in the wrong place or not at all (Windows)**: the target app may be elevated (see above), or may
   block simulated Ctrl+V. Check `flowtype stats` for the status.
