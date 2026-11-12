@@ -69,6 +69,32 @@ export class Capture {
     this.recording = true;
   }
 
+  /** Samples recorded so far in this take (pre-roll included), at the device rate. */
+  get recorded(): number {
+    return this.recording ? this.chunks.reduce((n, c) => n + c.length, 0) : 0;
+  }
+
+  /** The take from sample `from` (device rate) up to now, resampled to 16 kHz: a speculative chunk, or the search
+   * window for the next one. */
+  since(from: number, to = Infinity): Float32Array {
+    const end = Math.min(to, this.recorded);
+    const out = new Float32Array(Math.max(0, end - from));
+    let pos = 0;
+    for (const c of this.chunks) {
+      const a = Math.max(from - pos, 0);
+      const b = Math.min(end - pos, c.length);
+      if (b > a) out.set(c.subarray(a, b), pos + a - from);
+      pos += c.length;
+      if (pos >= end) break;
+    }
+    return this.rate === TARGET_RATE ? out : resample(out, this.rate, TARGET_RATE);
+  }
+
+  /** A 16 kHz sample index in the finished take for a device-rate index. */
+  toTarget(i: number): number {
+    return Math.floor((i * TARGET_RATE) / this.rate);
+  }
+
   /** Stop after the post-roll and return the take at 16 kHz. */
   async end(): Promise<Float32Array> {
     await new Promise((r) => setTimeout(r, POST_ROLL_MS));

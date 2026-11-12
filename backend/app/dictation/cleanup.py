@@ -47,7 +47,12 @@ RULES
 7. Numbers, dates, times, currency in natural written form (₹500, 30%, 200 users, 5:30 pm, 3rd Dec).
 8. If the transcript is empty or only filler, output nothing.
 
-STYLE: interview answer (spoken, first person, clear sentences)"""
+STYLE: {style}"""
+
+STYLES = {
+    "interview": "interview answer (spoken, first person, clear sentences)",
+    "code": "explaining code in a coding round: when the speaker spells out an identifier, write it as code (getUserById, max_profit) exactly as in KNOWN_TERMS; keep complexity notation as O(n log n); no markdown fences",
+}
 
 FEW_SHOTS: list[tuple[str, str]] = [
     (
@@ -89,10 +94,10 @@ def build_user(transcript: str, known_terms: list[str], question: str) -> str:
     return f"QUESTION BEING ANSWERED (do not answer it): {question[:300]}\nKNOWN_TERMS: {'; '.join(known_terms[:60])}\nTRANSCRIPT: {transcript}"
 
 
-def messages(transcript: str, known_terms: list[str], question: str) -> list[dict]:
+def messages(transcript: str, known_terms: list[str], question: str, style: str = "interview") -> list[dict]:
     """The examples carry only their transcript (their known terms are listed once), which keeps the request near
     800 tokens: Groq's free tier allows a few thousand input tokens a minute per model."""
-    msgs = [{"role": "system", "content": SYSTEM + "\n\nKNOWN_TERMS for the examples: Priya Raghunathan; Sardar Patel College; XGBoost; Render; FastAPI"}]
+    msgs = [{"role": "system", "content": SYSTEM.format(style=STYLES.get(style, STYLES["interview"])) + "\n\nKNOWN_TERMS for the examples: Priya Raghunathan; Sardar Patel College; XGBoost; Render; FastAPI"}]
     for raw, out in FEW_SHOTS:
         msgs.append({"role": "user", "content": f"TRANSCRIPT: {raw}"})
         msgs.append({"role": "assistant", "content": out or "(empty)"})
@@ -102,7 +107,7 @@ def messages(transcript: str, known_terms: list[str], question: str) -> list[dic
 
 # ---------- the guardrail validator ----------
 
-_ANSWERY = re.compile(r"^\s*(sure|certainly|of course|here'?s|here is|as an ai|i'?d be happy|great question|absolutely[,!])\b", re.I)
+_ANSWERY = re.compile(r"^\s*(sure|certainly|of course|here'?s|here is|as an ai|i'?d be happy|great question|absolutely[,!]|i can'?t|i cannot|sorry,? (but )?i)\b", re.I)
 _WORD = re.compile(r"[\w'+#./-]+")
 
 
@@ -116,15 +121,33 @@ _SCALES = {"hundred": 100, "thousand": 1_000, "lakh": 100_000, "lakhs": 100_000,
 
 
 def spoken_numbers(text: str) -> set[str]:
-    """Every number the speaker said, as digits: "two hundred" → 200, "1.5" → 1.5, "five lakh" → 500000."""
+    """Every number the speaker said, as digits: "two hundred" → 200, "one point five" → 1.5, "five lakh" → 500000.
+    Each number word also counts alone, so "four thirty" may be written 4:30."""
     found = {n.replace(",", "").lstrip("0") or "0" for n in re.findall(r"\d[\d,]*(?:\.\d+)?", text)}
     digits = re.sub(r"[a-z]+", lambda m: str(_UNITS[m.group(0)]) if m.group(0) in _UNITS else m.group(0), text.lower())
-    found |= {f"{a.lstrip('0') or '0'}.{b}" for a, b in re.findall(r"(\d+) point (\d+)", digits)}  # "one point five" → 1.5
+    found |= {f"{a.lstrip('0') or '0'}.{b}" for a, b in re.findall(r"(\d+) point (\d+)", digits)}
     total = cur = 0
     started = False
-    for w in [*re.findall(r"[a-z]+|\d+", text.lower()), "."]:
+    prev = ""
+
+    def flush():
+        nonlocal total, cur, started
+        if started:
+            found.add(str(total + cur))
+            for scale in (100, 1000):  # "two hundred" may be written "2 hundred"
+                if (total + cur) % scale == 0 and total + cur > scale:
+                    found.add(str((total + cur) // scale))
+        total = cur = 0
+        started = False
+
+    for w in [*re.findall(r"[a-z]+|\d+|[,.;:!?]", text.lower()), "."]:
         if w in _UNITS or w in _TENS:
-            cur += _UNITS.get(w, 0) + _TENS.get(w, 0)
+            v = _UNITS.get(w, 0) + _TENS.get(w, 0)
+            found.add(str(v))
+            # "five five" or "twenty thirty" are two numbers; "twenty five" and "hundred and five" are one.
+            if started and not (prev in _TENS and w in _UNITS and v < 10) and prev not in _SCALES and prev != "and":
+                flush()
+            cur += v
             started = True
         elif w in _SCALES and (started or w in ("hundred", "thousand")):
             scale = _SCALES[w]
@@ -132,17 +155,13 @@ def spoken_numbers(text: str) -> set[str]:
             if scale >= 1000:
                 total, cur = total + cur, 0
             started = True
-        elif w == "and" and started:
-            continue
+        elif w == "and" and started and prev in _SCALES:
+            pass
         else:
-            if started:
-                found.add(str(total + cur))
-                for scale in (100, 1000):  # "two hundred" may be written "2 hundred"; keep the parts too
-                    found.add(str((total + cur) // scale)) if (total + cur) % scale == 0 and total + cur > scale else None
-            total = cur = 0
-            started = False
+            flush()
             if w.isdigit():
                 found.add(w.lstrip("0") or "0")
+        prev = w
     return found
 
 
@@ -154,9 +173,15 @@ class Verdict:
     ratio: float = 1.0
 
 
-def guard(transcript: str, output: str, known_terms: list[str]) -> Verdict:
-    """Reject the rewrite if it moved too far from what was said, added a name or term nobody said, or reads like a
-    reply. Compared against the transcript with the unambiguous fillers already removed."""
+MAX_EDIT = 0.35
+
+
+def guard(transcript: str, output: str, known_terms: list[str], max_edit: float = MAX_EDIT) -> Verdict:
+    """Reject the rewrite if it moved too far from what was said, added a name, term or number nobody said, or reads
+    like a reply. Compared against the transcript with the unambiguous fillers already removed (Flowtype's validator,
+    tuned on live output: number words count as their digits, and a spelling fix that sounds like what was heard,
+    "fast RP" → FastAPI, isn't an invented name)."""
+    from app.dictation.matcher import sounds_like_said
     from app.services.speech_vocab import _sound
 
     base = strip_fillers(transcript)
@@ -164,23 +189,31 @@ def guard(transcript: str, output: str, known_terms: list[str]) -> Verdict:
     b = [_norm(w) for w in _WORD.findall(output) if _norm(w)]
     if not b:
         return Verdict(not a or len(a) <= 2, "empty output" if a and len(a) > 2 else "")
+
+    def parts(t: str) -> list[str]:
+        return [p for w in _WORD.findall(t) for p in re.findall(r"[a-z]+|\d+", w.lower())]
+
     ratio = len(b) / max(1, len(a))
-    sm = SequenceMatcher(None, a, b)
-    edit = 1 - sm.ratio()
-    if _ANSWERY.search(output):
+    canon = [str(_UNITS.get(w, _TENS.get(w, w))) for w in parts(base)]
+    edit = 1 - SequenceMatcher(None, canon, parts(output)).ratio()
+    if _ANSWERY.search(output) and not _ANSWERY.search(base):
         return Verdict(False, "reads like a reply", edit, ratio)
-    if not 0.5 <= ratio <= 1.3:
+    if not 0.5 <= ratio <= 1.3 and abs(len(b) - len(a)) > 2:
         return Verdict(False, f"length ratio {ratio:.2f}", edit, ratio)
-    if edit > 0.35:
+    if edit > max_edit and len(a) > 4:
         return Verdict(False, f"changed {edit:.0%} of the words", edit, ratio)
-    # Every name or term in the output must come from the transcript (by spelling or sound) or the known terms.
     said = {_norm(w) for w in _WORD.findall(transcript)} | {_sound(w) for w in _WORD.findall(transcript)}
     said_joined = _norm(transcript)
     known = {_norm(w) for t in known_terms for w in t.split()} | {_sound(w) for t in known_terms for w in t.split()}
     said_numbers = spoken_numbers(transcript)
-    for num in re.findall(r"\d[\d,]*(?:\.\d+)?", output):
+    said_words = [w.strip(".,;:!?'\"()") for w in _WORD.findall(transcript)]
+    for m in re.finditer(r"\d[\d,]*(?:\.\d+)?", output):
+        num = m.group(0).rstrip(",")
         n = num.replace(",", "").lstrip("0") or "0"
-        if n not in said_numbers and not re.fullmatch(r"\d", n):  # list numbers 1. 2. 3. are formatting
+        line_start = output.rfind("\n", 0, m.start()) + 1
+        is_list_marker = output[line_start : m.start()].strip() == "" and output[m.end() : m.end() + 1] in (".", ")")
+        is_zero_minutes = n == "0" and num == "00" and output[m.start() - 1 : m.start()] == ":"  # "ten" → 10:00
+        if n not in said_numbers and not is_list_marker and not is_zero_minutes:
             return Verdict(False, f"added the number {num}", edit, ratio)
     for i, w in enumerate(_WORD.findall(output)):
         bare = w.strip(".,;:!?'\"()")
@@ -194,6 +227,8 @@ def guard(transcript: str, output: str, known_terms: list[str]) -> Verdict:
         prev = output[: output.find(w)].rstrip()
         if i == 0 or prev.endswith((".", "?", "!", ":", "\n")) or re.match(r"^\d+[.)]", bare):
             continue  # a capital at a sentence start or a list number is formatting, not a new name
+        if sounds_like_said(bare, said_words):
+            continue  # a spelling fix of what was heard, not an invented name
         return Verdict(False, f"added '{bare}'", edit, ratio)
     return Verdict(True, "", edit, ratio)
 
@@ -213,7 +248,7 @@ def _models() -> list[tuple[str, str]]:
     return [m for m in chain if _cooldown.get(m[0], 0) <= now]
 
 
-async def cleanup(transcript: str, known_terms: list[str], question: str) -> tuple[str, int, str]:
+async def cleanup(transcript: str, known_terms: list[str], question: str, style: str = "interview") -> tuple[str, int, str]:
     """(rewritten text, ms, model). Raises when every model fails or is cooling down (the pipeline falls back)."""
     import groq
 
@@ -227,7 +262,7 @@ async def cleanup(transcript: str, known_terms: list[str], question: str) -> tup
                 model=model,
                 temperature=0,
                 max_tokens=min(1200, int(approx_tokens * 1.5) + 32 + (400 if reasoning and reasoning != "none" else 0)),
-                messages=messages(transcript, known_terms, question),
+                messages=messages(transcript, known_terms, question, style),
                 **({"reasoning_effort": reasoning} if reasoning else {}),
             )
         except groq.RateLimitError as e:

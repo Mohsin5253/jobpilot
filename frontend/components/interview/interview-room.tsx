@@ -458,7 +458,7 @@ function AnswerPanel({
     const b = el && document.activeElement === el ? el.selectionEnd : cur.length;
     const before = cur.slice(0, a);
     const after = cur.slice(b);
-    const glueL = before && !/\s$/.test(before) ? " " : "";
+    const glueL = before && !/\s$/.test(before) && !/^\s/.test(t) ? " " : "";
     const glueR = after && !/^\s/.test(after) ? " " : "";
     const next = `${before}${glueL}${t}${glueR}${after}`;
     setText(next);
@@ -476,7 +476,22 @@ function AnswerPanel({
     const i = cur.lastIndexOf(from);
     if (i >= 0) setText(cur.slice(0, i) + to + cur.slice(i + from.length));
   };
-  const flow = useFlow({ hint: `${q.q} ${q.jd_line} ${q.skill ?? ""}`, active: ready, onText: insertAtCursor, onReplace: replaceTake });
+  // Flowtype's context: the job, the round and the answer around the cursor (read when you start talking).
+  const around = () => {
+    const el = taRef.current;
+    const cur = textRef.current;
+    const a = el && document.activeElement === el ? el.selectionStart : cur.length;
+    const b = el && document.activeElement === el ? el.selectionEnd : cur.length;
+    return { before: cur.slice(0, a), after: cur.slice(b) };
+  };
+  const flow = useFlow({
+    hint: `${q.q} ${q.jd_line} ${q.skill ?? ""}`,
+    active: ready,
+    onText: insertAtCursor,
+    onReplace: replaceTake,
+    context: { company: s.meta.job?.company, role: s.meta.job?.title, roundName: q.round_name, kind: q.kind, around },
+    onLearned: (w) => toast.success(`Flowtype learned ${w.slice(0, 3).join(", ")}: spelled your way from now on.`),
+  });
   const voice = flow.supported ? flow : dictation;
   const speakToggle = () => {
     if (dictation.listening) return dictation.stop();
@@ -621,7 +636,7 @@ function AnswerPanel({
         )}
         {flow.supported && ready && !voice.listening && !voice.transcribing && !voice.source && (
           <p className="text-[12px] text-text-3">
-            <kbd className="rounded border border-border px-1 font-mono text-[11px]">Right Ctrl</kbd> hold to talk · double-tap for hands-free · or hold the Speak button. Your name, college and projects are spelled your way.
+            <span className="font-medium text-text-2">Flowtype:</span> <kbd className="rounded border border-border px-1 font-mono text-[11px]">Right Ctrl</kbd> hold to talk · double-tap for hands-free · or hold the Speak button. Long answers are written out while you talk; your name, college and projects are spelled your way, and words you correct are learned.
             <SpeechModeSwitch mode={flow.mode} onChange={flow.setMode} />
           </p>
         )}
@@ -631,8 +646,8 @@ function AnswerPanel({
             {voice.source !== "whisper"
               ? "Live captions only (the accurate transcriber wasn't available). Read it through and fix any misheard word before you submit."
               : flow.supported && flow.cleaned
-                ? "✓ Polished: fillers, false starts and self-corrections cleaned up, nothing added. Your name, college and projects are spelled your way."
-                : "✓ Transcribed word for word, with your name, college, projects and skills spelled your way."}
+                ? "✓ Flowtype polished it: fillers, false starts and self-corrections cleaned up, nothing added. Your name, college and projects are spelled your way."
+                : "✓ Flowtype wrote it word for word, with your name, college, projects and skills spelled your way."}
             {flow.supported && flow.cleaned && (
               <button type="button" onClick={flow.restoreExactWords} className="ml-1 text-cobalt-text hover:underline">
                 Use my exact words
@@ -1003,7 +1018,12 @@ function SpeechModeSwitch({ mode, onChange }: { mode: "polished" | "verbatim"; o
 function MyWords() {
   const [open, setOpen] = useState(false);
   const [text, setText] = useState("");
-  const words = useQuery({ queryKey: ["stt-words"], queryFn: () => api.get<{ words: string[] }>("/stt/words"), enabled: open });
+  const words = useQuery({ queryKey: ["stt-words"], queryFn: () => api.get<{ words: string[]; learned?: string[] }>("/stt/words"), enabled: open });
+  const forget = useMutation({
+    mutationFn: (w: string) => api.put<{ learned: string[] }>("/stt/learned", { words: (words.data?.learned ?? []).filter((x) => x !== w) }),
+    onSuccess: () => words.refetch(),
+    onError: (e: Error) => toast.error(e.message),
+  });
   const save = useMutation({
     mutationFn: (list: string[]) => api.put<{ words: string[] }>("/stt/words", { words: list }),
     onSuccess: (r) => (words.refetch(), setText(""), toast.success(`Saved. ${r.words.length} word${r.words.length === 1 ? "" : "s"} will be spelled your way.`)),
@@ -1033,6 +1053,16 @@ function MyWords() {
         Add
       </Button>
       {!!words.data?.words.length && <span className="text-text-3">Yours: {words.data.words.slice(0, 8).join(", ")}{words.data.words.length > 8 ? "…" : ""}</span>}
+      {!!words.data?.learned?.length && (
+        <span className="flex flex-wrap items-center gap-1 text-text-3">
+          Learned from your corrections:
+          {words.data.learned.slice(0, 8).map((w) => (
+            <button key={w} type="button" onClick={() => forget.mutate(w)} title="Forget this spelling" className="rounded-full border border-border px-1.5 hover:text-text-2">
+              {w} ×
+            </button>
+          ))}
+        </span>
+      )}
     </span>
   );
 }

@@ -291,23 +291,36 @@ Render (API, workers, Postgres) + Vercel (web). Step-by-step, with every environ
 
 ---
 
-### Voice answers: the Flow-style dictation engine
+### Voice answers: Flowtype in the mock interview
 
-Spoken interview answers use push-to-talk dictation built on Wispr Flow's published principles
-(`backend/app/dictation/`, `frontend/lib/flow/`):
+Spoken interview answers use **Flowtype**, the dictation engine from the Flowtype desktop app (`flowtype/`), built on
+Wispr Flow's published principles (`backend/app/dictation/`, `frontend/lib/flow/`):
 
 - **Capture:** hold Right Ctrl (Right Option on a Mac) or the Speak button; double-tap for hands-free. 16 kHz mono with a
   500 ms pre-roll ring buffer and 250 ms post-roll; energy VAD trims silence and sends nothing when no speech was heard;
   peak-normalised, with extra gain for quiet voices.
 - **Context-biased ASR:** Whisper's prompt (≤224 tokens, natural sentences, no instructions) carries the question's terms
   and your dictionary (name, college, employers, projects, skills, and words you add), most important last.
-- **Guards:** silent/looping/stock-phrase segments dropped; a loop retries once without the prompt; ASR falls back to a
-  second model on timeout.
-- **Fixes:** term spellings and a sound-alike match to your dictionary, then by mode:
+- **Context:** the company, role and round, and the answer around the cursor: names and terms already in your answer
+  are spelled the same way, your own words are Whisper's style sample, a take dictated mid-sentence continues it, and
+  a coding round keeps identifiers as code ("get user by id" → getUserById).
+- **Guards (tuned on live Groq output):** silent, low-confidence (avg_logprob < −1.0; Groq's turbo model reports
+  no_speech_prob = 0 even on noise), looping and stock-phrase segments dropped; a loop or the prompt echoed back retries
+  once without the prompt; ASR falls back to a second model on timeout.
+- **Long answers while you talk:** at a natural pause after 4+ s, the finished stretch is transcribed in the background
+  (`POST /api/stt/chunk`), so at release only the last few seconds are left (a 17.5 s answer: text 1.1 s after
+  release, polished).
+- **Spoken formatting:** "new paragraph" and "new line" become breaks.
+- **Learning:** when you submit, a word you corrected after dictating ("Aishan" → Ishaan) is learned, compared in memory
+  and never stored as text; the next dictation spells it your way. Learned words are listed (and removable) under
+  "A word still comes out wrong?".
+- **Fixes:** term spellings and a sound-alike match to your dictionary (Double Metaphone + spelling + an Indian-name sound
+  key), then by mode:
   - **Polished** (default): an LLM clean-up (`app/dictation/cleanup.py`) removes fillers and false starts, resolves
     self-corrections ("Flask, no wait, FastAPI" → FastAPI), adds punctuation, numbered lists and written numbers, and
     never answers the question. A guardrail validator rejects any rewrite that changes more than 35% of the words,
-    falls outside 0.5–1.3× the length, adds a name or number nobody said, or reads like a reply. Rejections, time-outs
+    falls outside 0.5–1.3× the length, adds a name or number nobody said, or reads like a reply ("four thirty" → 4:30
+    and spelling fixes that sound like what was said, "fast API" → FastAPI, are allowed). Rejections, time-outs
     (600 ms) and rate limits fall back to the plain text with only um / uh / stutters removed. "Use my exact words"
     undoes a clean-up.
   - **Word for word:** an AI pass that may only swap in a dictionary word that sounds like what was heard, within a

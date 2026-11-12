@@ -60,3 +60,21 @@ test("edit ratio: untouched, edited, extended", () => {
   assert.equal(editRatio(d, `${d}. I also wrote the tests.`), 0); // typing more after isn't editing the take
   assert.ok(editRatio(d, "I built a FastAPI service for 200 students") > 0.2);
 });
+
+import { findCut } from "./speculative.ts";
+
+test("speculative chunking cuts in the middle of a pause after enough speech", () => {
+  const take = cat(tone(4500, 0.3), noise(700, 0.002), tone(1500, 0.3), noise(400, 0.002));
+  const cut = findCut(take, RATE);
+  assert.ok(cut !== null);
+  const ms = (cut! / RATE) * 1000;
+  assert.ok(ms > 4500 && ms < 5200, `cut at ${ms} ms`);
+});
+
+test("no cut before 4 s of audio, at a short pause, or in pure noise", () => {
+  assert.equal(findCut(cat(tone(2000, 0.3), noise(700, 0.002), tone(1500, 0.3)), RATE), null);
+  assert.equal(findCut(cat(tone(4500, 0.3), noise(250, 0.002), tone(1500, 0.3)), RATE), null);
+  assert.equal(findCut(noise(8000, 0.01), RATE), null);
+  // a pause at the very end may be someone drawing breath mid-sentence: the newest 300 ms are never cut
+  assert.equal(findCut(cat(tone(4500, 0.3), noise(600, 0.002)), RATE), null);
+});

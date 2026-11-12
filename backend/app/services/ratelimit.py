@@ -30,6 +30,7 @@ LIMITS: dict[str, tuple[int, int]] = {
     "code_review": (60, 60 * 60),
     "payments_sync": (60, 60 * 60),
     "stt": (150, 60 * 60),
+    "stt_chunk": (900, 60 * 60),  # long answers are sent in pieces while you talk
 }
 
 

@@ -10,8 +10,12 @@ terminal gets your exact words.
   saying I'll be late") and it's inserted.
 - Say **"new line"** or **"new paragraph"** for a line break.
 
-It's tuned for English with an Indian accent and for Hinglish, which comes out in Roman script. It's separate from
-the JobPilot web app and only borrows ideas from its dictation engine.
+It's tuned for English with an Indian accent and for Hinglish, which comes out in Roman script.
+
+**In JobPilot:** the same engine powers spoken answers in JobPilot's mock interview (`backend/app/dictation/`,
+`frontend/lib/flow/`): the live-tuned guards, the sound match, spoken formatting, context from the answer box,
+speculative chunking and learning from corrections. Command mode stays out of the interview, because rewriting an answer
+with AI would defeat the practice. The desktop app is for everywhere else.
 
 ## Setup (Windows 11)
 

@@ -73,51 +73,127 @@ async def status(user: UserDep) -> dict:
     return {"enabled": enabled(), "model": MODEL if enabled() else None}
 
 
-@router.post("/stt")
-async def transcribe(
-    user: RealUserDep,
-    session: SessionDep,
-    audio: UploadFile = File(...),
-    hint: str = Form(default="", max_length=600),
-    audio_ms: int | None = Form(default=None, ge=0, le=900_000),
-    mode: str | None = Form(default=None, pattern="^(polished|verbatim)$"),
-) -> dict:
-    """One dictation through the Flow-style pipeline (see app.dictation): biased ASR with fallback, hallucination
-    filter, your dictionary, a constrained AI fix. Logs timings (never the audio or text) for latency and Edit Rate."""
-    if not enabled():
-        raise HTTPException(503, "Accurate speech-to-text isn't configured on this server (it needs GROQ_API_KEY). Live browser recognition still works.")
-    await hit("stt", str(user.id))
+class Around(BaseModel):
+    """What the interview shows around the cursor (Flowtype's context collector, for the answer box)."""
+
+    before: str = ""
+    after: str = ""
+    company: str = ""
+    role: str = ""
+    round_name: str = ""
+    kind: str = ""
+
+
+def _around(before: str, after: str, company: str, role: str, round_name: str, kind: str) -> Around:
+    return Around(before=before, after=after, company=company, role=role, round_name=round_name, kind=kind)
+
+
+async def _read_audio(audio: UploadFile | None) -> tuple[bytes, str]:
+    if audio is None:
+        return b"", "webm"
     kind = (audio.content_type or "").split(";")[0].strip()
     if kind not in AUDIO_TYPES:
         raise HTTPException(415, "Unsupported audio format")
     data = await audio.read(MAX_BYTES + 1)
     if len(data) > MAX_BYTES:
         raise HTTPException(413, "That recording is too long. Answer in shorter parts.")
-    if len(data) < 800:
-        return {"text": "", "model": MODEL}
+    ext = {"audio/mp4": "m4a", "audio/mpeg": "mp3", "audio/wav": "wav", "audio/x-wav": "wav", "audio/aac": "aac", "audio/ogg": "ogg"}.get(kind, "webm")
+    return (data if len(data) >= 800 else b""), ext
+
+
+async def _context(session, user, hint: str, around: Around, prefix: str = ""):
+    """Your own words (name, college, employers, projects, skills, the words you added and the ones learned from your
+    corrections), the question's terms and the answer around the cursor."""
     from sqlalchemy import select
 
-    from app.dictation.pipeline import DictationContext, run
-    from app.dictation.providers import ASRError
-    from app.models import Dictation, Profile
+    from app.dictation.context import collect
+    from app.dictation.pipeline import DictationContext
+    from app.models import Profile
     from app.schemas import ResumeData
     from app.services.speech_vocab import personal_vocabulary
 
-    # Your own words (name, college, employers, projects, skills, the words you added) steer the spelling.
     p = (await session.execute(select(Profile).where(Profile.user_id == user.id))).scalar_one_or_none()
     resume = ResumeData.model_validate((p.resume if p else None) or {})
     prefs = (p.preferences if p else None) or {}
     mine = list(prefs.get("speech_words") or [])
-    dictionary = personal_vocabulary(resume, (p.academics if p else None) or {}, [], own_name=user.name or "")
+    learned = list(prefs.get("speech_learned") or [])
+    dictionary = personal_vocabulary(resume, (p.academics if p else None) or {}, learned, own_name=user.name or "")
     context = re.findall(r"\bat ([A-Z][\w&.-]*(?: [A-Z][\w&.-]*){0,3})", hint) + extract_skills(hint)
-    ctx = DictationContext(dictionary=list(reversed(dictionary)), context_terms=context, starred=mine, hint=hint)  # most relevant last
-    ext = {"audio/mp4": "m4a", "audio/mpeg": "mp3", "audio/wav": "wav", "audio/x-wav": "wav", "audio/aac": "aac", "audio/ogg": "ogg"}.get(kind, "webm")
+    answer = collect(question=hint, before=around.before, after=around.after, company=around.company, role=around.role, round_name=around.round_name, kind=around.kind)
+    ctx = DictationContext(dictionary=list(reversed(dictionary)), context_terms=context, starred=mine, hint=hint, answer=answer, prefix=prefix)  # most relevant last
+    return ctx, prefs
+
+
+@router.post("/stt/chunk")
+async def transcribe_chunk(
+    user: RealUserDep,
+    session: SessionDep,
+    audio: UploadFile = File(...),
+    hint: str = Form(default="", max_length=600),
+    before: str = Form(default="", max_length=4000),
+    after: str = Form(default="", max_length=2000),
+    company: str = Form(default="", max_length=120),
+    role: str = Form(default="", max_length=160),
+    round_name: str = Form(default="", max_length=80),
+    kind: str = Form(default="", max_length=40),
+) -> dict:
+    """A finished stretch of a long answer, sent while you're still talking (speculative chunking): ASR and the
+    hallucination filter only. The clean-up runs once, at release, over the whole answer."""
+    if not enabled():
+        raise HTTPException(503, "Accurate speech-to-text isn't configured on this server.")
+    await hit("stt_chunk", str(user.id))
+    data, ext = await _read_audio(audio)
+    if not data:
+        return {"text": "", "ms": 0}
+    from app.dictation.pipeline import transcribe_chunk as run_chunk
+    from app.dictation.providers import ASRError
+
+    ctx, _prefs = await _context(session, user, hint, _around(before, after, company, role, round_name, kind))
+    try:
+        text, ms = await run_chunk(data, f"chunk.{ext}", ctx)
+    except ASRError as exc:
+        raise HTTPException(502, "Transcription failed.") from exc
+    return {"text": text, "ms": ms}
+
+
+@router.post("/stt")
+async def transcribe(
+    user: RealUserDep,
+    session: SessionDep,
+    audio: UploadFile | None = File(default=None),
+    hint: str = Form(default="", max_length=600),
+    audio_ms: int | None = Form(default=None, ge=0, le=900_000),
+    mode: str | None = Form(default=None, pattern="^(polished|verbatim)$"),
+    before: str = Form(default="", max_length=4000),
+    after: str = Form(default="", max_length=2000),
+    company: str = Form(default="", max_length=120),
+    role: str = Form(default="", max_length=160),
+    round_name: str = Form(default="", max_length=80),
+    kind: str = Form(default="", max_length=40),
+    prefix: str = Form(default="", max_length=20000),
+    chunks: int = Form(default=0, ge=0, le=200),
+) -> dict:
+    """One dictation through Flowtype's pipeline (see app.dictation): biased ASR with fallback, hallucination filter,
+    your dictionary, the clean-up behind its guardrails. `prefix` is the text of the chunks already transcribed while
+    you talked; `audio` is the rest. Logs timings (never the audio or text) for latency and Edit Rate."""
+    if not enabled():
+        raise HTTPException(503, "Accurate speech-to-text isn't configured on this server (it needs GROQ_API_KEY). Live browser recognition still works.")
+    await hit("stt", str(user.id))
+    data, ext = await _read_audio(audio)
+    if not data and not prefix.strip():
+        return {"text": "", "model": MODEL}
+    from app.dictation.pipeline import run
+    from app.dictation.providers import ASRError
+    from app.models import Dictation
+
+    ctx, prefs = await _context(session, user, hint, _around(before, after, company, role, round_name, kind), prefix)
     try:
         # Polished (the default) cleans up fillers and self-corrections; word for word keeps exactly what you said.
         mode = mode or prefs.get("speech_mode") or "polished"
-        out = await run(data, f"answer.{ext}", ctx, user.id, ai_fix=ai_correct, mode=mode)
+        out = await run(data or None, f"answer.{ext}", ctx, user.id, ai_fix=ai_correct, mode=mode)
     except ASRError as exc:
         raise HTTPException(502, "Transcription failed. Your live transcript is kept.") from exc
+    out.timings["chunks"] = chunks
     row = Dictation(
         user_id=user.id, model=out.model, fallback=out.fallback, retried=out.retried, audio_ms=audio_ms,
         words=len(out.text.split()), corrections=len(out.corrections), asr_ms=out.timings["asr_ms"], server_ms=out.timings["server_ms"],
@@ -128,6 +204,7 @@ async def transcribe(
     return {
         "text": out.text, "model": out.model, "corrections": out.corrections, "dictation_id": str(row.id), "timings": out.timings,
         "fallback": out.fallback, "mode": out.mode, "cleaned": out.guard == "ok", "raw": out.raw if out.mode == "polished" else None,
+        "continued": bool(ctx.answer and ctx.answer.continues_sentence and not out.text.startswith("\n")),
     }
 
 
@@ -181,7 +258,7 @@ async def get_words(user: UserDep, session: SessionDep) -> dict:
 
     p = (await session.execute(select(Profile).where(Profile.user_id == user.id))).scalar_one_or_none()
     prefs = (p.preferences if p else None) or {}
-    return {"words": prefs.get("speech_words", []), "mode": prefs.get("speech_mode") or "polished"}
+    return {"words": prefs.get("speech_words", []), "learned": prefs.get("speech_learned", []), "mode": prefs.get("speech_mode") or "polished"}
 
 
 class ModeIn(BaseModel):
@@ -217,10 +294,27 @@ async def set_words(body: WordsIn, user: UserDep, session: SessionDep) -> dict:
 
 
 
+@router.put("/stt/learned")
+async def set_learned(body: WordsIn, user: UserDep, session: SessionDep) -> dict:
+    """The spellings learned from your corrections (remove one that was learned wrongly)."""
+    from sqlalchemy import select
+
+    from app.models import Profile
+
+    words = list(dict.fromkeys(w.strip()[:60] for w in body.words if w.strip()))[:100]
+    p = (await session.execute(select(Profile).where(Profile.user_id == user.id))).scalar_one()
+    p.preferences = {**(p.preferences or {}), "speech_learned": words}
+    await session.commit()
+    return {"learned": words}
+
+
 class DictationUpdate(BaseModel):
     client_ms: int | None = Field(default=None, ge=0, le=120_000, description="Key release to text in the answer box")
     edited: bool | None = None
     edit_ratio: float | None = Field(default=None, ge=0, le=5)
+    # At submit: the dictated take and the submitted answer, compared in memory to learn corrected spellings. Never stored.
+    dictated: str | None = Field(default=None, max_length=20000, exclude=True)
+    final: str | None = Field(default=None, max_length=40000, exclude=True)
 
 
 @router.patch("/stt/dictations/{dictation_id}")
@@ -238,8 +332,30 @@ async def update_dictation(dictation_id: str, body: DictationUpdate, user: UserD
         raise HTTPException(404, "No such dictation")
     for k, v in body.model_dump(exclude_none=True).items():
         setattr(row, k, v)
+    learned: list[str] = []
+    if body.dictated and body.final:
+        learned = await _learn(session, user, body.dictated, body.final)
     await session.commit()
-    return {"ok": True}
+    return {"ok": True, "learned": learned}
+
+
+async def _learn(session, user, dictated: str, final: str) -> list[str]:
+    """Flowtype's auto-learn: a word you corrected after dictating ("Kavia" → "Kavya") is spelled your way next time."""
+    from sqlalchemy import select
+
+    from app.dictation.learn import learn, merge_learned
+    from app.models import Profile
+
+    res = learn(dictated, final)
+    if not res or not res.corrections:
+        return []
+    new = [fixed for _wrote, fixed in res.corrections]
+    p = (await session.execute(select(Profile).where(Profile.user_id == user.id))).scalar_one_or_none()
+    if p is None:
+        return []
+    prefs = p.preferences or {}
+    p.preferences = {**prefs, "speech_learned": merge_learned(list(prefs.get("speech_learned") or []), new, list(prefs.get("speech_words") or []))}
+    return new
 
 
 @router.get("/stt/metrics")
