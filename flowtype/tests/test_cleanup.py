@@ -39,6 +39,12 @@ def test_rejects_unfaithful_rewrites(out, reason):
     assert not v.ok and (reason.split()[-1] in v.reason or reason in v.reason), v.reason
 
 
+def test_times_written_as_digits_are_fine():
+    assert check("lets meet on monday at ten", "Let's meet on Monday at 10:00.", []).ok
+    assert check("call me at four thirty", "Call me at 4:30.", []).ok
+    assert not check("call me at four", "Call me at 4:45.", []).ok
+
+
 def test_known_terms_may_be_added():
     assert check("send it to kavia", "Send it to Kavya.", ["Kavya"]).ok
 

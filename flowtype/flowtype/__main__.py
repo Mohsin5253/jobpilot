@@ -42,6 +42,7 @@ def main(argv: list[str] | None = None) -> None:
     e.add_argument("folder", type=Path)
     e.add_argument("--variants", type=Path, help="variants.toml ([[variant]] name=..., set={...})")
     e.add_argument("--out", type=Path, help="report folder (default: <folder>/reports)")
+    e.add_argument("--pace", type=float, default=0.0, help="seconds to wait between clips (API rate limits)")
     sy = sub.add_parser("synth", help="build a synthetic eval set with the OS's text-to-speech")
     sy.add_argument("folder", type=Path)
     db = sub.add_parser("debug", help="open the debug panel (local web page)")
@@ -88,7 +89,7 @@ def main(argv: list[str] | None = None) -> None:
     elif args.cmd == "transcribe":
         _transcribe(cfg, args.wav, args.app)
     elif args.cmd == "eval":
-        _eval(cfg, args.folder, args.variants, args.out)
+        _eval(cfg, args.folder, args.variants, args.out, args.pace)
     elif args.cmd == "synth":
         from flowtype.eval.synth import build
 
@@ -241,7 +242,7 @@ def _transcribe(cfg, wav: Path, app: str | None) -> None:
           f"{' (' + d.llm_reason + ')' if d.llm_reason else ''} · total {d.total_ms} ms", file=sys.stderr)
 
 
-def _eval(cfg, folder: Path, variants_path: Path | None, out: Path | None) -> None:
+def _eval(cfg, folder: Path, variants_path: Path | None, out: Path | None, pace: float = 0.0) -> None:
     from flowtype.eval import harness
 
     clips, words = harness.load_dataset(folder)
@@ -249,7 +250,7 @@ def _eval(cfg, folder: Path, variants_path: Path | None, out: Path | None) -> No
         sys.exit(f"No clips in {folder} (need name.wav + name.txt pairs)")
     variants = harness.load_variants(variants_path)
     print(f"{len(clips)} clips × {len(variants)} variants")
-    results = harness.run(clips, variants, cfg, _make_pipeline_factory(cfg), words)
+    results = harness.run(clips, variants, cfg, _make_pipeline_factory(cfg), words, pace_s=pace)
     summary, comparisons = harness.summarise(results), harness.compare(results)
     print("\n" + harness.report_markdown(summary, comparisons))
     print(f"\nReport: {harness.save(results, summary, comparisons, out or folder / 'reports')}")

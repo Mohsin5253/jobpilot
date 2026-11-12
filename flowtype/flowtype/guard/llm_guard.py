@@ -99,10 +99,13 @@ def check(transcript: str, output: str, known_terms: list[str], max_edit: float 
     base = strip_fillers(transcript)
     a = [_norm(w) for w in _WORD.findall(base) if _norm(w)]
     b = [_norm(w) for w in _WORD.findall(output) if _norm(w)]
+    parts = lambda t: [p for w in _WORD.findall(t) for p in re.findall(r"[a-z]+|\d+", w.lower())]  # noqa: E731
     if not b:
         return Verdict(not a or len(a) <= 2, "empty output" if a and len(a) > 2 else "")
     ratio = len(b) / max(1, len(a))
-    edit = 1 - SequenceMatcher(None, a, b).ratio()
+    # Number words count as their digits, so "four thirty" -> "4:30" isn't an edit.
+    canon = lambda ws: [str(_UNITS.get(w, _TENS.get(w, w))) for w in ws]  # noqa: E731
+    edit = 1 - SequenceMatcher(None, canon(parts(base)), parts(output)).ratio()
     if _ANSWERY.search(output) and not _ANSWERY.search(base):
         return Verdict(False, "reads like a reply", edit, ratio)
     if not MIN_RATIO <= ratio <= MAX_RATIO and abs(len(b) - len(a)) > 2:
@@ -118,7 +121,8 @@ def check(transcript: str, output: str, known_terms: list[str], max_edit: float 
         n = num.replace(",", "").lstrip("0") or "0"
         line_start = output.rfind("\n", 0, m.start()) + 1
         is_list_marker = output[line_start : m.start()].strip() == "" and output[m.end() : m.end() + 1] in (".", ")")
-        if n not in said_numbers and not is_list_marker:  # list numbers 1. 2. 3. are formatting
+        is_zero_minutes = n == "0" and num == "00" and output[m.start() - 1 : m.start()] == ":"  # "ten" -> 10:00
+        if n not in said_numbers and not is_list_marker and not is_zero_minutes:  # list numbers 1. 2. 3. are formatting
             return Verdict(False, f"added the number {num}", edit, ratio)
     for i, w in enumerate(_WORD.findall(output)):
         bare = w.strip(".,;:!?'\"()")

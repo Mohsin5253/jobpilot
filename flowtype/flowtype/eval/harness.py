@@ -29,6 +29,7 @@ import numpy as np
 from flowtype.audio.dsp import read_wav
 from flowtype.config import Config, _apply
 from flowtype.context.focus import FocusInfo, FocusProbe
+from flowtype.eval.normalize import normalize
 
 
 @dataclass
@@ -66,9 +67,11 @@ _CHAR = jiwer.Compose([jiwer.ToLowerCase(), jiwer.RemovePunctuation(), jiwer.Rem
 
 
 def score(reference: str, hypothesis: str) -> tuple[float, float]:
+    """WER and CER after normalising numbers, currency, times and ordinals (eval/normalize.py)."""
     if not reference.strip():
         return (0.0 if not hypothesis.strip() else 1.0), 0.0
-    hyp = hypothesis if hypothesis.strip() else "∅"
+    reference = normalize(reference)
+    hyp = normalize(hypothesis) if hypothesis.strip() else "∅"
     w = jiwer.wer(reference, hyp, reference_transform=_TRANSFORM, hypothesis_transform=_TRANSFORM)
     c = jiwer.cer(reference, hyp, reference_transform=_CHAR, hypothesis_transform=_CHAR)
     return float(w), float(c)
@@ -108,20 +111,26 @@ def apply_overrides(cfg: Config, overrides: dict) -> Config:
 
 
 class CachingASR:
-    """In-memory cache of ASR responses keyed by audio, prompt, language and engine."""
+    """In-memory cache of ASR responses keyed by audio, prompt, language and engine. A cache hit waits as long as the
+    original call took (`replay_latency`), so every variant's latency stays comparable."""
 
-    def __init__(self, inner):
+    def __init__(self, inner, replay_latency: bool = True):
         self.inner = inner
         self.name = inner.name
-        self.cache: dict[str, object] = {}
+        self.cache: dict[str, tuple[object, float]] = {}
         self.calls = 0
+        self.replay_latency = replay_latency
 
     def transcribe(self, audio, prompt, lang):
         key = hashlib.sha1(np.ascontiguousarray(audio).tobytes() + f"|{prompt}|{lang}|{self.inner.name}".encode()).hexdigest()
         if key not in self.cache:
             self.calls += 1
-            self.cache[key] = self.inner.transcribe(audio, prompt, lang)
-        return copy.deepcopy(self.cache[key])
+            t = time.perf_counter()
+            res = self.inner.transcribe(audio, prompt, lang)
+            self.cache[key] = (res, time.perf_counter() - t)
+        elif self.replay_latency:
+            time.sleep(self.cache[key][1])
+        return copy.deepcopy(self.cache[key][0])
 
 
 class _Capture:
@@ -133,7 +142,7 @@ class _Capture:
         return 0
 
 
-def run(clips: list[Clip], variants: list[Variant], base_cfg: Config, make_pipeline, words: list[str] | None = None, progress=print) -> list[ClipResult]:
+def run(clips: list[Clip], variants: list[Variant], base_cfg: Config, make_pipeline, words: list[str] | None = None, progress=print, pace_s: float = 0.0) -> list[ClipResult]:
     """`make_pipeline(cfg, injector)` returns a Pipeline (the CLI builds a real one; tests pass fakes)."""
     results: list[ClipResult] = []
     for v in variants:
@@ -151,6 +160,8 @@ def run(clips: list[Clip], variants: list[Variant], base_cfg: Config, make_pipel
             terms = [t for t in (words or []) if t.lower() in ref.lower()]
             hit = sum(1 for t in terms if t in hyp)
             results.append(ClipResult(clip.name, v.name, hyp, d.status, w, c, d.total_ms or 0, d.asr_ms, d.llm_status, hit, len(terms)))
+            if pace_s:
+                time.sleep(pace_s)  # stay inside the API's per-minute limits
             progress(f"  {v.name:18} {clip.name:28} {d.status:10} " + (f"WER {w:5.1%}" if w is not None else ("HALLUCINATED: " + hyp[:40] if hyp else "ok (nothing)")))
     return results
 

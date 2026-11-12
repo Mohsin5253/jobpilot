@@ -7,6 +7,9 @@ tap_max_ms = 250          # shorter than this is a tap, not a hold
 double_tap_gap_ms = 350   # two taps within this toggle hands-free
 max_record_s = 120
 
+[command]
+modifier = "shift"        # hold Shift, then the hotkey: speak an instruction for the selected text ("none" to turn off)
+
 [audio]
 device = ""               # name or index from `python -m flowtype devices`; "" = system default
 preroll_ms = 400
@@ -16,27 +19,55 @@ max_gain_db = 30.0
 
 [vad]
 threshold = 0.5
-min_speech_ms = 250       # less speech than this = nothing is pasted
+min_speech_ms = 250       # less speech than this = nothing is pasted (one-word replies measure ~600 ms)
 pad_ms = 200
 
 [asr]
 provider = "groq"
 model = "whisper-large-v3-turbo"
 language = "en"           # pinned. Hinglish also uses "en" so it comes out in Roman script
-style = "en-IN"           # "en-IN" or "hinglish"
+style = "en-IN"           # "en-IN" or "hinglish": the style sample at the start of the bias prompt
 timeout_s = 10.0
+mode = "fast"             # "fast", or "max_accuracy": two engines in parallel, the more confident wins
+second_model = "whisper-large-v3"   # max-accuracy's other engine; "local" = faster-whisper
+fallback = "local"        # when Groq fails: "local" (faster-whisper, offline), "groq" (another Groq model) or "none"
+local_model = "small"     # faster-whisper size: tiny, base, small, medium, large-v3 (`flowtype fetch-model`)
+speculative = true        # long dictations are transcribed in chunks while you talk
+chunk_min_s = 4.0
+chunk_pause_ms = 500
 
-[llm]                     # the clean-up pass arrives in Phase 2
+[llm]
 provider = "groq"
-model = "llama-3.3-70b-versatile"
-enabled = false
+enabled = true            # the clean-up pass and command mode
+mode = "polished"         # "polished" (LLM clean-up, guarded) or "verbatim" (your exact words, um/uh removed)
+model = "qwen/qwen3.8-27b"
+reasoning = "none"
+fallback_model = "openai/gpt-oss-20b"
+fallback_reasoning = "low"
+budget_ms = 1200          # a slower clean-up is abandoned and the un-cleaned text pasted
+
+[styles]
+# Force a style for an app or a window title: email, chat, code, document, terminal (exact words), general.
+apps = {}                 # e.g. { "jira" = "document", "notion" = "document" }
+
+[context]
+enabled = true            # names and terms near the cursor bias the transcription (never stored)
+
+[learn]
+enabled = true            # re-read the field after a paste: learn corrected spellings, measure Edit Rate
+delay_s = 10.0
 
 [inject]
 restore_delay_ms = 150
 refuse_password_fields = true
 
 [store]
-store_text = false        # true = also keep the pasted text in flowtype.db (it never leaves this machine)
+store_text = false        # true = keep what you dictated (history, `flowtype history`); it never leaves this machine
+history_days = 30         # stored text older than this is erased at startup
+
+[ui]
+overlay = true            # the floating status pill
+debug_port = 8765         # `flowtype debug`
 
 [dictionary]
-words = []                # or: python -m flowtype words add "Mohsin Sidhpurwala" --star
+words = []                # or: python -m flowtype words add "Kavya Menon" --star

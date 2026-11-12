@@ -90,6 +90,7 @@ class Controller:
         self.focus_down = None
         self.spec = None
         self._last_spec = 0.0
+        self._started = 0.0
 
     def handle(self, ev: tuple) -> None:
         kind, at = ev[0], ev[1]
@@ -110,7 +111,8 @@ class Controller:
         self.handle(("tick", now))
         if self.recorder.recording and self.spec_factory is not None and not self.command and now - self._last_spec >= SPECULATIVE_EVERY_S:
             self._last_spec = now
-            if self.spec is None and self.focus_down is not None:
+            ready = self.focus_down is not None and (getattr(self.focus_down, "done", True) or now - self._started >= 1.0)
+            if self.spec is None and ready:  # build the prompt once the key-down context is in (or give up after 1 s)
                 self.spec = self.spec_factory(self.focus_down.result(timeout=0))
             if self.spec is not None:
                 self.spec.update(self.recorder.peek())
@@ -119,7 +121,7 @@ class Controller:
         if a is Action.START:
             self.recorder.start()
             self.focus_down = self.FocusProbe(self.probe)  # context while you speak: terms, selection, style
-            self.spec, self._last_spec = None, at
+            self.spec, self._last_spec, self._started = None, at, at
             self.ui.recording()
             self.post("command" if self.command else "recording", "")
         elif a is Action.HANDSFREE_ON:

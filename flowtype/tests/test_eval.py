@@ -69,3 +69,37 @@ def test_caching_asr():
 def test_paired_bootstrap():
     mean, lo, hi = harness.paired_bootstrap([0.2] * 20, [0.1] * 20)
     assert abs(mean + 0.1) < 1e-9 and hi < 0
+
+
+def test_numbers_are_normalised_before_scoring():
+    from flowtype.eval.normalize import normalize
+
+    cases = [
+        ("The invoice is for twelve thousand five hundred rupees, due on the third of December.", "The invoice is for ₹12,500, due on the 3rd of December."),
+        ("We grew from two hundred to eighteen hundred users in six weeks.", "We grew from 200 to 1,800 users in 6 weeks."),
+        ("Call at four thirty.", "Call at 4:30."),
+        ("It dropped by thirty percent.", "It dropped by 30%."),
+        ("Five lakh rupees", "Rs. 5,00,000"),
+    ]
+    for ref, hyp in cases:
+        assert harness.score(ref, hyp)[0] == 0.0, (normalize(ref), normalize(hyp))
+    assert harness.score("send two files", "send 3 files")[0] > 0  # a wrong number is still an error
+    assert normalize("first, we cleaned it") == "first we cleaned it"  # an enumeration isn't an ordinal date
+
+
+def test_cache_hit_replays_latency():
+    import time as _t
+
+    class Slow:
+        name = "slow"
+
+        def transcribe(self, *a):
+            _t.sleep(0.05)
+            return ok("x")
+
+    c = harness.CachingASR(Slow())
+    a = np.ones(10, np.float32)
+    c.transcribe(a, "", "en")
+    t = _t.perf_counter()
+    c.transcribe(a, "", "en")
+    assert _t.perf_counter() - t >= 0.045 and c.calls == 1

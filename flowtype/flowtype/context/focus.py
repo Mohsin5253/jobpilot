@@ -52,6 +52,10 @@ class FocusProbe:
 
         threading.Thread(target=run, daemon=True, name="focus-probe").start()
 
+    @property
+    def done(self) -> bool:
+        return self._done.is_set()
+
     def result(self, timeout: float = 0.3) -> FocusInfo:
         return self._info if self._done.wait(timeout) and self._info else FocusInfo(ms=int((time.perf_counter() - self._t0) * 1000))
 

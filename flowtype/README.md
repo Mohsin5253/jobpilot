@@ -1,14 +1,17 @@
 # Flowtype
 
-Push-to-talk dictation that works in any app. Hold **Right Ctrl**, speak, let go, and the text appears at your cursor.
-Double-tap Right Ctrl for hands-free; tap once more to stop, or press Esc to cancel.
+Push-to-talk dictation that works in any app. Hold **Right Ctrl**, speak, let go, and clean, punctuated text appears
+at your cursor, written for the app you're in: an email reads like an email, a Slack message stays casual, and a
+terminal gets your exact words.
 
-It's tuned for English with an Indian accent and for Hinglish. It's separate from the JobPilot web app and only
-borrows ideas from its dictation engine.
+- **Hold** Right Ctrl to dictate. **Double-tap** for hands-free; tap again to stop, or press Esc to cancel.
+- **Shift + Right Ctrl** is command mode. Select some text, say "make this more formal", "translate to Hindi" or "turn
+  this into bullet points", and the selection is replaced. With nothing selected, say what to write ("a two-line reply
+  saying I'll be late") and it's inserted.
+- Say **"new line"** or **"new paragraph"** for a line break.
 
-This is **Phase 1**: the hotkey, audio, VAD, Groq Whisper, the hallucination guards, the paste, and latency logging.
-The LLM clean-up, the learning dictionary, the context from the focused window, the overlay and the local fallback
-come later (see [Roadmap](#roadmap)).
+It's tuned for English with an Indian accent and for Hinglish, which comes out in Roman script. It's separate from
+the JobPilot web app and only borrows ideas from its dictation engine.
 
 ## Setup (Windows 11)
 
@@ -21,10 +24,12 @@ py -3.11 -m venv .venv
 pip install -e ".[dev]"
 python -m flowtype set-key groq        # paste your Groq API key; it goes into Windows Credential Manager
 python -m flowtype fetch-tokenizer     # optional (2 MB): counts prompt length exactly instead of estimating
+python -m flowtype fetch-model         # optional (~500 MB for "small"): the offline fallback
 python -m flowtype                     # start dictating
 ```
 
-Open Notepad, click into it, hold Right Ctrl, say a sentence, and let go. The terminal shows `✓ 9 words in 480 ms`.
+Open Notepad, click into it, hold Right Ctrl, say a sentence, and let go. A pill at the bottom of the screen shows
+Listening → Transcribing → ✓, and the terminal prints the timings.
 
 Windows permissions:
 - **Microphone**: Settings → Privacy & security → Microphone → turn on "Let desktop apps access your microphone".
@@ -44,13 +49,13 @@ python -m flowtype
 Right Ctrl is missing from most Mac keyboards. Set another key in `config.toml`, such as `key = "alt_r"` (Right
 Option) or `key = "f13"`.
 
-macOS permissions. Grant each one to the app you launch Flowtype from (Terminal, iTerm or VS Code), then restart that
-app:
+macOS permissions. Grant each one to the app you launch Flowtype from (Terminal, iTerm or VS Code), or to
+Flowtype.app if you use the packaged app, then restart it:
 - **Microphone**: System Settings → Privacy & Security → Microphone. macOS asks the first time.
 - **Input Monitoring**: Privacy & Security → Input Monitoring. Without it the hotkey is never seen, and Flowtype
   warns about this at startup.
-- **Accessibility**: Privacy & Security → Accessibility. Flowtype needs it to send Cmd+V and to detect password
-  fields.
+- **Accessibility**: Privacy & Security → Accessibility. Flowtype needs it to send Cmd+V, to read the text around the
+  cursor for context, and to detect password fields.
 
 While a password field has focus, macOS turns on Secure Input and Flowtype refuses to paste. Terminal's "Secure
 Keyboard Entry" setting does the same.
@@ -61,66 +66,126 @@ Keyboard Entry" setting does the same.
 |---|---|
 | `python -m flowtype` | Run the dictation app (Ctrl+C to quit) |
 | `python -m flowtype set-key groq` / `delete-key groq` | Store or remove the API key in the OS keychain |
-| `python -m flowtype devices` | List microphones (set `audio.device` in `config.toml`) |
-| `python -m flowtype stats` | Recent dictations with per-stage latency, plus p50/p95 |
-| `python -m flowtype words add "Mohsin Sidhpurwala" --star` | Add words to your dictionary (`list`, `remove`) |
-| `python -m flowtype transcribe clip.wav` | Run the pipeline on a WAV file and print the text instead of pasting |
-| `python -m flowtype eval folder/` | WER and latency over `name.wav` + `name.txt` pairs |
-| `python -m flowtype where` | Show the data folder |
+| `python -m flowtype words add "Kavya Menon" --star` | Add words to your dictionary (`list`, `remove`). Learned words show as "(learned)" |
+| `python -m flowtype snippets add "my email address" "kavya@example.com"` | Say the cue, get the expansion (`list`, `remove`) |
+| `python -m flowtype history [--search X] [--copy ID] [--erase]` | What you dictated (needs `store_text = true`) |
+| `python -m flowtype stats` | Recent dictations, per-stage p50/p95, Edit Rate |
+| `python -m flowtype debug` | The debug panel in your browser (local only) |
+| `python -m flowtype transcribe clip.wav [--app slack.exe]` | Run the full pipeline on a file and print the text instead of pasting |
+| `python -m flowtype synth evalset/` | Build a synthetic eval set with the OS's voices |
+| `python -m flowtype eval evalset/ --variants variants.toml --pace 2.5` | WER / CER / term accuracy / hallucinations / latency, with A/B comparisons |
+| `python -m flowtype autostart enable` | Start at login (`disable`, `status`) |
+| `python -m flowtype devices` / `where` | List microphones / show the data folder |
 
-Settings: copy [`config.example.toml`](config.example.toml) to the data folder as `config.toml` and edit it.
+Settings: copy [`config.example.toml`](config.example.toml) to the data folder as `config.toml`. Every setting is
+explained in that file.
 
 ## How a dictation works
 
 ```
 key down ─► recorder: the 400 ms pre-roll ring buffer becomes the start of the clip
+         ─► context: app, window title, text before the caret, selection (UI Automation / AX), in the background
+talking  ─► speculative chunks: at each natural pause after 4 s or more, the audio so far goes to ASR in the background
 key up   ─► + 250 ms post-roll ─► Silero VAD trim (no speech → nothing pasted, no API call)
-         ─► peak-normalise to −3 dBFS ─► bias prompt (style sample, your words, starred words last, ≤224 tokens)
-         ─► Groq whisper-large-v3-turbo (temperature 0, language pinned, verbose segments)
-         ─► guard: drop no-speech / looping / stock-phrase segments; one retry without the prompt on a loop or echo
-         ─► dictionary: phonetic match to your words, technical-term spellings
-         ─► focused field is a password field? refuse
+         ─► peak-normalise to −3 dBFS
+         ─► bias prompt: style sample, context terms, your dictionary, starred terms last (≤224 Whisper tokens)
+         ─► ASR: Groq whisper-large-v3-turbo (temperature 0, language pinned, verbose segments)
+               · speculative: only the remainder is left to transcribe
+               · falls back to local faster-whisper when Groq fails (then skips Groq for 60 s)
+               · max-accuracy mode: two engines in parallel, the more confident transcript wins
+         ─► hallucination guard: drop no-speech / looping / stock-phrase segments; one retry without the prompt on a loop or echo
+         ─► dictionary pre-pass: Double Metaphone + rapidfuzz match to your words, technical spellings
+         ─► "new line" / "new paragraph"
+         ─► LLM clean-up in the app's style (qwen3.8-27b; gpt-oss-20b when rate-limited), checked by the guardrail:
+               rejected if it changes >35% of the words, changes the length a lot, adds a name, term or number
+               nobody said, or reads like a reply. Then the un-cleaned text is pasted instead.
+               (Command mode: the LLM applies your instruction to the selection instead.)
+         ─► snippets ─► password field? refuse
          ─► save clipboard, set text, Ctrl+V / Cmd+V, restore the clipboard 150 ms later
          ─► one row in SQLite `dictations` with every stage's latency
+10 s later ─► re-read the field: Edit Rate, and corrected names ("Kavia" → "Kavya") join the dictionary
 ```
 
-The focused-field check runs in parallel with the ASR, so it adds almost no latency. On a fast connection, expect
-about 250 ms of post-roll, 200 to 300 ms of ASR and about 20 ms of paste.
+### App styles
+
+| Style | Apps (process or window title) | Clean-up |
+|---|---|---|
+| email | Outlook, Thunderbird, Mail, Spark; Gmail / Outlook in a browser | sentences, paragraphs, greeting and sign-off on their own lines |
+| chat | Slack, Teams, WhatsApp, Discord, Telegram, Signal, Messages | casual, short, no final full stop on a one-liner |
+| code | VS Code, Cursor, JetBrains IDEs, Xcode, Sublime, Zed, Vim; GitHub in a browser | spelled-out identifiers become code (`getUserById`) |
+| document | Word, Notepad, Pages, Notion, Obsidian, OneNote; Google Docs, Confluence | sentences, paragraphs, lists |
+| terminal | Windows Terminal, PowerShell, cmd, Terminal, iTerm, WezTerm | none: your exact words |
+| general | everything else | sentences |
+
+Override per app with `[styles] apps = { "jira" = "document" }`.
+
+## Measured
+
+Here are the numbers measured on the macOS dev machine against the live Groq API. The audio is synthetic speech in
+the three macOS Indian-English voices, so these numbers aren't a measure of your own voice. Run
+`flowtype eval` on your own recordings for that.
+
+EVAL_RESULTS
 
 ## Privacy
 
 - **Keys** live only in the OS keychain (`keyring`: Windows Credential Manager or macOS Keychain). They're never in
   config files, logs or the database.
-- **Audio** never touches the disk. Samples stay in memory, go to Groq for transcription, and the buffer is zeroed
-  as soon as the dictation is done. The mic stream stays open for the pre-roll, so the OS mic indicator stays on
-  while Flowtype runs. Only the last 400 ms are kept, in memory.
-- **Data** is stored in one local SQLite file, `flowtype.db` in the data folder. By default it records only timings,
-  counts, status and the app name. To also keep the text you dictated, set `store_text = true`. Phase 2's learning
-  from corrections needs it.
+- **Audio** never touches the disk. Samples stay in memory and go to Groq, or to the local model, for
+  transcription. Every buffer, speculative chunks included, is zeroed as soon as it's done. The mic stream stays
+  open for the pre-roll, so the OS mic indicator stays on while Flowtype runs; only the last 400 ms are kept, in
+  memory.
+- **Text** goes to Groq for the clean-up (the transcript and your dictionary terms). Set `llm.enabled = false` or
+  `mode = "verbatim"` to keep it from the LLM.
+- **Context** (the text around the cursor) is used in memory only: just the extracted names and terms go into the
+  prompt, and none of it is stored. Password fields are never read.
+- **Data** is stored in one local SQLite file, `flowtype.db` in the data folder. By default it records timings,
+  counts, status, the app, the style and the Edit Rate, but not what you said. `store_text = true` keeps history,
+  which is erased after `history_days`. `flowtype history --erase` erases it now.
+- **Learning** keeps the pasted text in memory for 10 seconds, until it re-reads the field. Only the corrected
+  spelling is stored.
+- **The debug panel** listens on 127.0.0.1 only, is read-only, and rejects requests that aren't addressed to localhost.
 - **Clipboard**: Flowtype marks the dictated text so Windows clipboard history and cloud clipboard skip it, and so
-  do clipboard managers on macOS. Your original clipboard comes back in every format (text, rich text, images,
-  copied files). If you copy something else within those 150 ms, Flowtype leaves it alone.
+  do clipboard managers on macOS. Your original clipboard comes back in every format.
+
+## Packaging and autostart
+
+```powershell
+.\scripts\build_windows.ps1        # → dist\Flowtype\Flowtype.exe (no console window)
+```
+```bash
+./scripts/build_macos.sh           # → dist/Flowtype.app (menu-bar style, no Dock icon)
+```
+
+The packaged app takes the same subcommands (`Flowtype.exe set-key groq`). `flowtype autostart enable` adds Flowtype
+to your login items. On Windows that's a per-user Run key and needs no admin rights; on macOS it's a LaunchAgent. It
+uses the packaged executable when there is one.
 
 ## Code layout
 
 ```
 flowtype/
-  audio/       recorder.py (sounddevice, pre/post-roll), dsp.py (normalise, WAV in memory)
+  audio/       recorder.py (sounddevice, pre/post-roll, level, peek), dsp.py (normalise, WAV in memory)
   vad/         silero.py (Silero ONNX via faster-whisper, trim)
-  asr/         base.py (ASRProvider), groq_whisper.py, prompt.py (bias prompt, token budget)
-  guard/       hallucination.py (no_speech_prob, compression ratio, stock phrases, loop/echo retry)
-  dictionary/  phonetic.py (sound-alike match to your words), terms.py (technical spellings)
-  context/     focus.py (focused app, password-field check: UI Automation / AX)
-  inject/      clipboard.py (save → set → paste → restore), win_clipboard.py, mac_clipboard.py
-  hotkey/      state.py (hold / double-tap state machine), listener.py (pynput)
-  llm/         base.py (LLMProvider), groq_llm.py: interface only in Phase 1
-  store/       db.py (SQLite: dictations, dictionary)
-  ui/          console.py (Phase 1 status line)
-  eval/        wer.py (WER, Edit Rate)
-  pipeline/    dictate.py (one dictation), app.py (threads and wiring)
+  asr/         base.py (ASRProvider), groq_whisper.py, local_whisper.py (faster-whisper), chain.py (fallback, dual),
+               prompt.py (bias prompt, token budget)
+  context/     focus.py (UIA / AX collector: app, title, before-caret text, selection, password), terms.py
+  dictionary/  matcher.py (Double Metaphone + rapidfuzz), snippets.py, learn.py (corrections → dictionary, Edit Rate),
+               terms.py (technical spellings), phonetic.py (shared sound keys)
+  llm/         base.py (LLMProvider), groq_llm.py (+ ModelChain with 429 cooldown), cleanup.py, styles.py
+  guard/       hallucination.py (ASR guard), llm_guard.py (clean-up guardrails)
+  inject/      clipboard.py (save → set → paste → restore; copy selection), win_clipboard.py, mac_clipboard.py
+  hotkey/      state.py (hold / double-tap state machine), listener.py (pynput, command modifier)
+  pipeline/    dictate.py (one dictation), speculative.py, commands.py, app.py (Controller, threads, wiring)
+  store/       db.py (SQLite: dictations, dictionary, snippets; migrations)
+  ui/          overlay.py (PySide6 pill), console.py, debug_server.py
+  eval/        harness.py (jiwer, A/B, bootstrap), synth.py (TTS dataset), wer.py
+  autostart.py
+packaging/     flowtype.spec (PyInstaller)
+scripts/       build_windows.ps1, build_macos.sh
 ```
 
-The interfaces the rest of the code depends on:
+The interfaces everything else depends on:
 
 ```python
 class ASRProvider(Protocol):
@@ -131,6 +196,7 @@ class ASRProvider(Protocol):
 class LLMProvider(Protocol):
     name: str
     def complete(self, system: str, user: str, *, max_tokens: int = 512, temperature: float = 0.0) -> str: ...
+    def chat(self, messages: list[dict], *, max_tokens: int = 512, temperature: float = 0.0, timeout_s: float | None = None) -> str: ...
 ```
 
 ## Tests
@@ -139,13 +205,31 @@ class LLMProvider(Protocol):
 python -m pytest
 ```
 
-They cover the prompt builder's token limit (fuzzed against Whisper's real tokenizer when it's cached), the
-hallucination filter, clipboard save and restore (including "don't clobber a newer copy" and "restore even if the
-paste fails"), the hotkey state machine, pre-roll and post-roll capture, and the whole pipeline with fake ASR.
+There are 147 tests. Each file covers:
 
-## Roadmap
+- **prompt**: the token limit. It's fuzzed against Whisper's real tokenizer when that's cached, so a prompt can never
+  exceed 224 tokens.
+- **hallucination**: stock phrases, weak phrases with confidence, no_speech_prob, compression ratio, loops, and the
+  echo retry.
+- **clipboard**: every format restored; a newer copy is never clobbered; the clipboard is restored even if the
+  paste fails; an unreadable clipboard means no paste.
+- **cleanup**: the guardrails (replies, added names and numbers, times, lists, length), fictional few-shots only,
+  the ≤1,000-token budget, fallbacks, the 429 cooldown, and the style table.
+- **context**: term extraction, terms reaching the prompt, and password fields never read.
+- **dictionary**: phonetic fixes and ordinary words left alone, snippets, learning from corrections, and Edit Rate.
+- **asr_chain**: the fallback and its circuit breaker, dual-engine choice, speculative chunk order, and the
+  whole-clip fallback.
+- **commands**: spoken formatting, command mode with and without a readable selection.
+- **eval**: jiwer scoring, dataset and variants, A/B comparison, the bootstrap, and the ASR cache.
+- **phase7**: the overlay model and an offscreen Qt run, the controller (hold, tap, command, speculative feed),
+  history and retention, the database migration, copy-selection, autostart on all three OSes, the debug panel's
+  localhost guard, and the CLI.
+- **hotkey, audio, pipeline**: the state machine, pre-roll and post-roll, and the end-to-end pipeline with fakes.
 
-- **Phase 2**: LLM clean-up with guardrails (it may only change words that sound like your dictionary words);
-  context from the focused window (UI Automation / AX) added to the prompt; a dictionary that learns from your
-  edits, with Edit Rate; a PySide6 overlay; a local faster-whisper fallback when Groq is slow or offline.
-- Later: per-app styles, packaging (a signed .exe / .app), auto-start at login.
+## Troubleshooting
+
+- **`ModuleNotFoundError: flowtype` on macOS after reinstalling packages**: macOS sometimes marks the venv's `.pth`
+  file hidden, and recent Python versions skip hidden `.pth` files. Run `pip install -e .` again.
+- **Nothing happens on the hotkey (macOS)**: grant Input Monitoring to the app you launched from, then restart it.
+- **Text appears in the wrong place or not at all (Windows)**: the target app may be elevated (see above), or may
+  block simulated Ctrl+V. Check `flowtype stats` for the status.
