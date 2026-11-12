@@ -35,6 +35,7 @@ from app.services.job_store import job_as_posting, store_postings
 from app.sources.authenticity import FIRST_PARTY, looks_legit
 from app.sources.base import USER_AGENT, Posting, is_relevant
 from app.sources.providers import ALL_SOURCES
+from app.safety import egress
 
 SOURCES = {s.name: s for s in ALL_SOURCES}
 BOARD_FIELDS = {"greenhouse": "greenhouse_boards", "lever": "lever_boards", "ashby": "ashby_boards", "career_page": "career_pages"}
@@ -259,7 +260,7 @@ async def ingest(claimed: list[Claimed]) -> IngestResult:
                 log.warning("ingest.target_failed", source=c.source, target=c.target, error=repr(exc)[:300])
                 return exc
 
-    async with httpx.AsyncClient(headers={"User-Agent": USER_AGENT}, follow_redirects=True) as client:
+    async with egress.client("ingest", headers={"User-Agent": USER_AGENT}, follow_redirects=True) as client:
         results = await asyncio.gather(*(guarded(c) for c in claimed))
 
     postings: list[Posting] = []

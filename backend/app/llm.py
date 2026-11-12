@@ -37,6 +37,51 @@ FALLBACK_BETA = "server-side-fallback-2026-07-01"
 _GROQ_GENERATION_ERRORS = ("json_validate_failed", "output_parse_failed", "does not match the expected schema", "parsing failed")
 
 
+
+_ECHO = re.compile(r"""(['"]?(failed_generation|input_value|input|generation|content|text)['"]?\s*[:=]\s*)(\{.*?\}|'(?:[^'\\]|\\.)*'|"(?:[^"\\]|\\.)*"|\S+)""", re.S | re.I)
+
+
+def scrub_error(message: str) -> str:
+    """Provider and validation errors can quote what the model wrote; keep the error, drop the quote."""
+    return _ECHO.sub(r"\1[removed]", message or "")[:500]
+
+
+async def _cache_get(key: str) -> dict | None:
+    from sqlalchemy import text
+
+    try:
+        async with session_scope() as s:
+            return (await s.execute(text("SELECT payload FROM ai_feature_cache WHERE key = :k AND created_at > now() - interval '30 days'"), {"k": key})).scalar_one_or_none()
+    except Exception:  # noqa: BLE001 - a cache miss is always safe
+        return None
+
+
+async def _cache_put(key: str, agent: str, user_id, payload: dict) -> None:
+    from sqlalchemy import text
+
+    try:
+        async with session_scope() as s:
+            await s.execute(
+                text(
+                    "INSERT INTO ai_feature_cache (key, agent, user_id, payload) VALUES (:k, :a, :u, CAST(:p AS jsonb)) "
+                    "ON CONFLICT (key) DO NOTHING"
+                ),
+                {"k": key, "a": agent, "u": user_id, "p": json.dumps(payload)},
+            )
+    except Exception as exc:  # noqa: BLE001
+        log.warning("llm.cache_put_failed", error=type(exc).__name__)
+
+
+def content_free_error(exc: Exception) -> str:
+    """A validation error without the text that failed: field paths and error types only. Run traces never keep
+    prompts or AI replies, and pydantic's default message quotes the reply (input_value=...)."""
+    if isinstance(exc, ValidationError):
+        parts = [f"{'.'.join(str(x) for x in e.get('loc', ())) or 'root'}: {e.get('type', 'invalid')}" for e in exc.errors(include_input=False, include_url=False)[:8]]
+        return ("validation failed: " + "; ".join(parts))[:500]
+    if isinstance(exc, json.JSONDecodeError):
+        return f"invalid JSON at position {exc.pos}"
+    return type(exc).__name__
+
 class LLMUnavailable(Exception):
     """No model available (offline mode or the API failed after retries)."""
 
@@ -223,6 +268,7 @@ class LLM:
         schema: type[T],
         ctx: CallContext,
         max_tokens: int = 8000,
+        cache: bool = False,
     ) -> T:
         if not self.enabled or self._client is None:
             raise LLMUnavailable("LLM disabled (offline mode)")
@@ -234,7 +280,25 @@ class LLM:
             if await over_ai_budget(ctx.user_id):
                 raise LLMUnavailable("Daily AI budget for your plan reached")
 
+        if "<<UNTRUSTED" in prompt:
+            from app.safety.untrusted import SYSTEM_NOTE
+
+            system = f"{system}\n\n{SYSTEM_NOTE}"
         model = self.model_for(tier)
+        # Repeatable scores: a cached answer for exactly this model, prompt and schema is reused, so re-running a match
+        # on the same resume and posting gives the same result (models don't sample deterministically, even at
+        # temperature 0). The key is a hash; the row is deleted with the account and after 30 days.
+        key = None
+        if cache:
+            import hashlib
+
+            key = hashlib.sha256("\x1f".join([self.provider, model, agent, schema.__name__, json.dumps(schema.model_json_schema(), sort_keys=True), system, prompt]).encode()).hexdigest()
+            hit = await _cache_get(key)
+            if hit is not None:
+                try:
+                    return schema.model_validate(hit)
+                except ValidationError:
+                    pass
         call = self._groq if self.provider == "groq" else self._anthropic
         usage = {"in": 0, "out": 0, "cache": 0}
         started = time.perf_counter()
@@ -263,8 +327,8 @@ class LLM:
                 try:
                     reply = await send()
                 except _Repairable as exc:
-                    last_error = str(exc)
-                    current_prompt = f"{prompt}\n\n---\nYour previous answer did not match the required JSON schema ({last_error[:300]}). Answer again with JSON that matches it exactly."
+                    last_error = "provider rejected the output: " + next((m for m in _GROQ_GENERATION_ERRORS if m in str(exc).lower()), "invalid")
+                    current_prompt = f"{prompt}\n\n---\nYour previous answer did not match the required JSON schema ({scrub_error(str(exc))[:300]}). Answer again with JSON that matches it exactly."
                     continue
                 except LLMUnavailable as exc:
                     await self._record(ctx, agent, model, usage, started, attempt, False, str(exc)[:1000])
@@ -286,15 +350,19 @@ class LLM:
                 try:
                     parsed = schema.model_validate_json(reply.text)
                 except (ValidationError, json.JSONDecodeError, ValueError) as exc:
-                    last_error = str(exc)[:800]
-                    log.info("llm.repair", agent=agent, attempt=attempt, error=last_error[:200])
+                    # The repair prompt quotes the full error; the stored/logged one never holds the model's reply.
+                    repair_error = str(exc)[:800]
+                    last_error = content_free_error(exc)
+                    log.info("llm.repair", agent=agent, attempt=attempt, error=last_error)
                     current_prompt = (
-                        f"{prompt}\n\n---\nYour previous answer failed validation:\n{last_error}\n"
+                        f"{prompt}\n\n---\nYour previous answer failed validation:\n{repair_error}\n"
                         f"Previous answer:\n{reply.text[:3000]}\n\nReturn only a corrected JSON object that matches the schema."
                     )
                     continue
 
                 await self._record(ctx, agent, model, usage, started, attempt, True, None)
+                if key:
+                    await _cache_put(key, agent, ctx.user_id, parsed.model_dump(mode="json"))
                 gen.update(
                     usage_details={"input": usage["in"], "output": usage["out"]},
                     cost_details={"total": estimate_cost(model, usage["in"], usage["out"], usage["cache"])},
@@ -318,6 +386,7 @@ class LLM:
     ) -> None:
         cost = estimate_cost(model, usage["in"], usage["out"], usage["cache"])
         latency = int((time.perf_counter() - started) * 1000)
+        error = scrub_error(error) if error else error
         try:
             async with session_scope() as s:
                 s.add(

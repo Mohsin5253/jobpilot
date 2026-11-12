@@ -15,7 +15,6 @@ import uuid
 from datetime import UTC, datetime, timedelta
 from typing import Literal
 
-import httpx
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import Response
 from pydantic import BaseModel, Field
@@ -37,6 +36,7 @@ from app.services.question_trends import refresh as refresh_question_trends
 from app.services.question_trends import trend_questions, trending_skills
 from app.services.ratelimit import hit
 from app.skills import extract_skills, role_digest, skill_overlap
+from app.safety import egress
 
 router = APIRouter(tags=["growth"])
 
@@ -451,7 +451,7 @@ async def submit_repo(project_id: str, body: RepoIn, user: RealUserDep, session:
     if not gh.get("verified") or (gh.get("username") or "").lower() != owner.lower():
         raise HTTPException(409, "Verify your GitHub account on the Proof page first; the repo must belong to it")
     headers = {"accept": "application/vnd.github+json", **({"authorization": f"Bearer {settings.github_token}"} if settings.github_token else {})}
-    async with httpx.AsyncClient(timeout=15, headers=headers) as c:
+    async with egress.client("evidence", timeout=15, headers=headers) as c:
         r = await c.get(f"https://api.github.com/repos/{owner}/{repo}")
         if r.status_code != 200:
             raise HTTPException(422, "Couldn't find that public repo on GitHub")

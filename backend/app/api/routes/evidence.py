@@ -24,6 +24,7 @@ from app.services.evidence import (
 )
 from app.services.ratelimit import hit
 from app.sources.base import USER_AGENT
+from app.safety import egress
 
 router = APIRouter(tags=["evidence"])
 
@@ -62,7 +63,7 @@ async def _out(session, p: Profile) -> dict:
 
 
 def _client() -> httpx.AsyncClient:
-    return httpx.AsyncClient(headers={"User-Agent": USER_AGENT}, follow_redirects=True)
+    return egress.client("evidence", headers={"User-Agent": USER_AGENT}, follow_redirects=True)
 
 
 @router.get("/evidence")

@@ -17,6 +17,7 @@ from urllib.parse import urlencode
 import httpx
 
 from app.config import settings
+from app.safety import egress
 
 AUTH_URL = "https://accounts.google.com/o/oauth2/v2/auth"
 TOKEN_URL = "https://oauth2.googleapis.com/token"
@@ -76,7 +77,7 @@ def auth_url(state: str, login_hint: str = "") -> str:
 
 async def exchange_code(code: str) -> tuple[str, str]:
     """Returns (refresh_token, email)."""
-    async with httpx.AsyncClient(timeout=20) as c:
+    async with egress.client("gmail", timeout=20) as c:
         r = await c.post(
             TOKEN_URL,
             data={"code": code, "client_id": settings.google_client_id, "client_secret": settings.google_client_secret, "redirect_uri": redirect_uri(), "grant_type": "authorization_code"},
@@ -97,7 +98,7 @@ async def exchange_code(code: str) -> tuple[str, str]:
 
 
 async def access_token(refresh_token: str) -> str:
-    async with httpx.AsyncClient(timeout=20) as c:
+    async with egress.client("gmail", timeout=20) as c:
         r = await c.post(
             TOKEN_URL,
             data={"refresh_token": refresh_token, "client_id": settings.google_client_id, "client_secret": settings.google_client_secret, "grant_type": "refresh_token"},
@@ -112,7 +113,7 @@ async def access_token(refresh_token: str) -> str:
 async def send_raw(refresh_token: str, message: bytes) -> str:
     """Sends an RFC 822 message as the connected user; returns Gmail's message id."""
     token = await access_token(refresh_token)
-    async with httpx.AsyncClient(timeout=30) as c:
+    async with egress.client("gmail", timeout=30) as c:
         r = await c.post(SEND_URL, headers={"authorization": f"Bearer {token}"}, json={"raw": base64.urlsafe_b64encode(message).decode()})
     if r.status_code in (401, 403):
         raise GmailRevoked("Gmail refused the send. Reconnect Gmail in Settings.")
@@ -126,7 +127,7 @@ async def send_raw(refresh_token: str, message: bytes) -> str:
 async def revoke(refresh_token: str) -> None:
     """Best effort: tells Google to drop the grant when the user disconnects."""
     try:
-        async with httpx.AsyncClient(timeout=10) as c:
+        async with egress.client("gmail", timeout=10) as c:
             await c.post(REVOKE_URL, data={"token": refresh_token})
     except httpx.HTTPError:
         pass

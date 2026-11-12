@@ -16,7 +16,7 @@ async def _seed():
         jobs = [
             Job(source="t", external_id="1", company="Acme", title="Intern", legit_status="verified", legit_checked_at=now),
             Job(source="t", external_id="2", company="Acme", title="Intern 2", legit_status="caution", legit_checked_at=now),
-            Job(source="t", external_id="3", company="Scam", title="Intern 3", legit_status="suspicious", legit_checked_at=now),
+            Job(source="t", external_id="3", company="Scam", title="Intern 3", legit_checked_at=now),  # blocked below, after matching
             Job(source="t", external_id="4", company="New", title="Unchecked"),
         ]
         s.add_all([real, demo, *jobs])
@@ -27,6 +27,8 @@ async def _seed():
                 s.add(m)
                 await s.flush()
                 s.add(OutreachDraft(user_id=user.id, match_id=m.id, status=st))
+        await s.flush()
+        jobs[2].legit_status = "suspicious"  # judged a scam after it was matched (a new match would be refused)
         s.add_all(
             [
                 AgentRun(user_id=real.id, status="completed", cost_usd=0.002),

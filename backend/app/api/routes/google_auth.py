@@ -30,6 +30,7 @@ from app.security import hash_password
 from app.services import gmail
 from app.services.consent import grant
 from app.services.ratelimit import client_ip, hit
+from app.safety import egress
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 STATE_COOKIE = "jp_g_state"
@@ -91,7 +92,7 @@ async def google_start(request: Request, mode: str = "login", adult: int = 0, co
 
 
 async def _identity(code: str) -> dict:
-    async with httpx.AsyncClient(timeout=20) as c:
+    async with egress.client("gmail", timeout=20) as c:
         tok = await c.post(gmail.TOKEN_URL, data={"code": code, "client_id": settings.google_client_id, "client_secret": settings.google_client_secret, "redirect_uri": redirect_uri(), "grant_type": "authorization_code"})
         if tok.status_code != 200:
             raise gmail.GmailError("token")

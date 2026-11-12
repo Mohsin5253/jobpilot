@@ -178,6 +178,19 @@ def parse_jobpostings(html: str, page_url: str) -> list[Posting]:
 
 
 async def fetch_career_page(client: httpx.AsyncClient, url: str) -> list[Posting]:
+    """robots.txt first (cached a day), then at most one page request a minute per domain, shared across replicas by
+    the egress gate (a domain fetched in the last minute is skipped; the next tick retries)."""
+    from app.safety import egress
+
+    with egress.purpose("career_page"):
+        try:
+            return await _fetch_career_page(client, url)
+        except egress.EgressDenied as exc:
+            log.info("career_page.skipped", host=host_of(url), rule=exc.rule)
+            return []
+
+
+async def _fetch_career_page(client: httpx.AsyncClient, url: str) -> list[Posting]:
     if blocked(url) or not url.startswith(("http://", "https://")):
         return []
     if not await robots_allows(client, url):

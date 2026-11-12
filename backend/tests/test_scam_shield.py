@@ -116,23 +116,40 @@ async def test_verifier_v2_records_a_verification_and_ghost_score_per_job():
 
 
 async def test_scam_flagged_postings_cannot_be_approved_or_sent(authed):
+    import pytest
+    from sqlalchemy.exc import IntegrityError
+
     async with session_scope() as s:
         me = (await s.execute(select(User))).scalar_one()
         job = await _job(s, description="Pay registration fee ₹999 to confirm your internship. " * 5)
-        await apply_verdict(s, job, datetime.now(UTC))
-        m = JobMatch(user_id=me.id, job_id=job.id, score=90)
+        m = JobMatch(user_id=me.id, job_id=job.id, score=90)  # matched before the Verifier looked at it
         s.add(m)
         await s.flush()
         d = OutreachDraft(user_id=me.id, match_id=m.id, to_email="hr@acme.example", subject="Hi", email_body="Hello")
         s.add(d)
         await s.flush()
-        draft_id = d.id
-    r = await authed.post(f"/api/drafts/{draft_id}/decision", json={"decision": "approve"})
-    assert r.status_code == 409 and "scam" in r.json()["detail"]
-    assert (await authed.post(f"/api/drafts/{draft_id}/send", json={})).status_code == 409
-    assert (await authed.post(f"/api/drafts/{draft_id}/decision", json={"decision": "reject"})).status_code == 200
+        draft_id, match_id, job_id = d.id, m.id, job.id
+        await apply_verdict(s, job, datetime.now(UTC))  # blocked: its unsent draft is voided with the reason
     async with session_scope() as s:
-        assert (await s.get(OutreachDraft, draft_id)).status == DraftStatus.rejected
+        voided = await s.get(OutreachDraft, draft_id)
+        assert voided.status == DraftStatus.voided and "scam" in voided.void_reason
+    r = await authed.post(f"/api/drafts/{draft_id}/decision", json={"decision": "approve"})
+    assert r.status_code == 409
+    assert (await authed.post(f"/api/drafts/{draft_id}/send", json={})).status_code == 409
+    # Enforced in the database too: no new match or draft for a blocked posting, whatever the code above it does.
+    with pytest.raises(IntegrityError):
+        async with session_scope() as s:
+            s.add(JobMatch(user_id=me.id, job_id=job_id, score=95))
+            await s.flush()
+    with pytest.raises(IntegrityError):
+        async with session_scope() as s:
+            s.add(OutreachDraft(user_id=me.id, match_id=match_id, to_email="hr@acme.example", subject="Hi", email_body="Hello"))
+            await s.flush()
+    with pytest.raises(IntegrityError):
+        async with session_scope() as s:
+            row = await s.get(OutreachDraft, draft_id)
+            row.status = DraftStatus.approved  # straight to the table, past every route
+            await s.flush()
 
 
 async def test_new_postings_get_a_verification_at_ingest():

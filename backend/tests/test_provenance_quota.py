@@ -124,7 +124,7 @@ async def test_daily_quota_is_enforced_server_side(authed):
     assert r.status_code == 429 and "5" in r.json()["detail"]
     assert (await authed.get("/api/quota")).json()["remaining"] == 0
     # Rejecting never uses the quota.
-    assert (await authed.post(f"/api/drafts/{ids[6]}/decision", json={"decision": "reject"})).status_code == 200
+    assert (await authed.post(f"/api/drafts/{ids[6]}/decision", json={"decision": "reject", "reason": "Wrong role for me"})).status_code == 200
     assert (await authed.put("/api/quota", json={"cap": 11})).status_code == 422
     assert (await authed.put("/api/quota", json={"cap": 6})).json()["remaining"] == 1
     assert (await authed.post(f"/api/drafts/{ids[5]}/decision", json={"decision": "approve"})).status_code == 200

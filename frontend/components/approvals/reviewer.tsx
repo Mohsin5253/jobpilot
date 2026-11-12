@@ -34,7 +34,7 @@ interface Props {
   total: number;
   onMove: (delta: number) => void;
   onApprove: (how: ApproveWith, edits: DraftEdits) => void;
-  onReject: () => void;
+  onReject: (reason: string) => void;
   busy: boolean;
   smtp: boolean;
   /** Full-screen on phones: a back button, swipe between drafts, and a bottom action bar. */
@@ -160,6 +160,9 @@ export function Reviewer({ draft, index, total, onMove, onApprove, onReject, bus
   const [channel, setChannel] = useState<"email" | "linkedin">("email");
   const [editing, setEditing] = useState(false);
   const [rejecting, setRejecting] = useState(false);
+  const [rejectReason, setRejectReason] = useState("");
+  // Every approval (button or shortcut) goes through a confirm step that names the recipient and their domain.
+  const [confirming, setConfirming] = useState<ApproveWith | null>(null);
   const [regen, setRegen] = useState(false);
   const [to, setTo] = useState(draft.to_email ?? "");
   const [subject, setSubject] = useState(draft.subject);
@@ -191,11 +194,12 @@ export function Reviewer({ draft, index, total, onMove, onApprove, onReject, bus
   const edited = Object.keys(edits()).length > 0;
   const primary: ApproveWith = smtp && to.trim() ? "send" : "gmail";
   const secondary: ApproveWith = primary === "send" ? "gmail" : "mail";
-  const approve = useCallback((how: ApproveWith) => onApprove(how, edits()), [onApprove, edits]);
+  const doApprove = useCallback((how: ApproveWith) => onApprove(how, edits()), [onApprove, edits]);
+  const approve = useCallback((how: ApproveWith) => setConfirming(how), []);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (rejecting || regen) return;
+      if (rejecting || regen || confirming) return;
       if ((e.metaKey || e.ctrlKey) && e.key === "Enter" && pending) {
         e.preventDefault();
         approve(primary);
@@ -212,7 +216,7 @@ export function Reviewer({ draft, index, total, onMove, onApprove, onReject, bus
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [approve, primary, pending, onMove, rejecting, regen]);
+  }, [approve, primary, pending, onMove, rejecting, regen, confirming]);
 
   // Phones: swipe left or right on the draft to move through the queue.
   const touch = useRef<{ x: number; y: number } | null>(null);
@@ -486,7 +490,7 @@ export function Reviewer({ draft, index, total, onMove, onApprove, onReject, bus
         <div className="shrink-0 space-y-2 border-t border-border bg-surface p-3 pb-[calc(12px+env(safe-area-inset-bottom))] md:p-4">
           <div className="flex flex-wrap items-center gap-2">
             {smtp && draft.status === "approved" && to.trim() && (
-              <Button size="sm" variant="primary" onClick={() => onApprove("send", { to_email: to.trim() })} loading={busy}>
+              <Button size="sm" variant="primary" onClick={() => setConfirming("send")} loading={busy}>
                 <Send /> Send with resume
               </Button>
             )}
@@ -504,20 +508,68 @@ export function Reviewer({ draft, index, total, onMove, onApprove, onReject, bus
       )}
 
       <Dialog open={rejecting} onOpenChange={setRejecting}>
-        <DialogContent title={`Reject the draft for ${draft.company}?`} description="Outreach won’t send it. You can prepare a new one later from the job page.">
-          <div className="flex justify-end gap-2">
+        <DialogContent title={`Reject the draft for ${draft.company}?`} description="Outreach won’t send it. Say why: it helps us write better drafts.">
+          <div className="mb-3 flex flex-wrap gap-1.5">
+            {["Wrong role for me", "Email reads wrong", "Wrong recipient", "Resume isn't right", "Looks like a scam"].map((r) => (
+              <button
+                key={r}
+                type="button"
+                onClick={() => setRejectReason(r)}
+                className={`rounded-full border px-2.5 py-1 text-[12.5px] ${rejectReason === r ? "border-[var(--cobalt)] text-cobalt-text" : "border-border text-text-2 hover:text-text"}`}
+              >
+                {r}
+              </button>
+            ))}
+          </div>
+          <Textarea value={rejectReason} onChange={(e) => setRejectReason(e.target.value)} rows={2} maxLength={300} placeholder="Or in your own words" aria-label="Why you're rejecting it" />
+          <div className="mt-3 flex justify-end gap-2">
             <DialogClose asChild>
               <Button>Cancel</Button>
             </DialogClose>
             <Button
               variant="danger"
-              autoFocus
+              disabled={rejectReason.trim().length < 3}
               onClick={() => {
                 setRejecting(false);
-                onReject();
+                onReject(rejectReason.trim());
+                setRejectReason("");
               }}
             >
               <X /> Reject
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={!!confirming} onOpenChange={(o) => !o && setConfirming(null)}>
+        <DialogContent
+          title={confirming === "send" ? "Send this application?" : "Approve this application?"}
+          description={
+            confirming === "send"
+              ? "It’s emailed from your mailbox with your tailored resume attached. Your approval covers this exact email: if anything changes, you’ll be asked again."
+              : "You’ll send it yourself from your mail app. Your approval covers this exact email."
+          }
+        >
+          <p className="mb-3 rounded-[var(--radius-control)] border border-border bg-surface-2/50 px-3 py-2 text-[13px]">
+            To <span className="font-medium">{to.trim() || "no recipient yet"}</span>
+            {to.includes("@") && <span className="text-text-3"> · domain {to.split("@")[1]}</span>}
+            <span className="block text-text-3">{draft.company} · {draft.title}</span>
+          </p>
+          <div className="flex justify-end gap-2">
+            <DialogClose asChild>
+              <Button>Cancel</Button>
+            </DialogClose>
+            <Button
+              variant="primary"
+              autoFocus
+              loading={busy}
+              onClick={() => {
+                const how = confirming;
+                setConfirming(null);
+                if (how) doApprove(how);
+              }}
+            >
+              {confirming && approveIcon(confirming)} Confirm
             </Button>
           </div>
         </DialogContent>

@@ -14,6 +14,7 @@ from app.models import Profile
 from app.services.consent import grant, has, withdraw
 from app.services.ratelimit import hit
 from app.services.whatsapp import digest_for, handle_inbound, normalize_number, send_template, valid_signature
+from app.safety import egress
 
 router = APIRouter(prefix="/whatsapp", tags=["whatsapp"])
 
@@ -78,7 +79,7 @@ async def send_test(user: RealUserDep, session: SessionDep) -> dict:
     now = datetime.now(UTC)
     digest = await digest_for(session, p, now) or (((p.resume or {}).get("name") or "there").split(" ")[0], "No new strong fits in the last 24 hours yet. Your agents are still watching.")
     try:
-        async with httpx.AsyncClient() as client:
+        async with egress.client("whatsapp") as client:
             await send_template(client, p.whatsapp_number, list(digest))
     except httpx.HTTPError as exc:
         raise HTTPException(502, "WhatsApp didn't accept the message. Check the number, and that the template is approved.") from exc

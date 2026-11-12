@@ -104,3 +104,12 @@ async def bump_stats(run_id: str, **values: int) -> None:
         stats = dict(run.stats or {})
         stats.update(values)
         run.stats = stats
+
+
+def safe_job() -> list:
+    """SQL conditions for postings an agent may write for: not blocked as a scam, and no prompt-injection signals."""
+    from sqlalchemy import func
+
+    from app.models import Job
+
+    return [Job.legit_status.is_distinct_from("suspicious"), func.jsonb_array_length(Job.injection_signals) == 0]

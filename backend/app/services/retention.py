@@ -18,6 +18,7 @@ async def retention_sweep() -> dict[str, int]:
             return {}
         steps = {
             "llm_calls": ("DELETE FROM llm_calls WHERE created_at < :t", now - timedelta(days=settings.retain_llm_calls_days)),
+            "ai_feature_cache": ("DELETE FROM ai_feature_cache WHERE created_at < :t", now - timedelta(days=30)),
             "notifications": ("DELETE FROM notifications WHERE created_at < :t", now - timedelta(days=settings.retain_notifications_days)),
             # Jobs nobody matched that no source has listed for a while (matched ones stay for the user's history).
             "jobs": (

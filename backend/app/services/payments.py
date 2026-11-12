@@ -24,6 +24,7 @@ from app.config import settings
 from app.db import session_scope
 from app.logging import log
 from app.models import Notification, Payment, User
+from app.safety import egress
 
 API = "https://api.razorpay.com/v1"
 IST = ZoneInfo("Asia/Kolkata")
@@ -40,7 +41,7 @@ def _auth() -> tuple[str, str]:
 
 
 async def _call(method: str, path: str, json: dict | None = None) -> dict:
-    async with httpx.AsyncClient(timeout=20, auth=_auth()) as c:
+    async with egress.client("razorpay", timeout=20, auth=_auth()) as c:
         r = await c.request(method, f"{API}{path}", json=json)
     if r.status_code >= 300:
         try:
@@ -132,7 +133,7 @@ async def qr_image(url: str) -> bytes:
     """The QR picture, fetched server-side so the page needn't load images from another origin."""
     if not url.startswith("https://"):
         raise PaymentsOff("No QR image")
-    async with httpx.AsyncClient(timeout=15, follow_redirects=True) as c:
+    async with egress.client("razorpay", timeout=15, follow_redirects=True) as c:
         r = await c.get(url)
     r.raise_for_status()
     return r.content

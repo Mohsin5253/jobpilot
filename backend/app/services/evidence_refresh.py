@@ -10,6 +10,7 @@ from app.logging import log
 from app.models import Profile
 from app.services.evidence import EvidenceError, fetch_codeforces, fetch_github
 from app.sources.base import USER_AGENT
+from app.safety import egress
 
 BATCH = 200  # per day: well inside GitHub's limits with a token (5,000 requests / hour)
 
@@ -21,7 +22,7 @@ async def refresh_evidence() -> int:
         if not (await s.execute(text("SELECT pg_try_advisory_xact_lock(724007)"))).scalar():
             return 0
         profiles = (await s.execute(select(Profile).where(Profile.evidence.has_key("github") | Profile.evidence.has_key("codeforces")).limit(BATCH * 3))).scalars().all()
-        async with httpx.AsyncClient(headers={"User-Agent": USER_AGENT}, follow_redirects=True) as client:
+        async with egress.client("evidence", headers={"User-Agent": USER_AGENT}, follow_redirects=True) as client:
             for p in profiles:
                 if refreshed >= BATCH:
                     break

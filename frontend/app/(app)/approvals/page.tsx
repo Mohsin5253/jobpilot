@@ -110,7 +110,7 @@ export default function ApprovalsPage() {
     );
   };
 
-  const reject = () => current && decide.mutate({ id: current.id, decision: "reject" }, { onSuccess: advance });
+  const reject = (reason: string) => current && decide.mutate({ id: current.id, decision: "reject", reason }, { onSuccess: advance });
 
   const reviewer = (onClose?: () => void) =>
     current && (

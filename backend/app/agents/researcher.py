@@ -30,6 +30,7 @@ from app.models import BoardProbe, Job, Notification, Profile
 from app.schemas import Preferences, ResumeData
 from app.sources.base import USER_AGENT
 from app.sources.providers import title_location_ok
+from app.safety import egress
 
 # Companies with public boards worth checking even before the LLM weighs in (Indian startups and
 # global companies with India offices, across engineering, data, marketing, sales, ops, HR, finance).
@@ -213,7 +214,7 @@ async def run_researcher(state: PipelineState) -> dict:
                     slugs.append(slug)
         slugs = slugs[: settings.research_max_candidates * 2]
 
-        async with httpx.AsyncClient(headers={"User-Agent": USER_AGENT}) as client:
+        async with egress.client("sources", headers={"User-Agent": USER_AGENT}) as client:
             boards = await cached_board_roles(client, slugs)
         hits = [h for h in (evaluate(boards.get(slug), prefs) for slug in slugs) if h]
 

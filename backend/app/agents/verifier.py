@@ -25,7 +25,9 @@ from app.agents.common import PipelineState, agent_step, bump_stats, ctx_of
 from app.db import session_scope
 from app.llm import LLMOutputError, LLMUnavailable, get_llm
 from app.models import Job, Verification
+from app.safety import untrusted
 from app.services import scam_shield
+from app.safety import egress
 
 LINK_RECHECKS = 15  # apply links re-opened per run when re-checking open matches
 RECHECK_AFTER = timedelta(days=1)
@@ -53,6 +55,7 @@ class Verdict:
     reasons: list[str] = field(default_factory=list)  # why it isn't verified (empty when verified)
     good: list[str] = field(default_factory=list)  # what checked out, shown on a verified job
     shield: scam_shield.ShieldResult | None = None
+    injection: list[str] = field(default_factory=list)  # prompt-injection signals (app/safety/untrusted.py)
 
 
 SHIELD_VERDICT = {"verified": "Likely safe", "caution": "Suspicious", "suspicious": "Likely scam"}
@@ -102,7 +105,31 @@ async def apply_verdict(s, job: Job, now: datetime, v: "Verdict | None" = None) 
     job.verification_id = row.id
     job.ghost_score = gs
     job.legit_status, job.legit_reasons, job.legit_checked_at = v.status, (v.reasons or v.good)[:5], now
+    job.injection_signals = v.injection
+    if v.status == "suspicious" or job.link_status == "dead":
+        await void_open_drafts(s, job.id, "The posting was blocked as a likely scam" if v.status == "suspicious" else "The posting closed")
     return v
+
+
+async def void_open_drafts(s, job_id: uuid.UUID, reason: str) -> int:
+    """A blocked or closed posting takes its unsent drafts (and their approvals) out of the queue, with the reason."""
+    from sqlalchemy import update
+
+    from app.models import DraftStatus, JobMatch, OutreachDraft
+    from app.safety import mandates
+
+    ids = (
+        await s.execute(
+            select(OutreachDraft.id)
+            .join(JobMatch, JobMatch.id == OutreachDraft.match_id)
+            .where(JobMatch.job_id == job_id, OutreachDraft.status.in_([DraftStatus.pending, DraftStatus.approved]))
+        )
+    ).scalars().all()
+    for i in ids:
+        await mandates.void(s, i, "posting_blocked_or_closed")
+    if ids:
+        await s.execute(update(OutreachDraft).where(OutreachDraft.id.in_(ids)).values(status=DraftStatus.voided, void_reason=reason[:200]))
+    return len(ids)
 
 
 def _host(url: str) -> str:
@@ -162,6 +189,11 @@ def assess(job: Job) -> Verdict:
             red.append(c.label)
         elif c.status == "warn" and c.weight >= 20 and c.id not in ("free_mail", "chat_only"):  # the rules above already cover those
             caution.append(c.label)
+    # Text written to steer AI tools (hidden instructions, fake approvals, "ignore previous instructions"): the posting
+    # is held for care and its text never reaches Tailor, Outreach or Dispatch.
+    v.injection = untrusted.scan(f"{job.title}\n{job.description or ''}").signals
+    if v.injection:
+        caution.append("Contains text aimed at AI tools (possible prompt injection)")
     red, caution = list(dict.fromkeys(red)), [x for x in dict.fromkeys(caution) if x not in red]
 
     if red:
@@ -189,7 +221,7 @@ async def second_opinion(job: Job, state: PipelineState) -> SecondOpinion | None
             agent="verifier",
             tier="fast",
             system=SYSTEM,
-            prompt=f"Employer: {job.company}\nTitle: {job.title}\nLocation: {job.location}\n\n{(job.description or '')[:3500]}",
+            prompt=f"Employer: {job.company}\nTitle: {job.title}\nLocation: {job.location}\n\n{untrusted.wrap((job.description or '')[:3500], 'job_post')}",
             schema=SecondOpinion,
             ctx=ctx_of(state),
             max_tokens=400,
@@ -203,7 +235,6 @@ async def _recheck_open(state: PipelineState, step, match_ids: list[uuid.UUID], 
     time on it) and re-run the scam checks on any not checked recently."""
     import asyncio
 
-    import httpx
 
     from app.models import JobMatch
     from app.sources.authenticity import FIRST_PARTY, check_link
@@ -220,7 +251,7 @@ async def _recheck_open(state: PipelineState, step, match_ids: list[uuid.UUID], 
 
     status: dict = {}
     if to_link:
-        async with httpx.AsyncClient(headers={"User-Agent": USER_AGENT}) as client:
+        async with egress.client("link_check", headers={"User-Agent": USER_AGENT}) as client:
             status = dict(await asyncio.gather(*(one(client, j) for j in to_link)))
     closed = suspicious = care = 0
     keep: list[str] = []

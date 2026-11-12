@@ -159,3 +159,38 @@ async def add_officer(org_id: str, body: OfficerIn, _: AdminDep, session: Sessio
         session.add(OrgMember(org_id=org.id, user_id=user.id, role="tpo"))
     await session.commit()
     return {"college": org.name, "officer": user.email}
+
+
+class KillSwitchIn(BaseModel):
+    on: bool
+
+
+@router.get("/kill-switch")
+async def kill_switch_state(_: AdminDep, session: SessionDep) -> dict:
+    from sqlalchemy import text
+
+    from app.config import settings
+
+    v = (await session.execute(text("SELECT value FROM system_flags WHERE key = 'kill_switch'"))).scalar_one_or_none()
+    return {"on": v == "on" or settings.kill_switch, "env": settings.kill_switch}
+
+
+@router.post("/kill-switch")
+async def set_kill_switch(body: KillSwitchIn, admin: AdminDep, session: SessionDep) -> dict:
+    """Stops (or resumes) every send, WhatsApp message and publish at once, across all replicas within 5 seconds."""
+    from sqlalchemy import text
+
+    from app.logging import log
+    from app.safety.policy import reset_kill_cache
+
+    await session.execute(
+        text(
+            "INSERT INTO system_flags (key, value, updated_at, updated_by) VALUES ('kill_switch', :v, now(), :by) "
+            "ON CONFLICT (key) DO UPDATE SET value = :v, updated_at = now(), updated_by = :by"
+        ),
+        {"v": "on" if body.on else "off", "by": admin.email},
+    )
+    await session.commit()
+    reset_kill_cache()
+    log.warning("admin.kill_switch", on=body.on)
+    return {"on": body.on}

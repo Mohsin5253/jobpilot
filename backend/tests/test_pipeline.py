@@ -71,9 +71,9 @@ async def test_full_pipeline_with_human_approval(authed):
     first, *rest = drafts
     r = await authed.post(f"/api/drafts/{first['id']}/decision", json={"decision": "approve", "subject": "Edited"})
     assert r.json()["status"] == "approved" and r.json()["subject"] == "Edited"
-    assert (await authed.post(f"/api/drafts/{first['id']}/decision", json={"decision": "reject"})).status_code == 409
+    assert (await authed.post(f"/api/drafts/{first['id']}/decision", json={"decision": "reject", "reason": "Wrong role for me"})).status_code == 409
     for d in rest:
-        await authed.post(f"/api/drafts/{d['id']}/decision", json={"decision": "reject"})
+        await authed.post(f"/api/drafts/{d['id']}/decision", json={"decision": "reject", "reason": "Wrong role for me"})
 
     assert await _work() == "completed"
     run = (await authed.get(f"/api/runs/{run_id}")).json()
@@ -200,7 +200,7 @@ async def test_prepare_application_for_any_job(authed):
     await authed.post("/api/runs")
     await _work()
     for d in (await authed.get("/api/drafts")).json():
-        await authed.post(f"/api/drafts/{d['id']}/decision", json={"decision": "reject"})
+        await authed.post(f"/api/drafts/{d['id']}/decision", json={"decision": "reject", "reason": "Wrong role for me"})
     await _work()  # finish the first run
 
     low = (await authed.get("/api/matches", params={"stage": "found"})).json()["items"][-1]  # lowest-scored job

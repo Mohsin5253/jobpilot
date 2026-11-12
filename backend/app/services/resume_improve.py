@@ -12,6 +12,7 @@ What it changes:
 The AI does this when available; without it, rule-based rewrites and a template summary do the same job, more simply.
 """
 
+from app.safety import untrusted
 import re
 
 from pydantic import BaseModel, Field
@@ -165,7 +166,7 @@ async def improve(resume: ResumeData, industry_key: str | None, job_title: str, 
                 ctx=CallContext(user_id=user_id),
                 max_tokens=1500,
                 system=BULLET_SYSTEM,
-                prompt=("Target: " + (job_title or INDUSTRIES[industry].name) + "\n" + (job_description[:1500] + "\n" if job_description else "")) + "\n".join(f"{i + 1}. {t}" for i, (_, t) in enumerate(targets)),
+                prompt=("Target: " + (job_title or INDUSTRIES[industry].name) + "\n" + (untrusted.wrap(job_description[:1500], "job_post") + "\n" if job_description else "")) + "\n".join(f"{i + 1}. {t}" for i, (_, t) in enumerate(targets)),
             )
             if len(out.bullets) == len(targets):
                 ai_used = True

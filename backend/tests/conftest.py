@@ -29,6 +29,7 @@ os.environ.update(
     ADMIN_EMAILS="",
     SCAM_FETCH_URLS="false",
     SCAM_RDAP_ENABLED="false",
+    EGRESS_THROTTLE_ENABLED="false",  # tests/test_v10_safety.py turns it on for the rate-limit test
 )
 
 import pytest  # noqa: E402
@@ -39,7 +40,7 @@ from sqlalchemy import text  # noqa: E402
 
 from app.db import engine  # noqa: E402
 
-TABLES = "dictations, campus_leads, campus_placements, question_bank, industry_trends, audit_events, transparency_daily, alumni, gap_projects, interview_sessions, stipend_reports, payment_events, payments, whatsapp_events, proof_link_views, proof_links, approval_events, quotas, scam_reports, verifications, rights_requests, drive_statuses, campus_drives, org_members, organizations, api_tokens, consents, mail_accounts, password_resets, rate_limits, board_probes, source_targets, company_contacts, notifications, skill_questions, reminders, outreach_drafts, tailored_resumes, llm_calls, job_matches, agent_runs, jobs, profiles, users"
+TABLES = "ai_feature_cache, approval_grants, system_flags, dictations, campus_leads, campus_placements, question_bank, industry_trends, audit_events, transparency_daily, alumni, gap_projects, interview_sessions, stipend_reports, payment_events, payments, whatsapp_events, proof_link_views, proof_links, approval_events, quotas, scam_reports, verifications, rights_requests, drive_statuses, campus_drives, org_members, organizations, api_tokens, consents, mail_accounts, password_resets, rate_limits, board_probes, source_targets, company_contacts, notifications, skill_questions, reminders, outreach_drafts, tailored_resumes, llm_calls, job_matches, agent_runs, jobs, profiles, users"
 
 
 @pytest.fixture(scope="session", autouse=True)

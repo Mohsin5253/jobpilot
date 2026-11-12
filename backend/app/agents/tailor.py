@@ -11,13 +11,14 @@ from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.dialects.postgresql import insert
 
-from app.agents.common import PipelineState, agent_step, bump_stats, ctx_of, load_profile
+from app.agents.common import safe_job, PipelineState, agent_step, bump_stats, ctx_of, load_profile
 from app.agents.guard import bullet_contexts, check_claim, proof_contexts, resume_skillset, source_label
 from app.logging import log
 from app.services.evidence import evidenced_skills
 from app.db import session_scope
+from app.safety import untrusted
 from app.llm import CallContext, LLMOutputError, LLMUnavailable, get_llm
-from app.models import JobMatch, TailoredResume
+from app.models import Job, JobMatch, TailoredResume
 from app.schemas import ResumeData
 from app.skills import extract_skills, role_digest
 
@@ -99,7 +100,7 @@ async def tailor_one(match: JobMatch, resume: ResumeData, resume_text: str, ctx:
                 + "\n".join(f"add{i}: {a.skill} (described by the candidate)" for i, a in enumerate(resume.additional))
                 + "\n</headers>\n\n"
                 + ("<proof>\n" + "\n".join(f"[{pid}] {text}" for pid, text in proofs.items()) + "\n</proof>\n\n" if proofs else "")
-                + f"<job title=\"{job.title}\" company=\"{job.company}\">\n{role_digest(job.description, 4000)}\n</job>\n\n"
+                + f"<job title=\"{job.title}\" company=\"{job.company}\">\n{untrusted.wrap(role_digest(job.description, 4000), 'job_post')}\n</job>\n\n"
                 + f"Candidate strengths for this job: {', '.join(match.strengths) or 'n/a'}"
             ),
             schema=TailorOutput,
@@ -191,7 +192,8 @@ async def run_tailor(state: PipelineState) -> dict:
         profile, resume, _ = await load_profile(state["user_id"])
         ids = [uuid.UUID(x) for x in state.get("shortlist_ids", [])]
         async with session_scope() as s:
-            matches = (await s.execute(select(JobMatch).where(JobMatch.id.in_(ids)))).scalars().all()
+            # Never tailor for a blocked posting, or one whose text tries to steer AI tools (prompt injection).
+            matches = (await s.execute(select(JobMatch).join(Job, Job.id == JobMatch.job_id).where(JobMatch.id.in_(ids), *safe_job()))).scalars().all()
 
         results = await asyncio.gather(*(tailor_one(m, resume, profile.resume_text, ctx_of(state), profile.evidence) for m in matches))
         summaries = await asyncio.gather(*(targeted_summary(m, resume, profile.resume_text, ctx_of(state)) for m in matches))

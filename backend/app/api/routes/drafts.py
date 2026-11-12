@@ -10,7 +10,8 @@ from app.api.routes.matches import apply_stage
 from app.models import CompanyContact, Consent, DraftStatus, Job, JobMatch, OutreachDraft, Stage, TailoredResume, User
 from app.services import quota
 from app.schemas import ContactOut, DraftDecision, DraftEdit, DraftWithJob
-from app.services.applications import BelowTarget, send_application
+from app.safety.policy import PolicyDenied
+from app.services.applications import BelowTarget, NotSendable, send_application
 from app.services.mailer import SendTooSoon, user_sender
 from app.services.runs import request_resume
 
@@ -20,7 +21,7 @@ _EMAIL = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
 
 
 async def _apply_edits(session, d: OutreachDraft, body: DraftEdit) -> None:
-    edits = body.model_dump(exclude_none=True, exclude={"decision"})
+    edits = body.model_dump(exclude_none=True, exclude={"decision", "reason"})
     if "contact_id" in edits:
         contact = await session.get(CompanyContact, edits.pop("contact_id"))
         if contact is None:
@@ -126,6 +127,18 @@ async def approve(session, user: User, d: OutreachDraft, m: JobMatch, j: Job, ch
     from app.services.proof_links import create_for
 
     await create_for(session, user, d, m, j)  # the signed Proof Link for this application (if the proof page is published)
+    # Bind the approval to this exact email (recipient, subject, body, attachment, mailbox): see app/safety/mandates.py.
+    from app.models import Profile
+    from app.safety import mandates
+    from app.services.applications import build_payload
+
+    from sqlalchemy.orm import selectinload
+
+    await session.flush()
+    profile = (await session.execute(select(Profile).where(Profile.user_id == user.id))).scalar_one()
+    m = (await session.execute(select(JobMatch).where(JobMatch.id == m.id).options(selectinload(JobMatch.tailored), selectinload(JobMatch.job)))).scalar_one()
+    payload, _ = await build_payload(session, d, m, profile)
+    await mandates.issue(session, user.id, d.id, payload, channel)
     await _maybe_resume(session, d)
 
 
@@ -146,6 +159,13 @@ async def edit_draft(draft_id: uuid.UUID, body: DraftEdit, user: UserDep, sessio
     if d.status not in (DraftStatus.pending, DraftStatus.approved):
         raise HTTPException(409, "Sent or rejected drafts can't be edited")
     await _apply_edits(session, d, body)
+    if d.status == DraftStatus.approved:
+        # An approval covers the email as it was: an edited one goes back to the queue for a fresh approval.
+        from app.safety import mandates
+
+        await mandates.void(session, d.id, "edited")
+        d.status, d.decided_at = DraftStatus.pending, None
+        await quota.refund(session, user.id)
     await session.commit()
     return _with_job(d, m, j)
 
@@ -159,7 +179,10 @@ async def decide(draft_id: uuid.UUID, body: DraftDecision, user: UserDep, sessio
     if body.decision == "approve":
         await approve(session, user, d, m, j, "web", request)
     else:
-        d.status, d.decided_at = DraftStatus.rejected, datetime.now(UTC)
+        reason = (body.reason or "").strip()
+        if len(reason) < 3:
+            raise HTTPException(422, "Say briefly why you're rejecting it (it helps us improve the drafts)")
+        d.status, d.decided_at, d.reject_reason = DraftStatus.rejected, datetime.now(UTC), reason[:300]
         await quota.record(session, d.id, user.id, "reject", "web", request)
         await _maybe_resume(session, d)
     await session.commit()
@@ -196,6 +219,10 @@ async def send(draft_id: uuid.UUID, body: DraftEdit, user: UserDep, session: Ses
     await session.commit()
     try:
         await send_application(d.id)
+    except NotSendable as exc:
+        raise HTTPException(409, str(exc)) from exc
+    except PolicyDenied as exc:
+        raise HTTPException(423, str(exc)) from exc
     except SendTooSoon as exc:
         raise HTTPException(429, f"Approved. {exc}", headers={"retry-after": str(exc.wait_s)}) from exc
     except BelowTarget as exc:

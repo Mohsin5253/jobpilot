@@ -43,6 +43,7 @@ class DraftStatus(StrEnum):
     approved = "approved"
     rejected = "rejected"
     sent = "sent"
+    voided = "voided"  # the posting was blocked or closed before it was sent; see void_reason
 
 
 class RunStatus(StrEnum):
@@ -168,6 +169,8 @@ class Job(Base):
     # The Verifier's verdict: verified | caution | suspicious (None until checked), with its reasons.
     legit_status: Mapped[str | None] = mapped_column(String(12))
     legit_reasons: Mapped[list[str]] = mapped_column(JSONB, default=list, server_default="[]")
+    # Prompt-injection signals found in the posting (app/safety/untrusted.py); its text never reaches Tailor/Outreach.
+    injection_signals: Mapped[list[str]] = mapped_column(JSONB, default=list, server_default="[]")
     legit_checked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     # Verifier v2: the latest verification row (checks with evidence), how often the role was reposted, and a
     # 0-100 ghost-job score (age, reposts, last seen, whether the ATS still lists it, career-page presence).
@@ -282,6 +285,8 @@ class OutreachDraft(Base):
     sent_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     send_worthiness: Mapped[int | None] = mapped_column(Integer)  # 0-100, recorded when approved
     approval_channel: Mapped[str | None] = mapped_column(String(20))  # web | whatsapp
+    void_reason: Mapped[str | None] = mapped_column(String(200))
+    reject_reason: Mapped[str | None] = mapped_column(String(300))  # required on reject; a labelled eval candidate
     created_at: Mapped[datetime] = _now_col()
 
     match: Mapped[JobMatch] = relationship(back_populates="drafts")
@@ -914,3 +919,33 @@ class Dictation(Base):
     guard: Mapped[str] = mapped_column(String(40), default="", server_default="")  # polished: ok / rejected: … / timeout
     llm_ms: Mapped[int | None] = mapped_column(Integer)
     created_at: Mapped[datetime] = _now_col()
+
+
+class ApprovalGrant(Base):
+    """An approval of one exact email (app/safety/mandates.py): the hash of the payload that will be sent, single use,
+    expiring. Dispatch sends only against a matching, unused, unexpired grant of the same user."""
+
+    __tablename__ = "approval_grants"
+    __table_args__ = (Index("ix_grants_draft", "draft_id", "created_at"),)
+
+    id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=uuid.uuid4)
+    draft_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("outreach_drafts.id", ondelete="CASCADE"))
+    user_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    payload_hash: Mapped[str] = mapped_column(String(64))
+    channel: Mapped[str] = mapped_column(String(20), default="web")
+    created_at: Mapped[datetime] = _now_col()
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    used_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    voided_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    void_reason: Mapped[str | None] = mapped_column(String(40))
+
+
+class SystemFlag(Base):
+    """Operational switches set by admins (kill_switch = on stops every send, WhatsApp message and publish)."""
+
+    __tablename__ = "system_flags"
+
+    key: Mapped[str] = mapped_column(String(40), primary_key=True)
+    value: Mapped[str] = mapped_column(String(200))
+    updated_at: Mapped[datetime] = _now_col()
+    updated_by: Mapped[str | None] = mapped_column(String(320))

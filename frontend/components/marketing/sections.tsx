@@ -503,6 +503,9 @@ export function InterviewReady() {
 /** What's new: the latest features, in one grid. */
 export function WhatsNew() {
   const items: { icon: ReactNode; title: string; text: string; tag: string }[] = [
+    { icon: <BadgeCheck />, tag: "Safety", title: "An approval covers one exact email", text: "What you approve (recipient, text and the attached resume) is what can be sent, once. Change anything and it waits for you again. Every approve asks you to confirm who it goes to." },
+    { icon: <ShieldAlert />, tag: "Safety", title: "Hidden instructions can't steer the agents", text: "Postings are cleaned of hidden text and checked for lines aimed at AI tools, in English, Hindi and Hinglish. Flagged ones never reach the agents that write your applications." },
+    { icon: <Ban />, tag: "Safety", title: "Blocked sites stay blocked, even on a redirect", text: "Every request JobPilot makes passes one gate: LinkedIn and the boards we never use are refused at every hop, and each source's published rate limit holds across our servers." },
     { icon: <FileText />, tag: "Resume", title: "Restructure with AI", text: "A messy PDF (icons, broken lines, stacks typed as bullets) becomes a clean standard resume: Skills, Work Experience, Education, Project Work, Awards." },
     { icon: <Target />, tag: "Resume", title: "Reach your target ATS score", text: "Graded for the role you fit, the way recruiters search. Skills your resume already proves are added; for the rest you get exact steps, never invented facts." },
     { icon: <Paperclip />, tag: "Apply", title: "Only on-target resumes are sent", text: "Prepare application asks your target first. Each draft in Approvals shows the tailored resume attached, with its score for the job." },

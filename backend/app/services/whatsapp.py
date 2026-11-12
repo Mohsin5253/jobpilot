@@ -18,6 +18,8 @@ import re
 from datetime import UTC, datetime, timedelta, timezone
 
 import httpx
+
+from app.safety import egress
 from sqlalchemy import select, text
 
 from app.config import settings
@@ -85,7 +87,12 @@ def _lang(lang: str) -> str:
     return lang if lang in settings.whatsapp_template_langs else "en"
 
 
-async def _post(client: httpx.AsyncClient, body: dict) -> dict:
+async def _post(client: httpx.AsyncClient, body: dict, actor: str = "digest") -> dict:
+    # The choke point for every WhatsApp message: only the digest job and replies to a student's own tap, only to a
+    # number whose owner has the 'whatsapp' consent active, and never while the kill switch is on.
+    from app.safety import policy
+
+    await policy.authorize(actor, "whatsapp.send", ctx=await policy.whatsapp_context(body.get("to", "")))
     r = await client.post(
         f"{GRAPH}/{settings.whatsapp_phone_number_id}/messages",
         headers={"Authorization": f"Bearer {settings.whatsapp_token}"},
@@ -113,7 +120,7 @@ async def send_template(client: httpx.AsyncClient, to: str, params: list[str], l
 
 async def send_text(client: httpx.AsyncClient, to: str, body: str) -> dict:
     """A free-form reply: allowed inside the 24-hour window the student's button tap opened."""
-    return await _post(client, {"to": to, "type": "text", "text": {"body": body[:4000]}})
+    return await _post(client, {"to": to, "type": "text", "text": {"body": body[:4000]}}, actor="whatsapp_reply")
 
 
 def sign_action(action: str, draft_id: str, user: User, now: datetime | None = None) -> str:
@@ -215,7 +222,7 @@ async def digest_sweep(now: datetime | None = None) -> int:
                 )
             )
         ).scalars().all()
-        async with httpx.AsyncClient() as client:
+        async with egress.client("whatsapp") as client:
             for p in profiles:
                 if not await has(s, p.user_id, "whatsapp"):
                     continue
@@ -323,7 +330,7 @@ async def _button(s, profile: Profile, number: str, payload: str) -> int:
             log.warning("whatsapp.dispatch_failed", error=str(exc)[:200])
     if settings.whatsapp_enabled:
         try:
-            async with httpx.AsyncClient() as client:
+            async with egress.client("whatsapp") as client:
                 await send_text(client, number, reply)
         except httpx.HTTPError as exc:
             log.warning("whatsapp.reply_failed", error=str(exc)[:200])

@@ -24,6 +24,7 @@ from app.services.question_trends import refresh as refresh_question_trends
 from app.services.retention import retention_sweep
 from app.services.whatsapp import digest_sweep
 from app.sources.authenticity import reverify_jobs
+from app.safety import egress
 from app.services.runs import (
     claim_next,
     close_graph,
@@ -118,7 +119,7 @@ async def keep_awake_ping() -> None:
 
     url = f"{settings.render_external_url.rstrip('/')}/health"
     try:
-        async with httpx.AsyncClient(timeout=20) as c:
+        async with egress.client("self", timeout=20) as c:
             await c.get(url)
     except httpx.HTTPError as exc:
         log.warning("keep_awake.failed", error=type(exc).__name__)

@@ -19,6 +19,7 @@ from sqlalchemy.dialects.postgresql import insert
 from app.agents.common import PipelineState, agent_step, bump_stats, ctx_of, load_profile
 from app.config import settings
 from app.db import session_scope
+from app.safety import untrusted
 from app.embeddings import get_embedder
 from app.services.usage import usage_for
 from app.llm import CallContext, LLMOutputError, LLMUnavailable, get_llm
@@ -135,11 +136,12 @@ async def review_fit(job: Job, resume_json: str, ctx: CallContext) -> FitReview 
             prompt=(
                 f"<resume>\n{resume_json}\n</resume>\n\n"
                 f"<job title=\"{job.title}\" company=\"{job.company}\" location=\"{job.location}\">\n"
-                f"{role_digest(job.description, 3500)}\n</job>"
+                f"{untrusted.wrap(role_digest(job.description, 3500), 'job_post')}\n</job>"
             ),
             schema=FitReview,
             ctx=ctx,
             max_tokens=4000,
+            cache=True,  # same resume + same posting + same prompt and model -> the same fit score
         )
         return audit_review(review, resume_json)
     except (LLMUnavailable, LLMOutputError):
@@ -189,7 +191,7 @@ async def run_matcher(state: PipelineState) -> dict:
         async with session_scope() as s:
             distance = Job.embedding.cosine_distance(profile_vec)
             rows = (
-                await s.execute(select(Job, distance.label("dist")).where(Job.id.in_(job_ids)).order_by(distance))
+                await s.execute(select(Job, distance.label("dist")).where(Job.id.in_(job_ids), Job.legit_status.is_distinct_from("suspicious")).order_by(distance))
             ).all()
 
         scored = []

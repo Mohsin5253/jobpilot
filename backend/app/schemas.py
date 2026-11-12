@@ -378,6 +378,7 @@ class DraftEdit(BaseModel):
 
 class DraftDecision(DraftEdit):
     decision: Literal["approve", "reject"]
+    reason: str | None = Field(default=None, max_length=300, description="Why it was rejected (required to reject)")
 
 
 class DraftWithJob(DraftOut):

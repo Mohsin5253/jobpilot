@@ -94,6 +94,14 @@ class Settings(BaseSettings):
     scam_rdap_enabled: bool = True
     scam_llm_daily_cap: int = 300
     send_spacing_s: int = 90  # minimum gap between two sends from one mailbox
+    # Safety rails (app/safety): an approval covers one exact email for this long; KILL_SWITCH stops every outside
+    # effect (sends, WhatsApp, publishing) at once; Hunter contacts below this confidence are never used.
+    approval_grant_ttl_min: int = 30
+    kill_switch: bool = False
+    hunter_min_confidence: int = 80
+    # Outbound requests: the per-source ceilings from the sources table, shared across replicas through Postgres.
+    egress_throttle_enabled: bool = True
+    egress_max_wait_s: float = 65.0
     inactive_delete_days: int = 365  # DPDP retention: accounts unused this long are deleted...
     inactive_notice_days: int = 30  # ...after a notice this many days earlier
 

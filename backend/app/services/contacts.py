@@ -29,6 +29,7 @@ from app.llm import CallContext, LLMOutputError, LLMUnavailable, get_llm
 from app.logging import log
 from app.models import CompanyContact, Job
 from app.sources.base import USER_AGENT
+from app.safety import egress
 
 HUNTER = "https://api.hunter.io/v2"
 ATS_OR_FEED = (
@@ -263,7 +264,7 @@ def official_address(ranked: list[CompanyContact]) -> CompanyContact | None:
 
 async def find_contacts(job: Job, ctx: CallContext | None = None, force: bool = False) -> list[CompanyContact]:
     """Ranked real contacts for the job's company (cached per domain for settings.contacts_cache_days)."""
-    async with httpx.AsyncClient(headers={"User-Agent": USER_AGENT}) as client:
+    async with egress.client("contacts", headers={"User-Agent": USER_AGENT}) as client:
         domain = await resolve_domain(client, job, ctx)
         if domain and domain != job.company_domain:
             async with session_scope() as s:
@@ -315,4 +316,9 @@ async def find_contacts(job: Job, ctx: CallContext | None = None, force: bool = 
             else:
                 q = q.where(CompanyContact.email == job.recruiter_email.lower())
             contacts = list((await s.execute(q)).scalars().all())
-    return rank(contacts, job)
+    # The recipient policy: on the company's domain, no free-mail or lookalikes, Hunter only when verified with
+    # cited sources. Anything else is never offered as a recipient.
+    from app.safety.recipients import contact_ok
+
+    ok = [c for c in contacts if contact_ok(c.email, c.source, domain or c.domain, c.verification, c.confidence, c.sources).allowed]
+    return rank(ok, job)

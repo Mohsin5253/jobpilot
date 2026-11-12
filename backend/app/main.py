@@ -23,7 +23,12 @@ def init_sentry(component: str) -> None:
         return
     import sentry_sdk
 
-    sentry_sdk.init(dsn=settings.sentry_dsn, environment=settings.env, send_default_pii=False, traces_sample_rate=0.05, server_name=component)
+    from app.safety.scrub import before_send
+
+    sentry_sdk.init(
+        dsn=settings.sentry_dsn, environment=settings.env, send_default_pii=False, traces_sample_rate=0.05, server_name=component,
+        before_send=before_send, include_local_variables=False, max_request_body_size="never",
+    )
 
 
 @asynccontextmanager

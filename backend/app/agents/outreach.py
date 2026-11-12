@@ -11,12 +11,13 @@ from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.orm import selectinload
 
-from app.agents.common import PipelineState, agent_step, bump_stats, ctx_of, load_profile
+from app.agents.common import safe_job, PipelineState, agent_step, bump_stats, ctx_of, load_profile
 from app.agents.guard import check_freeform, resume_skillset
 from app.db import session_scope
+from app.safety import untrusted
 from app.llm import CallContext, LLMOutputError, LLMUnavailable, get_llm
 from app.logging import log
-from app.models import CompanyContact, DraftStatus, JobMatch, OutreachDraft
+from app.models import CompanyContact, DraftStatus, Job, JobMatch, OutreachDraft
 from app.services.contacts import find_contacts, official_address
 from app.schemas import ResumeData
 from app.skills import role_digest
@@ -199,7 +200,7 @@ async def draft_one(match: JobMatch, resume: ResumeData, resume_text: str, ctx: 
                 f"Relevant experience (already tailored, factual):\n"
                 + "\n".join(f"- {b['rewritten']}" for b in bullets[:5])
                 + f"\nMatching strengths: {', '.join(match.strengths[:6])}\n\n"
-                f"<job title=\"{job.title}\" company=\"{job.company}\" location=\"{job.location}\">\n{role_digest(job.description, 2500)}\n</job>"
+                f"<job title=\"{job.title}\" company=\"{job.company}\" location=\"{job.location}\">\n{untrusted.wrap(role_digest(job.description, 2500), 'job_post')}\n</job>"
             ),
             schema=OutreachOutput,
             ctx=ctx,
@@ -237,7 +238,7 @@ async def run_outreach(state: PipelineState) -> dict:
         ids = [uuid.UUID(x) for x in state.get("tailored_ids", [])]
         async with session_scope() as s:
             matches = (
-                (await s.execute(select(JobMatch).where(JobMatch.id.in_(ids)).options(selectinload(JobMatch.tailored))))
+                (await s.execute(select(JobMatch).join(Job, Job.id == JobMatch.job_id).where(JobMatch.id.in_(ids), *safe_job()).options(selectinload(JobMatch.tailored))))
                 .scalars()
                 .all()
             )

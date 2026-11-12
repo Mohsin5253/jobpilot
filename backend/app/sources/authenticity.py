@@ -16,6 +16,7 @@ import re
 import httpx
 
 from app.sources.base import Posting
+from app.safety import egress
 
 FIRST_PARTY = {"greenhouse", "lever", "ashby", "career_page", "demo", "campus"}  # the employer's own system
 
@@ -76,7 +77,9 @@ async def check_link(client: httpx.AsyncClient, url: str) -> str:
     if not url:
         return "unverified"
     try:
-        r = await client.get(url, timeout=12, follow_redirects=True)
+        # An apply-link check may reach any public company site, never a denied board (those stay "unverified").
+        with egress.purpose("link_check"):
+            r = await client.get(url, timeout=12, follow_redirects=True)
     except httpx.HTTPError:
         return "unverified"
     if r.status_code in (404, 410):
@@ -126,7 +129,7 @@ async def reverify_jobs(limit: int = 60) -> dict[str, int]:
         if not jobs:
             return {}
         sem = asyncio.Semaphore(8)
-        async with httpx.AsyncClient(headers={"User-Agent": USER_AGENT}) as client:
+        async with egress.client("link_check", headers={"User-Agent": USER_AGENT}) as client:
 
             async def one(j):
                 links = [a["url"] for a in (j.apply_links or []) if a.get("direct")] or [j.url]

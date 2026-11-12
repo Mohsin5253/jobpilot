@@ -170,7 +170,7 @@ export function useUpdateMatch() {
 export function useDecideDraft() {
   const invalidate = useInvalidate();
   return useMutation({
-    mutationFn: ({ id, ...body }: { id: string; decision: "approve" | "reject"; to_email?: string; subject?: string; email_body?: string; linkedin_note?: string }) =>
+    mutationFn: ({ id, ...body }: { id: string; decision: "approve" | "reject"; reason?: string; to_email?: string; subject?: string; email_body?: string; linkedin_note?: string }) =>
       api.post<DraftWithJob>(`/drafts/${id}/decision`, body),
     onSuccess: (d) => {
       toast.success(d.status === "approved" ? `Approved · ${d.company} moved to Applied` : `Rejected draft for ${d.company}`);

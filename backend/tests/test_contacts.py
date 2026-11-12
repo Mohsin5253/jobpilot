@@ -51,7 +51,8 @@ async def test_find_contacts_keeps_only_found_and_ranks_senior_ml_lead_first(mon
     assert "guess.person@acme.ai" not in emails  # pattern-inferred: never used
     assert {"privacy@acme.ai", "noreply@acme.ai", "sales@acme.ai"}.isdisjoint(emails)
     assert emails[0] == "priya.rao@acme.ai"  # senior ML/IT lead first
-    assert emails.index("arjun@acme.ai") < emails.index("careers@acme.ai")
+    assert "arjun@acme.ai" not in emails  # Hunter 'accept_all' isn't a verified address: never used (contact policy)
+    assert "careers@acme.ai" in emails
     assert ct.official_address(ranked).email == "careers@acme.ai"
     assert about.call_count == 0  # robots.txt respected
     params = hunter.calls[0].request.url.params

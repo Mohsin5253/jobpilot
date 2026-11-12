@@ -22,6 +22,7 @@ from app.services.job_store import store_postings
 from app.skills import extract_skills
 from app.sources.base import USER_AGENT
 from app.sources.india import GOV_PORTALS, alert_links, blocked, fetch_career_page, host_of, publisher_for
+from app.safety import egress
 
 router = APIRouter(tags=["sources"])
 
@@ -109,7 +110,7 @@ async def add_link(body: LinkIn, user: RealUserDep, session: SessionDep) -> dict
                 profile.preferences = prefs.model_copy(update={field: [*boards, token]}).model_dump()
                 await session.commit()
             return {"kind": "board_added", "board": token, "detail": f"Added {token}'s public job board. New roles there reach your Scout within minutes."}
-    async with httpx.AsyncClient(headers={"User-Agent": USER_AGENT}, follow_redirects=True) as c:
+    async with egress.client("career_page", headers={"User-Agent": USER_AGENT}, follow_redirects=True) as c:
         try:
             postings = await fetch_career_page(c, url)
         except httpx.HTTPError:

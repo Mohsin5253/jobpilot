@@ -19,6 +19,7 @@ from app.db import session_scope
 from app.logging import log
 from app.models import AgentRun, ApprovalEvent, Consent, Job, JobMatch, OutreachDraft, Profile, Quota, TailoredResume, User
 from app.schemas import Preferences
+from app.safety import egress
 
 IST = ZoneInfo("Asia/Kolkata")
 
@@ -65,6 +66,12 @@ async def consume(s: AsyncSession, user: User) -> int:
     if row is None:
         raise QuotaExceeded(cap, plan_max(user))
     return row
+
+
+async def refund(s: AsyncSession, user_id) -> None:
+    """An approval was undone before sending (the draft was edited, or its approval no longer matched): give the
+    day's send back."""
+    await s.execute(text("UPDATE quotas SET sends_used = sends_used - 1 WHERE user_id = :u AND date = :d AND sends_used > 0"), {"u": user_id, "d": today_ist()})
 
 
 async def set_cap(s: AsyncSession, user: User, cap: int) -> None:
@@ -147,7 +154,7 @@ async def weekly_report(now: datetime | None = None) -> int:
                     from app.services.whatsapp import send_template
 
                     try:
-                        async with httpx.AsyncClient(timeout=15) as c:
+                        async with egress.client("whatsapp", timeout=15) as c:
                             await send_template(c, prof.whatsapp_number, [u.name or "there", summary])
                     except httpx.HTTPError as exc:
                         log.warning("weekly_report.whatsapp_failed", error=str(exc)[:200])

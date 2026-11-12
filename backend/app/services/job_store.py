@@ -11,7 +11,6 @@ import uuid
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 
-import httpx
 from sqlalchemy import func, literal_column, select, tuple_
 from sqlalchemy.dialects.postgresql import insert
 
@@ -22,6 +21,7 @@ from app.models import Job
 from app.skills import extract_skills, job_embedding_text
 from app.sources.authenticity import FIRST_PARTY, dedupe_key, verify_postings
 from app.sources.base import USER_AGENT, Posting, classify_track
+from app.safety import egress
 
 COMPANY_SITE = {"greenhouse": "Company site", "lever": "Company site", "ashby": "Company site"}
 _REQUIREMENTS = re.compile(r"requirement|qualification|responsibilit|you will|you'll|skills|what we.re looking for|eligib|must have", re.IGNORECASE)
@@ -113,7 +113,7 @@ async def store_postings(postings: list[Posting], now: datetime) -> StoreResult:
                 ).all()
             )
         fresh = [p for p in postings if (p.source, p.external_id) not in already]
-        async with httpx.AsyncClient(headers={"User-Agent": USER_AGENT}) as client:
+        async with egress.client("sources", headers={"User-Agent": USER_AGENT}) as client:
             checked = await verify_postings(client, fresh)
         index = {id(p): i for i, p in enumerate(postings)}
         status = {index[id(fresh[i])]: st for i, st in checked.items()}

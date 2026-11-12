@@ -30,6 +30,7 @@ from app.logging import log
 from app.models import ScamReport, Verification
 from app.services import scam_shield as shield
 from app.services.ratelimit import client_ip, hit
+from app.safety import egress
 
 router = APIRouter(tags=["scam-shield"])
 
@@ -118,7 +119,7 @@ async def _fetch_page(url: str) -> str:
     if not host or not u.startswith(("http://", "https://")) or not await asyncio.to_thread(_public_host, host):
         return ""
     try:
-        async with httpx.AsyncClient(timeout=3, follow_redirects=False, headers={"user-agent": "JobPilot-ScamShield/1.0"}) as c:
+        async with egress.client("scam_shield", timeout=3, follow_redirects=False, headers={"user-agent": "JobPilot-ScamShield/1.0"}) as c:
             r = await c.get(u)
         if r.status_code != 200 or "html" not in r.headers.get("content-type", ""):
             return ""
@@ -138,7 +139,7 @@ async def _domain_age(domain: str) -> int | None:
         return hit_[1]
     age = None
     try:
-        async with httpx.AsyncClient(timeout=2, follow_redirects=True) as c:
+        async with egress.client("rdap", timeout=2, follow_redirects=True) as c:
             r = await c.get(f"https://rdap.org/domain/{domain}")
         if r.status_code == 200:
             for ev in r.json().get("events", []):
