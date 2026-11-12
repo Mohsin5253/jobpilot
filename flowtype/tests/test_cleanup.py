@@ -45,6 +45,14 @@ def test_times_written_as_digits_are_fine():
     assert not check("call me at four", "Call me at 4:45.", []).ok
 
 
+def test_sound_alike_spelling_fixes_are_allowed_without_a_dictionary():
+    # Live case: Whisper heard "fast RP"; the LLM wrote FastAPI. Invented names stay rejected.
+    assert check("The fast RP endpoint returns in forty milliseconds", "The FastAPI endpoint returns in 40 milliseconds.", []).ok
+    assert check("we moved the billing service to cooper nets", "We moved the billing service to Kubernetes.", []).ok
+    assert not check("can you send the report by friday", "Can you send the report to Rahul by Friday?", []).ok
+    assert not check("we moved the billing service to the cloud", "We moved the billing service to Kotlin.", []).ok
+
+
 def test_known_terms_may_be_added():
     assert check("send it to kavia", "Send it to Kavya.", ["Kavya"]).ok
 

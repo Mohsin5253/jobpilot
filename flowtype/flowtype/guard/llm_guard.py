@@ -85,6 +85,17 @@ def spoken_numbers(text: str) -> set[str]:
     return found
 
 
+SOUNDS_LIKE = 0.8  # measured: real fixes 0.84-0.95 ("fast RP" -> FastAPI, "cooper nets" -> Kubernetes); invented names <= 0.5
+
+
+def sounds_like_said(term: str, said_words: list[str]) -> bool:
+    """Whether `term` sounds and is spelled like a run of 1-4 words the speaker said."""
+    from flowtype.dictionary.matcher import match_score
+
+    return any(match_score(" ".join(said_words[i : i + n]), term) >= SOUNDS_LIKE
+               for n in (1, 2, 3, 4) for i in range(max(0, len(said_words) - n + 1)))
+
+
 @dataclass
 class Verdict:
     ok: bool
@@ -116,6 +127,7 @@ def check(transcript: str, output: str, known_terms: list[str], max_edit: float 
     said_joined = _norm(transcript)
     known = {_norm(w) for t in known_terms for w in t.split()} | {_sound(w) for t in known_terms for w in t.split()}
     said_numbers = spoken_numbers(transcript)
+    said_words = [w.strip(".,;:!?'\"()") for w in _WORD.findall(transcript)]
     for m in re.finditer(r"\d[\d,]*(?:\.\d+)?", output):
         num = m.group(0).rstrip(",")
         n = num.replace(",", "").lstrip("0") or "0"
@@ -136,5 +148,7 @@ def check(transcript: str, output: str, known_terms: list[str], max_edit: float 
         prev = output[: output.find(w)].rstrip()
         if i == 0 or prev.endswith((".", "?", "!", ":", "\n")) or re.match(r"^\d+[.)]", bare):
             continue  # a capital at a sentence start is formatting, not a new name
+        if sounds_like_said(bare, said_words):
+            continue  # a spelling fix of what was heard ("fast RP" -> FastAPI), not an invented name
         return Verdict(False, f"added '{bare}'", edit, ratio)
     return Verdict(True, "", edit, ratio)
