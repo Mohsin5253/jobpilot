@@ -1,0 +1,42 @@
+# Copy to your data folder as config.toml (run `python -m flowtype where` to find it).
+# Every setting is optional; these are the defaults. API keys never go here: use `python -m flowtype set-key`.
+
+[hotkey]
+key = "ctrl_r"            # pynput key name: ctrl_r, alt_r, cmd_r (macOS), f13...
+tap_max_ms = 250          # shorter than this is a tap, not a hold
+double_tap_gap_ms = 350   # two taps within this toggle hands-free
+max_record_s = 120
+
+[audio]
+device = ""               # name or index from `python -m flowtype devices`; "" = system default
+preroll_ms = 400
+postroll_ms = 250
+target_dbfs = -3.0
+max_gain_db = 30.0
+
+[vad]
+threshold = 0.5
+min_speech_ms = 250       # less speech than this = nothing is pasted
+pad_ms = 200
+
+[asr]
+provider = "groq"
+model = "whisper-large-v3-turbo"
+language = "en"           # pinned. Hinglish also uses "en" so it comes out in Roman script
+style = "en-IN"           # "en-IN" or "hinglish"
+timeout_s = 10.0
+
+[llm]                     # the clean-up pass arrives in Phase 2
+provider = "groq"
+model = "llama-3.3-70b-versatile"
+enabled = false
+
+[inject]
+restore_delay_ms = 150
+refuse_password_fields = true
+
+[store]
+store_text = false        # true = also keep the pasted text in flowtype.db (it never leaves this machine)
+
+[dictionary]
+words = []                # or: python -m flowtype words add "Mohsin Sidhpurwala" --star
