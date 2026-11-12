@@ -16,7 +16,6 @@ from pydantic import BaseModel, Field
 
 from app.api.deps import RealUserDep, SessionDep, UserDep
 from app.config import settings
-from app.logging import log
 from app.services.ratelimit import hit
 from app.skills import extract_skills
 
@@ -27,33 +26,7 @@ MAX_BYTES = 12 * 1024 * 1024  # about 10 minutes of compressed audio; answers ar
 AUDIO_TYPES = ("audio/webm", "audio/ogg", "audio/mp4", "audio/mpeg", "audio/wav", "audio/x-wav", "audio/aac", "video/webm")
 
 
-# Spoken-English mishearings of technical terms, and spellings Whisper often gets almost right.
-FIXES = {
-    r"\bjit ?hub\b": "GitHub", r"\bgit ?hub\b": "GitHub", r"\bgit ?lab\b": "GitLab", r"\bci[- ]cd\b": "CI/CD",
-    r"\bpost ?gre ?sql\b": "PostgreSQL", r"\bpost ?gres\b": "Postgres", r"\bmy ?sql\b": "MySQL", r"\bno ?sql\b": "NoSQL",
-    r"\bjava ?script\b": "JavaScript", r"\btype ?script\b": "TypeScript", r"\bnode ?(?:\.|dot)? ?js\b": "Node.js",
-    r"\bnext ?(?:\.|dot)? ?js\b": "Next.js", r"\breact ?(?:\.|dot)? ?js\b": "React", r"\bfast ?api\b": "FastAPI",
-    r"\bpy ?torch\b": "PyTorch", r"\btensor ?flow\b": "TensorFlow", r"\bscikit[- ]?learn\b": "scikit-learn", r"\bnum ?py\b": "NumPy",
-    r"\bpower ?bi\b": "Power BI", r"\bk8s\b": "Kubernetes", r"\bkuber ?netes\b": "Kubernetes", r"\bdev ?ops\b": "DevOps",
-    r"\bml ?ops\b": "MLOps", r"\bllms\b": "LLMs", r"\bllm\b": "LLM", r"\brest ?apis?\b": lambda m: "REST APIs" if m.group(0).lower().endswith("s") else "REST API",
-    r"\bjson\b": "JSON", r"\bsql\b": "SQL", r"\baws\b": "AWS", r"\bgcp\b": "GCP", r"\bdsa\b": "DSA", r"\boop\b": "OOP",
-    r"\bui ?/? ?ux\b": "UI/UX", r"\bseo\b": "SEO", r"\broas\b": "ROAS", r"\bctr\b": "CTR", r"\bkpis?\b": lambda m: m.group(0).upper().replace("KPIS", "KPIs"),
-    r"\bci ?/? ?cd\b|\bc ?i ?c ?d\b": "CI/CD", r"\bpost ?gres ?(?:cal|kel|kwel|sequel|q ?l|s ?q ?l)\b": "PostgreSQL",
-    r"\bmy ?sequel\b": "MySQL", r"\bmongo ?db\b": "MongoDB", r"\bfire ?base\b": "Firebase", r"\bgraph ?ql\b": "GraphQL",
-    r"\bc ?sharp\b": "C#", r"\bc ?plus ?plus\b": "C++", r"\bdot ?net\b": ".NET", r"\bexpress ?(?:\.|dot)? ?js\b": "Express.js",
-    r"\bspring ?boot\b": "Spring Boot", r"\btail ?wind\b": "Tailwind", r"\bopen ?ai\b": "OpenAI", r"\blang ?chain\b": "LangChain",
-    r"\bhugging ?face\b": "Hugging Face", r"\bmat ?plot ?lib\b": "Matplotlib", r"\bjupiter notebook\b": "Jupyter notebook",
-    r"\btablo\b": "Tableau", r"\bfig ?ma\b": "Figma", r"\bj ?query\b": "jQuery", r"\bvs ?code\b": "VS Code",
-    r"\bgst\b": "GST", r"\btds\b": "TDS", r"\bdcf\b": "DCF", r"\bcgpa\b": "CGPA", r"\bb\. ?tech\b": "B.Tech",
-}
-_FIXES = [(re.compile(k, re.I), v) for k, v in FIXES.items()]
-
-
-def polish(text: str) -> str:
-    """Correct technical terms' spelling and casing (GitHub, PostgreSQL, CI/CD...), which matter in an interview answer."""
-    for rx, rep in _FIXES:
-        text = rx.sub(rep, text)
-    return text
+from app.dictation.terms import FIXES, polish  # noqa: F401  (re-exported for callers and tests)
 
 
 def vocabulary(hint: str) -> str:
@@ -101,7 +74,16 @@ async def status(user: UserDep) -> dict:
 
 
 @router.post("/stt")
-async def transcribe(user: RealUserDep, session: SessionDep, audio: UploadFile = File(...), hint: str = Form(default="", max_length=600)) -> dict:
+async def transcribe(
+    user: RealUserDep,
+    session: SessionDep,
+    audio: UploadFile = File(...),
+    hint: str = Form(default="", max_length=600),
+    audio_ms: int | None = Form(default=None, ge=0, le=900_000),
+    mode: str | None = Form(default=None, pattern="^(polished|verbatim)$"),
+) -> dict:
+    """One dictation through the Flow-style pipeline (see app.dictation): biased ASR with fallback, hallucination
+    filter, your dictionary, a constrained AI fix. Logs timings (never the audio or text) for latency and Edit Rate."""
     if not enabled():
         raise HTTPException(503, "Accurate speech-to-text isn't configured on this server (it needs GROQ_API_KEY). Live browser recognition still works.")
     await hit("stt", str(user.id))
@@ -113,39 +95,40 @@ async def transcribe(user: RealUserDep, session: SessionDep, audio: UploadFile =
         raise HTTPException(413, "That recording is too long. Answer in shorter parts.")
     if len(data) < 800:
         return {"text": "", "model": MODEL}
-    import groq
     from sqlalchemy import select
 
-    from app.models import Profile
+    from app.dictation.pipeline import DictationContext, run
+    from app.dictation.providers import ASRError
+    from app.models import Dictation, Profile
     from app.schemas import ResumeData
-    from app.services.speech_vocab import correct, personal_vocabulary, whisper_prompt
+    from app.services.speech_vocab import personal_vocabulary
 
     # Your own words (name, college, employers, projects, skills, the words you added) steer the spelling.
     p = (await session.execute(select(Profile).where(Profile.user_id == user.id))).scalar_one_or_none()
     resume = ResumeData.model_validate((p.resume if p else None) or {})
     prefs = (p.preferences if p else None) or {}
-    vocab = personal_vocabulary(resume, (p.academics if p else None) or {}, prefs.get("speech_words") or [], own_name=user.name or "")
-    for company in re.findall(r"\bat ([A-Z][\w&.-]*(?: [A-Z][\w&.-]*){0,3})", hint):
-        vocab.append(company)
-    vocab += [t for t in extract_skills(hint) if t not in vocab]
+    mine = list(prefs.get("speech_words") or [])
+    dictionary = personal_vocabulary(resume, (p.academics if p else None) or {}, [], own_name=user.name or "")
+    context = re.findall(r"\bat ([A-Z][\w&.-]*(?: [A-Z][\w&.-]*){0,3})", hint) + extract_skills(hint)
+    ctx = DictationContext(dictionary=list(reversed(dictionary)), context_terms=context, starred=mine, hint=hint)  # most relevant last
     ext = {"audio/mp4": "m4a", "audio/mpeg": "mp3", "audio/wav": "wav", "audio/x-wav": "wav", "audio/aac": "aac", "audio/ogg": "ogg"}.get(kind, "webm")
     try:
-        client = groq.AsyncGroq(api_key=settings.groq_api_key, max_retries=2, timeout=60.0)
-        res = await client.audio.transcriptions.create(
-            file=(f"answer.{ext}", data),
-            model=MODEL,
-            language="en",
-            temperature=0,
-            response_format="verbose_json",
-            prompt=whisper_prompt(vocab, extract_skills(hint)),
-        )
-    except (groq.APIStatusError, groq.APIConnectionError) as exc:
-        log.warning("stt.failed", error=type(exc).__name__)
+        # Polished (the default) cleans up fillers and self-corrections; word for word keeps exactly what you said.
+        mode = mode or prefs.get("speech_mode") or "polished"
+        out = await run(data, f"answer.{ext}", ctx, user.id, ai_fix=ai_correct, mode=mode)
+    except ASRError as exc:
         raise HTTPException(502, "Transcription failed. Your live transcript is kept.") from exc
-    text = polish(keep_speech(res))
-    text, fixes = correct(text, vocab)
-    text, ai_fixes = await ai_correct(text, vocab, hint, user.id)
-    return {"text": text, "model": MODEL, "corrections": [*fixes, *ai_fixes]}
+    row = Dictation(
+        user_id=user.id, model=out.model, fallback=out.fallback, retried=out.retried, audio_ms=audio_ms,
+        words=len(out.text.split()), corrections=len(out.corrections), asr_ms=out.timings["asr_ms"], server_ms=out.timings["server_ms"],
+        mode=out.mode, guard=out.guard, llm_ms=out.timings["ai_ms"] if out.mode == "polished" and out.guard not in ("", "skipped") else None,
+    )
+    session.add(row)
+    await session.commit()
+    return {
+        "text": out.text, "model": out.model, "corrections": out.corrections, "dictation_id": str(row.id), "timings": out.timings,
+        "fallback": out.fallback, "mode": out.mode, "cleaned": out.guard == "ok", "raw": out.raw if out.mode == "polished" else None,
+    }
 
 
 class Fixed(BaseModel):
@@ -197,7 +180,26 @@ async def get_words(user: UserDep, session: SessionDep) -> dict:
     from app.models import Profile
 
     p = (await session.execute(select(Profile).where(Profile.user_id == user.id))).scalar_one_or_none()
-    return {"words": ((p.preferences if p else None) or {}).get("speech_words", [])}
+    prefs = (p.preferences if p else None) or {}
+    return {"words": prefs.get("speech_words", []), "mode": prefs.get("speech_mode") or "polished"}
+
+
+class ModeIn(BaseModel):
+    mode: str = Field(pattern="^(polished|verbatim)$")
+
+
+@router.put("/stt/mode")
+async def set_mode(body: ModeIn, user: UserDep, session: SessionDep) -> dict:
+    """Polished: fillers and self-corrections cleaned up, punctuation and lists added. Word for word: exactly what
+    you said, with only your names and terms spelled right."""
+    from sqlalchemy import select
+
+    from app.models import Profile
+
+    p = (await session.execute(select(Profile).where(Profile.user_id == user.id))).scalar_one()
+    p.preferences = {**(p.preferences or {}), "speech_mode": body.mode}
+    await session.commit()
+    return {"mode": body.mode}
 
 
 @router.put("/stt/words")
@@ -212,3 +214,39 @@ async def set_words(body: WordsIn, user: UserDep, session: SessionDep) -> dict:
     p.preferences = {**(p.preferences or {}), "speech_words": words}
     await session.commit()
     return {"words": words}
+
+
+
+class DictationUpdate(BaseModel):
+    client_ms: int | None = Field(default=None, ge=0, le=120_000, description="Key release to text in the answer box")
+    edited: bool | None = None
+    edit_ratio: float | None = Field(default=None, ge=0, le=5)
+
+
+@router.patch("/stt/dictations/{dictation_id}")
+async def update_dictation(dictation_id: str, body: DictationUpdate, user: UserDep, session: SessionDep) -> dict:
+    """The browser reports the end-to-end latency and, at submit, whether the dictated text was edited (Edit Rate)."""
+    import uuid
+
+    from app.models import Dictation
+
+    try:
+        row = await session.get(Dictation, uuid.UUID(dictation_id))
+    except ValueError:
+        row = None
+    if row is None or row.user_id != user.id:
+        raise HTTPException(404, "No such dictation")
+    for k, v in body.model_dump(exclude_none=True).items():
+        setattr(row, k, v)
+    await session.commit()
+    return {"ok": True}
+
+
+@router.get("/stt/metrics")
+async def stt_metrics(user: UserDep, session: SessionDep, scope: str = "me") -> dict:
+    """Latency p50/p95 per stage and the Dictation Edit Rate, for you (or everyone, for admins)."""
+    from app.dictation.store import metrics
+
+    if scope == "all" and user.email.lower() in {e.lower() for e in settings.admin_emails}:
+        return await metrics(session, None)
+    return await metrics(session, user.id)

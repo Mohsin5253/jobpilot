@@ -114,7 +114,15 @@ class Settings(BaseSettings):
     llm_mode: Literal["auto", "on", "offline"] = "auto"
     groq_api_key: str | None = None
     # Speech-to-text for spoken interview answers: the full large-v3 is the most accurate; whisper-large-v3-turbo is faster/cheaper.
-    stt_model: str = "whisper-large-v3"
+    stt_model: str = "whisper-large-v3-turbo"  # fastest; with the speaker's vocabulary as accurate as large-v3 in our tests
+    stt_timeout_s: float = 6.0  # then the fallback model (large-v3) is tried once
+    stt_ai_budget_ms: int = 600  # the AI spelling pass is skipped if it takes longer (Flow's latency budget)
+    # Polished mode: the clean-up model (a fast instruct model; reasoning off) and its time budget.
+    stt_cleanup_model: str = "qwen/qwen3.8-27b"
+    stt_cleanup_reasoning: str = "none"  # Groq reasoning_effort for models that think by default; "" to omit
+    stt_cleanup_fallback_model: str = "openai/gpt-oss-20b"  # used while the first is rate-limited
+    stt_cleanup_fallback_reasoning: str = "low"
+    stt_cleanup_budget_ms: int = 600
     anthropic_api_key: str | None = None
     fast_model: str = ""  # scoring / parsing; empty = provider default (PROVIDER_MODELS)
     smart_model: str = ""  # writing (tailor + outreach); empty = provider default

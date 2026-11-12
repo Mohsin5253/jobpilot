@@ -60,7 +60,7 @@ export function tidy(text: string): string {
 }
 
 let sttEnabled: Promise<boolean> | null = null;
-const serverStt = () => (sttEnabled ??= api.get<{ enabled: boolean }>("/stt/status").then((r) => r.enabled, () => false));
+export const serverStt = () => (sttEnabled ??= api.get<{ enabled: boolean }>("/stt/status").then((r) => r.enabled, () => false));
 
 function pickMime(): string | undefined {
   if (typeof MediaRecorder === "undefined") return undefined;
