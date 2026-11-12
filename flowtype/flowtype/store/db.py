@@ -4,7 +4,7 @@ machine. Transcript text is stored only when `store.store_text` is on; audio is 
 import sqlite3
 import threading
 from dataclasses import asdict, dataclass, field
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 SCHEMA = """
@@ -36,6 +36,11 @@ CREATE TABLE IF NOT EXISTS dictations (
     words INTEGER,
     text TEXT                        -- only with store_text = true
 );
+CREATE TABLE IF NOT EXISTS snippets (
+    cue TEXT PRIMARY KEY COLLATE NOCASE,
+    expansion TEXT NOT NULL,
+    added_at TEXT NOT NULL
+);
 CREATE TABLE IF NOT EXISTS dictionary (
     term TEXT PRIMARY KEY COLLATE NOCASE,
     starred INTEGER NOT NULL DEFAULT 0,
@@ -45,7 +50,14 @@ CREATE TABLE IF NOT EXISTS dictionary (
 );
 """
 
-STAGES = ["postroll_ms", "vad_ms", "normalise_ms", "prompt_ms", "asr_ms", "asr_retry_ms", "guard_ms", "dictionary_ms", "context_ms", "inject_ms", "total_ms"]
+# Columns added after Phase 1; existing databases get them on open.
+MIGRATIONS = {
+    "style": "TEXT", "llm_status": "TEXT", "llm_reason": "TEXT", "llm_ms": "INTEGER", "llm_model": "TEXT",
+    "context_terms": "INTEGER", "fixes": "INTEGER", "snippets_used": "INTEGER", "chunks": "INTEGER",
+    "asr_mode": "TEXT", "command": "INTEGER", "edit_rate": "REAL", "learned": "TEXT", "wait_ms": "INTEGER",
+}
+
+STAGES = ["postroll_ms", "vad_ms", "normalise_ms", "prompt_ms", "asr_ms", "asr_retry_ms", "guard_ms", "dictionary_ms", "context_ms", "llm_ms", "inject_ms", "total_ms"]
 
 
 @dataclass
@@ -71,6 +83,20 @@ class Dictation:
     context_ms: int | None = None
     inject_ms: int | None = None
     total_ms: int | None = None
+    wait_ms: int | None = None  # key up -> last speculative chunk done
+    style: str | None = None
+    llm_status: str | None = None
+    llm_reason: str | None = None
+    llm_ms: int | None = None
+    llm_model: str | None = None
+    context_terms: int | None = None
+    fixes: int | None = None
+    snippets_used: int | None = None
+    chunks: int | None = None
+    asr_mode: str | None = None
+    command: bool = False
+    edit_rate: float | None = None
+    learned: str | None = None
     chars: int | None = None
     words: int | None = None
     text: str | None = None
@@ -86,17 +112,54 @@ class Store:
         self._lock = threading.Lock()
         with self._lock:
             self._db.executescript(SCHEMA)
+            have = {r[1] for r in self._db.execute("PRAGMA table_info(dictations)")}
+            for col, typ in MIGRATIONS.items():
+                if col not in have:
+                    self._db.execute(f"ALTER TABLE dictations ADD COLUMN {col} {typ}")
+            self._db.commit()
 
     # --- dictations ---------------------------------------------------------------------------------------------
     def add_dictation(self, d: Dictation, store_text: bool = False) -> int:
         row = asdict(d)
         row["asr_retried"] = int(d.asr_retried)
+        row["command"] = int(d.command)
         if not store_text:
             row["text"] = None
         cols = ", ".join(row)
         with self._lock, self._db:
             cur = self._db.execute(f"INSERT INTO dictations ({cols}) VALUES ({', '.join('?' * len(row))})", list(row.values()))
         return int(cur.lastrowid)
+
+    def update_dictation(self, dictation_id: int, **fields) -> None:
+        allowed = {k: v for k, v in fields.items() if k in Dictation.__dataclass_fields__ and k != "text"}
+        if allowed:
+            with self._lock, self._db:
+                self._db.execute(f"UPDATE dictations SET {', '.join(f'{k} = ?' for k in allowed)} WHERE id = ?", [*allowed.values(), dictation_id])
+
+    def history(self, limit: int = 20, query: str = "") -> list[sqlite3.Row]:
+        with self._lock:
+            return self._db.execute(
+                "SELECT id, created_at, app, style, words, text FROM dictations WHERE text IS NOT NULL AND text LIKE ? ORDER BY id DESC LIMIT ?",
+                (f"%{query}%", limit),
+            ).fetchall()
+
+    def purge_text(self, older_than_days: int) -> int:
+        cutoff = (datetime.now(timezone.utc) - timedelta(days=older_than_days)).isoformat(timespec="milliseconds")
+        with self._lock, self._db:
+            return self._db.execute("UPDATE dictations SET text = NULL WHERE text IS NOT NULL AND created_at < ?", (cutoff,)).rowcount
+
+    def erase_all_text(self) -> int:
+        with self._lock, self._db:
+            return self._db.execute("UPDATE dictations SET text = NULL WHERE text IS NOT NULL").rowcount
+
+    def get(self, dictation_id: int) -> sqlite3.Row | None:
+        with self._lock:
+            return self._db.execute("SELECT * FROM dictations WHERE id = ?", (dictation_id,)).fetchone()
+
+    def edit_rate_summary(self) -> dict:
+        with self._lock:
+            rows = self._db.execute("SELECT COALESCE(llm_status, 'none') AS s, AVG(edit_rate) AS r, COUNT(edit_rate) AS n FROM dictations WHERE edit_rate IS NOT NULL GROUP BY s").fetchall()
+        return {r["s"]: {"edit_rate": round(r["r"], 3), "n": r["n"]} for r in rows}
 
     def recent(self, limit: int = 20) -> list[sqlite3.Row]:
         with self._lock:
@@ -136,6 +199,20 @@ class Store:
         if terms:
             with self._lock, self._db:
                 self._db.executemany("UPDATE dictionary SET uses = uses + 1 WHERE term = ?", [(t,) for t in terms])
+
+    # --- snippets -----------------------------------------------------------------------------------------------
+    def add_snippet(self, cue: str, expansion: str) -> None:
+        now = datetime.now(timezone.utc).isoformat(timespec="seconds")
+        with self._lock, self._db:
+            self._db.execute("INSERT INTO snippets (cue, expansion, added_at) VALUES (?, ?, ?) ON CONFLICT(cue) DO UPDATE SET expansion = excluded.expansion", (cue.strip(), expansion, now))
+
+    def remove_snippet(self, cue: str) -> bool:
+        with self._lock, self._db:
+            return self._db.execute("DELETE FROM snippets WHERE cue = ?", (cue.strip(),)).rowcount > 0
+
+    def snippets(self) -> list[tuple[str, str]]:
+        with self._lock:
+            return [(r["cue"], r["expansion"]) for r in self._db.execute("SELECT cue, expansion FROM snippets ORDER BY cue")]
 
     def close(self) -> None:
         self._db.close()

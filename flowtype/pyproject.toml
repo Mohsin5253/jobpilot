@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "flowtype"
-version = "0.1.0"
+version = "0.7.0"
 description = "System-wide push-to-talk dictation: hold a key, speak, release, and the text appears at your cursor."
 requires-python = ">=3.11"
 readme = "README.md"
@@ -21,10 +21,16 @@ dependencies = [
     "pyobjc-framework-Cocoa>=10; sys_platform == 'darwin'",
     "pyobjc-framework-ApplicationServices>=10; sys_platform == 'darwin'",
     "pyperclip>=1.8; sys_platform == 'linux'",
+    # Phase 4: phonetic matching; Phase 6: evals; Phase 7: the overlay.
+    "rapidfuzz>=3.6",
+    "metaphone>=0.6",
+    "jiwer>=3.0",
+    "PySide6-Essentials>=6.6",  # QtWidgets only: the overlay needs nothing else
 ]
 
 [project.optional-dependencies]
 dev = ["pytest>=8"]
+package = ["pyinstaller>=6.5"]
 
 [project.scripts]
 flowtype = "flowtype.__main__:main"

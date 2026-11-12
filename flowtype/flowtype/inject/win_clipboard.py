@@ -89,6 +89,14 @@ class WinClipboard:
         # The original is already in clipboard history; don't add it a second time.
         self._write(snap, hide_from_history=True)
 
+    def get_text(self) -> str | None:
+        self._open()
+        try:
+            data = self._read(CF_UNICODETEXT)
+        finally:
+            user32.CloseClipboard()
+        return data.decode("utf-16-le", errors="ignore").split("\0", 1)[0] if data else None
+
     def change_marker(self) -> int:
         return int(user32.GetClipboardSequenceNumber())
 

@@ -1,9 +1,15 @@
-"""What has keyboard focus: the app, and whether it's a password field (we never paste into one).
+"""The context collector: what has keyboard focus.
 
-Phase 1 reads only these two facts. Phase 2 adds the window title and nearby text for the bias prompt.
+- the app (process name) and window title: these pick the clean-up style;
+- whether the focused field is a password field (we never paste into one, and never read it);
+- the text just before the caret and the current selection: these feed the bias prompt's context terms (Phase 3),
+  command mode (Phase 7), and learning from corrections (Phase 4).
 
-The check starts on a background thread the moment the key comes up, so it runs while the audio is being
-transcribed, and the pipeline waits at most a short timeout for it (UI Automation can hang on a frozen app)."""
+Windows reads it through UI Automation (TextPattern, falling back to ValuePattern); macOS through the Accessibility
+API (AXValue / AXSelectedTextRange). Everything stays in memory: context text is never stored.
+
+Probes run on a daemon thread and the pipeline waits at most a short timeout (UI Automation can hang on a frozen
+app)."""
 
 import sys
 import threading
@@ -11,6 +17,8 @@ import time
 from dataclasses import dataclass
 from typing import Callable
 
+BEFORE_CHARS = 600
+FIELD_CHARS = 8000
 
 last_error: str | None = None  # why the last password check couldn't tell, for the startup self-check
 
@@ -19,20 +27,24 @@ last_error: str | None = None  # why the last password check couldn't tell, for 
 class FocusInfo:
     app: str | None = None
     is_password: bool | None = None  # None = couldn't tell
+    title: str | None = None
+    before_text: str = ""  # up to BEFORE_CHARS before the caret
+    selected_text: str = ""
+    field_text: str | None = None  # the whole field, only when asked for (learning)
     ms: int = 0
 
 
 class FocusProbe:
     """Runs `probe` on a daemon thread; `result(timeout)` returns FocusInfo() if it didn't finish in time."""
 
-    def __init__(self, probe: Callable[[], FocusInfo]):
+    def __init__(self, probe: Callable[..., FocusInfo], full: bool = False):
         self._info: FocusInfo | None = None
         self._done = threading.Event()
         self._t0 = time.perf_counter()
 
         def run():
             try:
-                self._info = probe()
+                self._info = probe(full=full) if full else probe()
             except Exception:
                 self._info = FocusInfo()
             self._info.ms = int((time.perf_counter() - self._t0) * 1000)
@@ -44,12 +56,12 @@ class FocusProbe:
         return self._info if self._done.wait(timeout) and self._info else FocusInfo(ms=int((time.perf_counter() - self._t0) * 1000))
 
 
-def platform_probe() -> Callable[[], FocusInfo]:
+def platform_probe() -> Callable[..., FocusInfo]:
     if sys.platform == "win32":
         return _windows_probe
     if sys.platform == "darwin":
         return _mac_probe
-    return lambda: FocusInfo()
+    return lambda full=False: FocusInfo()
 
 
 def warm() -> None:
@@ -64,37 +76,14 @@ def warm() -> None:
 
 
 # --- Windows -----------------------------------------------------------------------------------------------------
-def _windows_probe() -> FocusInfo:
-    return FocusInfo(app=_windows_app(), is_password=_windows_is_password())
+UIA_TEXT_PATTERN, UIA_VALUE_PATTERN = 10014, 10002
+ENDPOINT_START, ENDPOINT_END = 0, 1
 
 
-def _windows_app() -> str | None:
-    import ctypes
-    from ctypes import wintypes
-
-    user32, kernel32 = ctypes.windll.user32, ctypes.windll.kernel32
-    user32.GetForegroundWindow.restype = wintypes.HWND
-    kernel32.OpenProcess.restype = wintypes.HANDLE
-    kernel32.OpenProcess.argtypes = [wintypes.DWORD, wintypes.BOOL, wintypes.DWORD]
-    kernel32.QueryFullProcessImageNameW.argtypes = [wintypes.HANDLE, wintypes.DWORD, wintypes.LPWSTR, ctypes.POINTER(wintypes.DWORD)]
-    kernel32.CloseHandle.argtypes = [wintypes.HANDLE]
-    hwnd = user32.GetForegroundWindow()
-    pid = wintypes.DWORD()
-    user32.GetWindowThreadProcessId(hwnd, ctypes.byref(pid))
-    h = kernel32.OpenProcess(0x1000, False, pid.value)  # PROCESS_QUERY_LIMITED_INFORMATION
-    if not h:
-        return None
-    try:
-        buf = ctypes.create_unicode_buffer(1024)
-        n = wintypes.DWORD(1024)
-        if kernel32.QueryFullProcessImageNameW(h, 0, buf, ctypes.byref(n)):
-            return buf.value.rsplit("\\", 1)[-1]
-        return None
-    finally:
-        kernel32.CloseHandle(h)
-
-
-def _windows_is_password() -> bool | None:
+def _windows_probe(full: bool = False) -> FocusInfo:
+    app, title = _windows_app_and_title()
+    info = FocusInfo(app=app, title=title)
+    global last_error
     try:
         import comtypes
         import comtypes.client
@@ -102,52 +91,147 @@ def _windows_is_password() -> bool | None:
         comtypes.CoInitializeEx(comtypes.COINIT_MULTITHREADED)
         try:
             comtypes.client.GetModule("UIAutomationCore.dll")
-            from comtypes.gen.UIAutomationClient import CUIAutomation, IUIAutomation
+            from comtypes.gen import UIAutomationClient as UIA
 
-            uia = comtypes.client.CreateObject(CUIAutomation, interface=IUIAutomation)
+            uia = comtypes.client.CreateObject(UIA.CUIAutomation, interface=UIA.IUIAutomation)
             el = uia.GetFocusedElement()
-            return bool(el.CurrentIsPassword) if el else None
+            if not el:
+                return info
+            info.is_password = bool(el.CurrentIsPassword)
+            if info.is_password:
+                return info  # never read a password field
+            _windows_text(el, UIA, info, full)
         finally:
             comtypes.CoUninitialize()
     except Exception as exc:
-        global last_error
         last_error = f"UI Automation: {type(exc).__name__}: {exc}"[:200]
-        return None
+    return info
+
+
+def _windows_text(el, UIA, info: FocusInfo, full: bool) -> None:
+    try:
+        pat = el.GetCurrentPattern(UIA_TEXT_PATTERN)
+        if pat:
+            tp = pat.QueryInterface(UIA.IUIAutomationTextPattern)
+            doc = tp.DocumentRange
+            sel = tp.GetSelection()
+            if sel and sel.Length:
+                r = sel.GetElement(0)
+                info.selected_text = (r.GetText(4000) or "").strip()
+                before = doc.Clone()
+                before.MoveEndpointByRange(ENDPOINT_END, r, ENDPOINT_START)
+                info.before_text = (before.GetText(-1) or "")[-BEFORE_CHARS:]
+            if full:
+                info.field_text = (doc.GetText(FIELD_CHARS) or "")
+            return
+    except Exception:
+        pass
+    try:
+        pat = el.GetCurrentPattern(UIA_VALUE_PATTERN)
+        if pat:
+            value = pat.QueryInterface(UIA.IUIAutomationValuePattern).CurrentValue or ""
+            info.before_text = value[-BEFORE_CHARS:]  # no caret position from ValuePattern: assume the end
+            if full:
+                info.field_text = value[:FIELD_CHARS]
+    except Exception:
+        pass
+
+
+def _windows_app_and_title() -> tuple[str | None, str | None]:
+    import ctypes
+    from ctypes import wintypes
+
+    user32, kernel32 = ctypes.windll.user32, ctypes.windll.kernel32
+    user32.GetForegroundWindow.restype = wintypes.HWND
+    user32.GetWindowTextW.argtypes = [wintypes.HWND, wintypes.LPWSTR, ctypes.c_int]
+    kernel32.OpenProcess.restype = wintypes.HANDLE
+    kernel32.OpenProcess.argtypes = [wintypes.DWORD, wintypes.BOOL, wintypes.DWORD]
+    kernel32.QueryFullProcessImageNameW.argtypes = [wintypes.HANDLE, wintypes.DWORD, wintypes.LPWSTR, ctypes.POINTER(wintypes.DWORD)]
+    kernel32.CloseHandle.argtypes = [wintypes.HANDLE]
+    hwnd = user32.GetForegroundWindow()
+    tbuf = ctypes.create_unicode_buffer(512)
+    user32.GetWindowTextW(hwnd, tbuf, 512)
+    pid = wintypes.DWORD()
+    user32.GetWindowThreadProcessId(hwnd, ctypes.byref(pid))
+    h = kernel32.OpenProcess(0x1000, False, pid.value)  # PROCESS_QUERY_LIMITED_INFORMATION
+    app = None
+    if h:
+        try:
+            buf = ctypes.create_unicode_buffer(1024)
+            n = wintypes.DWORD(1024)
+            if kernel32.QueryFullProcessImageNameW(h, 0, buf, ctypes.byref(n)):
+                app = buf.value.rsplit("\\", 1)[-1]
+        finally:
+            kernel32.CloseHandle(h)
+    return app, tbuf.value or None
 
 
 # --- macOS -------------------------------------------------------------------------------------------------------
-def _mac_probe() -> FocusInfo:
-    app = None
+def _mac_probe(full: bool = False) -> FocusInfo:
+    info = FocusInfo()
+    pid = None
     try:
         from AppKit import NSWorkspace
 
         front = NSWorkspace.sharedWorkspace().frontmostApplication()
-        app = str(front.localizedName()) if front else None
+        if front:
+            info.app, pid = str(front.localizedName()), int(front.processIdentifier())
     except Exception:
         pass
-    return FocusInfo(app=app, is_password=_mac_is_password())
+    info.is_password = _mac_secure_input()
+    try:
+        from ApplicationServices import AXUIElementCopyAttributeValue, AXUIElementCreateApplication, AXUIElementCreateSystemWide
+
+        def attr(el, name):
+            err, val = AXUIElementCopyAttributeValue(el, name, None)
+            return None if err else val
+
+        app_el = AXUIElementCreateApplication(pid) if pid else None
+        win = attr(app_el, "AXFocusedWindow") if app_el is not None else None
+        if win is not None:
+            t = attr(win, "AXTitle")
+            info.title = str(t) if t else None
+        el = attr(AXUIElementCreateSystemWide(), "AXFocusedUIElement")
+        if el is None:
+            global last_error
+            last_error = "Accessibility API returned nothing (is Accessibility permission granted?)"
+            return info
+        if str(attr(el, "AXSubrole") or "") == "AXSecureTextField":
+            info.is_password = True
+        if info.is_password:
+            return info
+        if info.is_password is None:
+            info.is_password = False
+        value = attr(el, "AXValue")
+        value = str(value) if isinstance(value, str) or hasattr(value, "UTF8String") else ""
+        sel = attr(el, "AXSelectedText")
+        info.selected_text = str(sel).strip() if sel else ""
+        caret = len(value)
+        rng = attr(el, "AXSelectedTextRange")
+        if rng is not None:
+            try:
+                from ApplicationServices import AXValueGetValue, kAXValueCFRangeType
+
+                ok, r = AXValueGetValue(rng, kAXValueCFRangeType, None)
+                if ok:
+                    caret = int(r.location)
+            except Exception:
+                pass
+        info.before_text = value[:caret][-BEFORE_CHARS:]
+        if full:
+            info.field_text = value[:FIELD_CHARS]
+    except Exception as exc:
+        last_error = f"Accessibility: {type(exc).__name__}"
+    return info
 
 
-def _mac_is_password() -> bool | None:
+def _mac_secure_input() -> bool | None:
     # Secure Event Input is on whenever a password field has focus (and when Terminal's Secure Keyboard Entry is on).
     try:
         import ctypes
 
         carbon = ctypes.CDLL("/System/Library/Frameworks/Carbon.framework/Carbon")
         carbon.IsSecureEventInputEnabled.restype = ctypes.c_bool
-        if carbon.IsSecureEventInputEnabled():
-            return True
-    except Exception:
-        pass
-    try:
-        from ApplicationServices import AXUIElementCopyAttributeValue, AXUIElementCreateSystemWide
-
-        err, el = AXUIElementCopyAttributeValue(AXUIElementCreateSystemWide(), "AXFocusedUIElement", None)
-        if err or el is None:
-            global last_error
-            last_error = f"Accessibility error {err} (is Accessibility permission granted?)"
-            return None
-        err, sub = AXUIElementCopyAttributeValue(el, "AXSubrole", None)
-        return (str(sub) == "AXSecureTextField") if not err else False
+        return True if carbon.IsSecureEventInputEnabled() else None
     except Exception:
         return None

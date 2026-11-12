@@ -51,15 +51,54 @@ class ASRConfig:
     style: str = "en-IN"  # "en-IN" or "hinglish": picks the style sample at the start of the bias prompt
     timeout_s: float = 10.0
     base_url: str = "https://api.groq.com/openai/v1"
+    mode: str = "fast"  # "fast" (Groq, local fallback) or "max_accuracy" (two engines in parallel, best wins)
+    fallback: str = "local"  # "local" (faster-whisper), "groq" (a second Groq model) or "none"
+    local_model: str = "small"  # faster-whisper size: tiny, base, small, medium, large-v3
+    second_model: str = "whisper-large-v3"  # the other engine in max-accuracy mode ("local" for faster-whisper)
+    speculative: bool = True  # transcribe long dictations in chunks while you talk
+    chunk_min_s: float = 4.0
+    chunk_pause_ms: int = 500
 
 
 @dataclass
 class LLMConfig:
     provider: str = "groq"
-    model: str = "llama-3.3-70b-versatile"
-    enabled: bool = False  # the clean-up pass is Phase 2
+    enabled: bool = True  # the clean-up pass (Polished mode)
+    mode: str = "polished"  # "polished" or "verbatim" (exact words, fillers stripped)
+    model: str = "qwen/qwen3.8-27b"
+    reasoning: str = "none"
+    fallback_model: str = "openai/gpt-oss-20b"
+    fallback_reasoning: str = "low"
+    budget_ms: int = 1200  # past this the clean-up is abandoned and the raw text pasted
     timeout_s: float = 6.0
     base_url: str = "https://api.groq.com/openai/v1"
+
+
+@dataclass
+class StylesConfig:
+    apps: dict = field(default_factory=dict)  # {"process or title substring" = "email|chat|code|document|terminal|general"}
+
+
+@dataclass
+class ContextConfig:
+    enabled: bool = True  # read terms around the cursor for the bias prompt
+
+
+@dataclass
+class LearnConfig:
+    enabled: bool = True  # learn spellings from your corrections
+    delay_s: float = 10.0  # how long after a paste the field is re-read
+
+
+@dataclass
+class CommandConfig:
+    modifier: str = "shift"  # hold Shift while pressing the hotkey: speak an instruction for the selected text
+
+
+@dataclass
+class UIConfig:
+    overlay: bool = True  # the floating status pill (needs PySide6); otherwise the terminal line
+    debug_port: int = 8765
 
 
 @dataclass
@@ -71,6 +110,7 @@ class InjectConfig:
 @dataclass
 class StoreConfig:
     store_text: bool = False  # off by default: only timings and counts are kept unless you opt in
+    history_days: int = 30  # stored text older than this is erased at startup
 
 
 @dataclass
@@ -88,6 +128,11 @@ class Config:
     inject: InjectConfig = field(default_factory=InjectConfig)
     store: StoreConfig = field(default_factory=StoreConfig)
     dictionary: DictionaryConfig = field(default_factory=DictionaryConfig)
+    styles: StylesConfig = field(default_factory=StylesConfig)
+    context: ContextConfig = field(default_factory=ContextConfig)
+    learn: LearnConfig = field(default_factory=LearnConfig)
+    command: CommandConfig = field(default_factory=CommandConfig)
+    ui: UIConfig = field(default_factory=UIConfig)
 
 
 def _apply(obj, values: dict, where: str) -> None:

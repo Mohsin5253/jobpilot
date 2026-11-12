@@ -29,6 +29,7 @@ class Recorder:
         self._device = _parse_device(device)
         self._stream = None
         self.last_status = ""
+        self.level = -60.0
 
     # --- stream -------------------------------------------------------------------------------------------------
     def open(self) -> None:
@@ -49,6 +50,8 @@ class Recorder:
         if status:
             self.last_status = str(status)
         block = indata[:, 0].copy()
+        rms = float(np.sqrt(np.mean(block * block))) if len(block) else 0.0
+        self.level = max(-60.0, 20 * math.log10(rms + 1e-9))  # dBFS, for the overlay's meter
         with self._lock:
             self._ring.append(block)
             if self._capture is None:
@@ -75,6 +78,12 @@ class Recorder:
             self._capture = [pre[-self.preroll_samples :]] if self.preroll_samples else []
             self._stopping = False
             self._post_done.clear()
+
+    def peek(self) -> np.ndarray:
+        """A copy of the recording so far (for speculative chunking); empty when not recording."""
+        with self._lock:
+            chunks = list(self._capture or [])
+        return np.concatenate(chunks).astype(np.float32) if chunks else np.zeros(0, np.float32)
 
     def stop(self) -> np.ndarray:
         """Wait for the post-roll, then hand back the whole recording (pre-roll + speech + post-roll)."""

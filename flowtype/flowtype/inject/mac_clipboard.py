@@ -37,5 +37,9 @@ class MacClipboard:
         if objs:
             self._pb.writeObjects_(objs)
 
+    def get_text(self) -> str | None:
+        s = self._pb.stringForType_(NSPasteboardTypeString)
+        return str(s) if s is not None else None
+
     def change_marker(self) -> int:
         return int(self._pb.changeCount())
