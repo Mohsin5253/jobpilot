@@ -49,6 +49,7 @@ def test_loop_detection():
     assert has_loop("no no no no")
     assert not has_loop("no, no, I said no")
     assert not has_loop("We will, we will rock you.")
+    assert not has_loop(".") and not has_loop("")
 
 
 def test_no_segments_falls_back_to_text():
@@ -69,5 +70,30 @@ def test_retry_on_loop_or_echo_but_only_with_a_prompt():
 def test_echo_short():
     p = "So, um, I'll say it in my own words."
     assert echoes_prompt("in my own words", p)
-    assert not echoes_prompt("my words", p)
+    assert echoes_prompt("my words", p)  # only prompt words: retried without the prompt (harmless for real speech)
     assert not echoes_prompt("in my own way", p)
+    assert not echoes_prompt("book my words", p)
+
+
+# Real Groq whisper-large-v3-turbo output, captured on the synthetic eval set (segment text, avg_logprob).
+PROMPT = "So, um, I'll say it in my own words. I often mention Kavya Menon, Kubernetes, FastAPI, Zeta Labs and Razorpay."
+LIVE_NOISE_WITH_PROMPT = [("Razorpay, Zeta Labs, FastAPI, Kubernetes", -0.554), ("Razorpay", -0.406), ("Razorpay.", -0.529)]
+LIVE_NOISE_NO_PROMPT = [("HAAAHHHHH!", -1.644), (".", -0.774), ("So", -0.879)]
+LIVE_SPEECH = [("Running 10 minutes late, start without me.", -0.153), ("Men abhi office pohunch raha hoon, 10 minutes may call karta hoon.", -0.37),
+               ("Kalka meeting cancel ho gaya, so let's sync on Monday.", -0.276), ("Razorpay webhooks failed twice last night, so I added a retry.", -0.135)]
+
+
+def test_live_noise_with_prompt_is_retried():
+    for text, lp in LIVE_NOISE_WITH_PROMPT:
+        assert needs_retry(res(Segment(text, avg_logprob=lp)), PROMPT), text
+
+
+def test_live_noise_without_prompt_is_dropped():
+    for text, lp in LIVE_NOISE_NO_PROMPT:
+        assert clean(res(Segment(text, avg_logprob=lp))).text == "", text
+
+
+def test_live_speech_is_kept_and_not_retried():
+    for text, lp in LIVE_SPEECH:
+        r = res(Segment(text, avg_logprob=lp))
+        assert clean(r).text == text and not needs_retry(r, PROMPT), text

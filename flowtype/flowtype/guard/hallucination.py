@@ -4,7 +4,11 @@
 - short phrases that are real replies but also classic phantoms ("Thank you.", "Okay.", "Bye."): dropped only when
   Whisper itself wasn't sure there was speech;
 - segments Whisper marks as unlikely speech (no_speech_prob), and repetition loops (compression_ratio > 2.4);
-- a loop, or the prompt echoed back, triggers one retry without the prompt (a bias prompt can seed both)."""
+- a loop, or the prompt echoed back, triggers one retry without the prompt (a bias prompt can seed both).
+
+Tuned on live Groq output (README, "Measured"): Groq's turbo model reports no_speech_prob = 0 even for pure noise, so
+confidence comes from avg_logprob (speech -0.11..-0.37; noise without a prompt -0.66..-1.64). With a bias prompt,
+noise comes back as the prompt's own terms ("Razorpay, Zeta Labs, FastAPI"), which the echo check catches."""
 
 import re
 from dataclasses import dataclass, field
@@ -25,6 +29,7 @@ LOGPROB = -0.8
 WEAK_NO_SPEECH = 0.3
 WEAK_LOGPROB = -0.6
 COMPRESSION = 2.4
+LOW_CONFIDENCE = -1.0  # avg_logprob below this is dropped whatever no_speech_prob says
 
 
 @dataclass
@@ -40,6 +45,8 @@ def is_stock(text: str) -> bool:
 def has_loop(text: str, n: int = 4, repeats: int = 4) -> bool:
     """The same 1..n-word phrase repeated `repeats`+ times in a row (Whisper's decoding loop)."""
     w = re.findall(r"\w+", text.lower())
+    if len(w) < repeats:
+        return False
     for size in range(1, n + 1):
         for i in range(0, max(0, len(w) - size * repeats) + 1):
             chunk = w[i : i + size]
@@ -53,6 +60,8 @@ def echoes_prompt(text: str, prompt: str, min_words: int = 6) -> bool:
     if not prompt or not text:
         return False
     t, p = _words(text), _words(prompt)
+    if len(t) <= 12 and set(t) <= set(p):
+        return True  # nothing but the prompt's own words ("Razorpay, Zeta Labs, FastAPI" from noise)
     if len(t) < min_words:  # a short result counts only if it's a run of the prompt's own words
         return len(t) >= 3 and f" {' '.join(t)} " in f" {' '.join(p)} "
     grams = {tuple(p[i : i + min_words]) for i in range(len(p) - min_words + 1)}
@@ -79,6 +88,8 @@ def clean(res: ASRResult) -> GuardResult:
             continue
         if s.no_speech_prob > NO_SPEECH and s.avg_logprob < LOGPROB:
             dropped.append("no_speech")
+        elif s.avg_logprob < LOW_CONFIDENCE:
+            dropped.append("low_confidence")
         elif s.compression_ratio > COMPRESSION or has_loop(text):
             dropped.append("loop")
         elif is_stock(text):

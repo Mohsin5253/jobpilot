@@ -47,6 +47,7 @@ def words_to_digits(tokens: list[str]) -> list[str]:
 
 def normalize(text: str, ordinals: bool = True) -> str:
     t = text.lower().replace("’", "'")
+    t = re.sub(r"(?<=[a-z])[-\u2010\u2011\u2013](?=[a-z])", "", t)  # stand-up / stand‑up / standup are one word
     t = re.sub(r"(?:₹|\brs\.?\s?|\binr\s?)(\d[\d,]*(?:\.\d+)?)", r"\1 rupees", t)
     t = re.sub(r"(\d),(?=\d{2,3}\b)", r"\1", t)  # 12,500 / 1,00,000
     t = re.sub(r"(\d+)[:.](\d\d)\b(?!\.\d)", r"\1 \2", t)  # 4:30, 4.30 (times)
