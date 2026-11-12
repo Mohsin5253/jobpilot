@@ -5,7 +5,7 @@ import { BetaCounters } from "@/components/marketing/beta-counters";
 import { CrewStory } from "@/components/marketing/crew-story";
 import { Hero } from "@/components/marketing/hero";
 import { RunStory } from "@/components/marketing/run-story";
-import { Campus, Control, Credibility, Faq, FinalCta, Honesty, InterviewReady, Outcomes, Pricing, Safety, TraceSample } from "@/components/marketing/sections";
+import { Campus, Control, Credibility, Faq, FinalCta, Honesty, InterviewReady, Outcomes, Pricing, Safety, TraceSample, WhatsNew } from "@/components/marketing/sections";
 import { formatInr, getPublicStats } from "@/lib/server-api";
 
 export const metadata: Metadata = { alternates: { canonical: "/" } };
@@ -14,7 +14,7 @@ export const metadata: Metadata = { alternates: { canonical: "/" } };
 export const revalidate = 300;
 
 /**
- * Landing: hero → live beta counters → safety → honesty → control → credibility → interview-ready (resume & ATS,
+ * Landing: hero → live beta counters → what's new → safety → honesty → control → credibility → interview-ready (resume & ATS,
  * mock interviews, one-click apply) → outcomes →
  * how it works (crew, run, trace) → pricing → campus → FAQ → CTA.
  */
@@ -26,6 +26,7 @@ export default async function LandingPage() {
     <DemoRunProvider>
       <Hero costPerRun={cost} />
       <BetaCounters stats={stats} />
+      <WhatsNew />
       <Safety />
       <Honesty />
       <Control />

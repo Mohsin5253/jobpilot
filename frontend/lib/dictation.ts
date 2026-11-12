@@ -70,6 +70,7 @@ function pickMime(): string | undefined {
 export function useDictation({ hint, onLive, onFinal }: { hint: string; onLive: (text: string) => void; onFinal: (text: string, source: TranscriptSource) => void }) {
   const [listening, setListening] = useState(false);
   const [source, setSource] = useState<TranscriptSource | null>(null);
+  const [corrections, setCorrections] = useState<{ heard: string; fixed: string }[]>([]);
   const [transcribing, setTranscribing] = useState(false);
   const [level, setLevel] = useState(0);
   const [error, setError] = useState<string | null>(null);
@@ -103,6 +104,7 @@ export function useDictation({ hint, onLive, onFinal }: { hint: string; onLive: 
   const start = useCallback(async () => {
     setError(null);
     setSource(null);
+    setCorrections([]);
     if (!navigator.mediaDevices?.getUserMedia) {
       setError("This browser can't use the microphone. Type your answer instead.");
       return;
@@ -212,7 +214,8 @@ export function useDictation({ hint, onLive, onFinal }: { hint: string; onLive: 
         const fd = new FormData();
         fd.set("audio", blob, `answer.${blob.type.includes("mp4") ? "m4a" : blob.type.includes("ogg") ? "ogg" : "webm"}`);
         fd.set("hint", cb.current.hint.slice(0, 500));
-        const r = await api.post<{ text: string }>("/stt", fd);
+        const r = await api.post<{ text: string; corrections?: { heard: string; fixed: string }[] }>("/stt", fd);
+        setCorrections(r.corrections ?? []);
         // Whisper occasionally skips a stretch after a long pause; if it heard far fewer words than the live captions
         // did, the live words are the safer record.
         const dropped = words(live) >= 12 && words(r.text) < 0.6 * words(live);
@@ -232,5 +235,5 @@ export function useDictation({ hint, onLive, onFinal }: { hint: string; onLive: 
     else cb.current.onFinal("", "browser");
   }, [cleanup]);
 
-  return { listening, transcribing, level, error, source, start, stop };
+  return { listening, transcribing, level, error, source, corrections, start, stop };
 }

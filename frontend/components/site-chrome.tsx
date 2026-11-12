@@ -10,6 +10,7 @@ import { buttonClass } from "@/components/ui/button";
 
 const LINKS = [
   { href: "/scam-check", label: "Scam check" },
+  { href: "/#whats-new", label: "What's new" },
   { href: "/#safety", label: "Safety" },
   { href: "/#crew", label: "Crew" },
   { href: "/#how", label: "How it works" },

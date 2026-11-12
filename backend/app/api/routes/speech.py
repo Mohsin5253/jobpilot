@@ -12,6 +12,7 @@ answer the student submits).
 import re
 
 from fastapi import APIRouter, File, Form, HTTPException, UploadFile
+from pydantic import BaseModel, Field
 
 from app.api.deps import RealUserDep, SessionDep, UserDep
 from app.config import settings
@@ -116,10 +117,17 @@ async def transcribe(user: RealUserDep, session: SessionDep, audio: UploadFile =
     from sqlalchemy import select
 
     from app.models import Profile
+    from app.schemas import ResumeData
+    from app.services.speech_vocab import correct, personal_vocabulary, whisper_prompt
 
-    # The student's own skills join the vocabulary: answers are mostly about what they've built and used.
-    resume = (await session.execute(select(Profile.resume).where(Profile.user_id == user.id))).scalar_one_or_none() or {}
-    hint = f"{hint} {', '.join((resume.get('skills') or [])[:30])}"
+    # Your own words (name, college, employers, projects, skills, the words you added) steer the spelling.
+    p = (await session.execute(select(Profile).where(Profile.user_id == user.id))).scalar_one_or_none()
+    resume = ResumeData.model_validate((p.resume if p else None) or {})
+    prefs = (p.preferences if p else None) or {}
+    vocab = personal_vocabulary(resume, (p.academics if p else None) or {}, prefs.get("speech_words") or [], own_name=user.name or "")
+    for company in re.findall(r"\bat ([A-Z][\w&.-]*(?: [A-Z][\w&.-]*){0,3})", hint):
+        vocab.append(company)
+    vocab += [t for t in extract_skills(hint) if t not in vocab]
     ext = {"audio/mp4": "m4a", "audio/mpeg": "mp3", "audio/wav": "wav", "audio/x-wav": "wav", "audio/aac": "aac", "audio/ogg": "ogg"}.get(kind, "webm")
     try:
         client = groq.AsyncGroq(api_key=settings.groq_api_key, max_retries=2, timeout=60.0)
@@ -129,10 +137,78 @@ async def transcribe(user: RealUserDep, session: SessionDep, audio: UploadFile =
             language="en",
             temperature=0,
             response_format="verbose_json",
-            prompt=prompt_for(hint),
+            prompt=whisper_prompt(vocab, extract_skills(hint)),
         )
     except (groq.APIStatusError, groq.APIConnectionError) as exc:
         log.warning("stt.failed", error=type(exc).__name__)
         raise HTTPException(502, "Transcription failed. Your live transcript is kept.") from exc
     text = polish(keep_speech(res))
-    return {"text": text, "model": MODEL}
+    text, fixes = correct(text, vocab)
+    text, ai_fixes = await ai_correct(text, vocab, hint, user.id)
+    return {"text": text, "model": MODEL, "corrections": [*fixes, *ai_fixes]}
+
+
+class Fixed(BaseModel):
+    text: str = Field(description="The transcript with only misheard names and technical terms corrected")
+
+
+async def ai_correct(text: str, vocab: list[str], hint: str, user_id) -> tuple[str, list[dict]]:
+    """A last pass for terms the sound match missed. Every change must be a word from the student's vocabulary,
+    otherwise the pass is discarded: it can't rephrase what they said."""
+    from app.llm import CallContext, LLMOutputError, LLMUnavailable, get_llm
+    from app.services.speech_vocab import guard_ai_fix
+
+    if len(text.split()) < 4 or not vocab:
+        return text, []
+    try:
+        res = await get_llm().structured(
+            agent="interviewer",
+            tier="fast",
+            schema=Fixed,
+            ctx=CallContext(user_id=user_id),
+            max_tokens=min(2000, 60 + len(text) // 2),
+            system=(
+                "You correct speech-to-text transcripts. Replace ONLY words that are clearly misheard versions of terms in the "
+                "speaker's vocabulary (their name, college, companies, projects, tools). Keep every other word, filler, repetition "
+                "and the punctuation exactly as it is. Don't rephrase, don't fix grammar, don't add or remove anything else."
+            ),
+            prompt=f"Vocabulary: {'; '.join(vocab[:60])}\nQuestion being answered: {hint[:300]}\nTranscript: {text}",
+        )
+    except (LLMUnavailable, LLMOutputError):
+        return text, []
+    fixed = re.sub(r"\s+", " ", res.text).strip()
+    if not fixed or fixed == text or not guard_ai_fix(text, fixed, vocab):
+        return text, []
+    from difflib import SequenceMatcher
+
+    a, b = text.split(), fixed.split()
+    changes = [{"heard": " ".join(a[i1:i2]), "fixed": " ".join(b[j1:j2])} for op, i1, i2, j1, j2 in SequenceMatcher(None, a, b).get_opcodes() if op == "replace"]
+    return fixed, changes
+
+
+class WordsIn(BaseModel):
+    words: list[str] = Field(max_length=100)
+
+
+@router.get("/stt/words")
+async def get_words(user: UserDep, session: SessionDep) -> dict:
+    from sqlalchemy import select
+
+    from app.models import Profile
+
+    p = (await session.execute(select(Profile).where(Profile.user_id == user.id))).scalar_one_or_none()
+    return {"words": ((p.preferences if p else None) or {}).get("speech_words", [])}
+
+
+@router.put("/stt/words")
+async def set_words(body: WordsIn, user: UserDep, session: SessionDep) -> dict:
+    """Words speech-to-text should always spell your way: your name, college, a project, a tool."""
+    from sqlalchemy import select
+
+    from app.models import Profile
+
+    words = list(dict.fromkeys(w.strip()[:60] for w in body.words if w.strip()))[:100]
+    p = (await session.execute(select(Profile).where(Profile.user_id == user.id))).scalar_one()
+    p.preferences = {**(p.preferences or {}), "speech_words": words}
+    await session.commit()
+    return {"words": words}

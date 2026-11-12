@@ -165,3 +165,39 @@ def test_speech_filters_silence_and_uses_spoken_style_prompt():
     assert keep_speech(SimpleNamespace(text=" .", segments=[])) == ""
     p = prompt_for("Tell me about Docker and cicd. Python, FastAPI")
     assert p.startswith("So, um,") and "Docker" in p and "FastAPI" in p and "Tell me about" not in p
+
+
+def test_speech_spells_your_own_words():
+    from app.schemas import EducationItem, ExperienceItem, ProjectItem, ResumeData
+    from app.services.speech_vocab import correct, guard_ai_fix, personal_vocabulary, whisper_prompt
+
+    r = ResumeData(
+        name="Mohsin Sidhpurwala", skills=["Python", "Flask", "RAG"], experience=[ExperienceItem(title="ML Intern", organization="QSkill")],
+        projects=[ProjectItem(name="AI Medical Assistant (2025)")], education=[EducationItem(school="Rizvi College of Engineering")],
+    )
+    vocab = personal_vocabulary(r, {}, ["LangGraph"], job="HackerRank")
+    assert vocab[0] == "Mohsin Sidhpurwala" and "Rizvi College of Engineering" in vocab and "AI Medical Assistant" in vocab and "LangGraph" in vocab
+    assert "Mohsin Sidhpurwala" in whisper_prompt(vocab, ["Python"])
+    text, fixes = correct("Hi, I'm Mohsen Sethpurwala. I study at Rizavi College of Engineering, interned at Q skill and built an ai medical assistant with flask.", vocab)
+    assert text == "Hi, I'm Mohsin Sidhpurwala. I study at Rizvi College of Engineering, interned at QSkill and built an AI Medical Assistant with Flask."
+    assert {"heard": "Mohsen Sethpurwala", "fixed": "Mohsin Sidhpurwala"} in fixes
+    # Correct text and ordinary words are left alone.
+    ok = "I'm Mohsin Sidhpurwala from Rizvi College of Engineering. I like to rag on my friends."
+    assert correct(ok, vocab) == (ok, [])
+    # The AI pass may only swap in vocabulary words; a rephrase is rejected.
+    assert guard_ai_fix("I built it with Flax", "I built it with Flask", vocab)
+    assert not guard_ai_fix("I built it with Flax", "I developed it using Flask", vocab)
+
+
+async def test_speech_words_are_saved(authed):
+    r = await authed.put("/api/stt/words", json={"words": ["Sidhpurwala", " LangGraph ", "Sidhpurwala"]})
+    assert r.json()["words"] == ["Sidhpurwala", "LangGraph"]
+    assert (await authed.get("/api/stt/words")).json()["words"] == ["Sidhpurwala", "LangGraph"]
+
+
+def test_ai_speech_fix_must_sound_like_what_was_heard():
+    from app.services.speech_vocab import guard_ai_fix
+
+    v = ["scikit-learn", "SQLite", "Flask"]
+    assert guard_ai_fix("built with Sclite and", "built with SQLite and", v)
+    assert not guard_ai_fix("built with Sclite and", "built with scikit-learn and", v)  # a different word, even if it's yours

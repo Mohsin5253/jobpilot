@@ -588,7 +588,13 @@ function AnswerPanel({
         )}
         {!dictation.listening && !dictation.transcribing && dictation.source && (
           <p className="text-[12px] text-text-3" aria-live="polite">
-            {dictation.source === "whisper" ? "✓ Transcribed word for word by Whisper. Check it and fix any word before you submit." : "Live captions only (the accurate transcriber wasn't available). Read it through and fix any misheard word before you submit."}
+            {dictation.source === "whisper" ? "✓ Transcribed word for word by Whisper, with your name, college, projects and skills spelled your way." : "Live captions only (the accurate transcriber wasn't available). Read it through and fix any misheard word before you submit."}
+            {!!dictation.corrections.length && (
+              <span className="mt-0.5 block">
+                Fixed using your profile: {dictation.corrections.slice(0, 4).map((c) => `“${c.heard}” → ${c.fixed}`).join(", ")}
+              </span>
+            )}
+            <MyWords />
           </p>
         )}
         {(dictation.listening || dictation.transcribing || dictation.error) && (
@@ -909,5 +915,44 @@ function Report({ s }: { s: InterviewSession }) {
         </div>
       </Card>
     </div>
+  );
+}
+
+
+/** Words speech-to-text should always spell your way (a name, a place, a tool). */
+function MyWords() {
+  const [open, setOpen] = useState(false);
+  const [text, setText] = useState("");
+  const words = useQuery({ queryKey: ["stt-words"], queryFn: () => api.get<{ words: string[] }>("/stt/words"), enabled: open });
+  const save = useMutation({
+    mutationFn: (list: string[]) => api.put<{ words: string[] }>("/stt/words", { words: list }),
+    onSuccess: (r) => (words.refetch(), setText(""), toast.success(`Saved. ${r.words.length} word${r.words.length === 1 ? "" : "s"} will be spelled your way.`)),
+    onError: (e: Error) => toast.error(e.message),
+  });
+  if (!open)
+    return (
+      <button type="button" onClick={() => setOpen(true)} className="mt-0.5 block text-cobalt-text hover:underline">
+        A word still comes out wrong? Add it
+      </button>
+    );
+  const add = () => {
+    const fresh = text.split(",").map((w) => w.trim()).filter(Boolean);
+    if (fresh.length) save.mutate([...(words.data?.words ?? []), ...fresh]);
+  };
+  return (
+    <span className="mt-1.5 flex flex-wrap items-center gap-1.5">
+      <input
+        value={text}
+        onChange={(e) => setText(e.target.value)}
+        onKeyDown={(e) => e.key === "Enter" && (e.preventDefault(), add())}
+        placeholder="e.g. Sidhpurwala, Rizvi College, LangGraph"
+        aria-label="Words to spell your way"
+        className="h-8 w-64 rounded-[var(--radius-control)] border border-border bg-transparent px-2.5 text-[12.5px] text-text outline-none focus:border-[var(--cobalt)]"
+      />
+      <Button size="sm" onClick={add} loading={save.isPending}>
+        Add
+      </Button>
+      {!!words.data?.words.length && <span className="text-text-3">Yours: {words.data.words.slice(0, 8).join(", ")}{words.data.words.length > 8 ? "…" : ""}</span>}
+    </span>
   );
 }

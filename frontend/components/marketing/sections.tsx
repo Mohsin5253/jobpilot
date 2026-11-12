@@ -1,6 +1,6 @@
 "use client";
 
-import { ArrowRight, BadgeCheck, Ban, Check, CircleAlert, GitBranch, Mail, Pencil, Play, Puzzle, Send, ShieldAlert, ShieldCheck, Trophy, Undo2, X } from "lucide-react";
+import { ArrowRight, BadgeCheck, Ban, Building2, Check, CircleAlert, Code2, Download, FileText, GitBranch, Mail, MessagesSquare, Mic, Paperclip, Pencil, Play, Puzzle, Send, ShieldAlert, ShieldCheck, Target, Trophy, Undo2, Users, X } from "lucide-react";
 import { motion, useReducedMotion } from "motion/react";
 import Link from "next/link";
 import type { ReactNode } from "react";
@@ -419,10 +419,10 @@ export function InterviewReady() {
       eyebrow: "Resume & ATS",
       title: "See your resume the way an ATS does, then fix it in one click.",
       points: [
-        "ATS score by industry: 12 fields, from software and data to marketing, finance and core engineering",
-        "Gap report, missing keywords and improvements ranked by points gained",
-        "Improve with AI: stronger bullets and a summary from your own facts, nothing invented",
-        "Clean one-page PDF or Word file with proper page breaks",
+        "ATS score for the role you fit (backend, data scientist, mechanical design…) across 12 fields, the way recruiters search",
+        "Restructure with AI: a messy PDF becomes a clean standard layout, Skills to Awards",
+        "Reach your target score: skills your resume already proves are added, and you get the exact steps for the rest",
+        "PDF or Word in the standard one-column layout, with proper page breaks",
       ],
       preview: (
         <div className="card flex flex-wrap items-center gap-x-4 gap-y-3 p-4">
@@ -441,10 +441,11 @@ export function InterviewReady() {
       eyebrow: "AI mock interviews",
       title: "A real 30 to 60 minute interview for each job, with a coding round for tech roles.",
       points: [
-        "A 3D interviewer (choose a male or female voice) runs the rounds your field really uses",
-        "Coding round in Python, JavaScript, Java or C++, judged by an AI code reviewer: correct or not, complexity, bugs, fixes",
-        "Answer out loud: accurate speech-to-text tuned for Indian English",
-        "A report on every round against your field's bar, with gaps and a 7-day plan",
+        "Coding round run like big-tech loops: clarify, state the complexity, code, then test, judged by an AI code reviewer",
+        "Follow-up questions that push back on your answer, like a trained interviewer",
+        "A panel scorecard on four hiring attributes, from Strong No Hire to Strong Hire",
+        "Download every question, your answer and how to answer it, as PDF or Word",
+        "Answer out loud: word-for-word transcription that spells your name, college and projects right",
       ],
       preview: (
         <div className="card p-4 text-[12.5px]">
@@ -462,9 +463,9 @@ export function InterviewReady() {
       eyebrow: "Apply in one click",
       title: "Your tailored resume and a short email to the recruiter, sent when you say so.",
       points: [
-        "Prepare application: a resume tailored to the job description and a draft written to your field's norms",
-        "See the uploaded and tailored versions side by side, with the ATS score for both",
-        "Send from your own Gmail with the PDF attached, after you confirm",
+        "Pick your target ATS score first; confirm the job's keywords you've really used, and it gets there",
+        "The tailored resume is attached to each draft in Approvals, with its score for the job",
+        "Only a resume that reaches your target is sent, from your own Gmail, after you confirm",
       ],
       preview: (
         <div className="card p-4 text-[12.5px]">
@@ -495,6 +496,40 @@ export function InterviewReady() {
         ))}
       </div>
       <Sample>Sample numbers.</Sample>
+    </Wrap>
+  );
+}
+
+/** What's new: the latest features, in one grid. */
+export function WhatsNew() {
+  const items: { icon: ReactNode; title: string; text: string; tag: string }[] = [
+    { icon: <FileText />, tag: "Resume", title: "Restructure with AI", text: "A messy PDF (icons, broken lines, stacks typed as bullets) becomes a clean standard resume: Skills, Work Experience, Education, Project Work, Awards." },
+    { icon: <Target />, tag: "Resume", title: "Reach your target ATS score", text: "Graded for the role you fit, the way recruiters search. Skills your resume already proves are added; for the rest you get exact steps, never invented facts." },
+    { icon: <Paperclip />, tag: "Apply", title: "Only on-target resumes are sent", text: "Prepare application asks your target first. Each draft in Approvals shows the tailored resume attached, with its score for the job." },
+    { icon: <Code2 />, tag: "Interview", title: "Coding rounds like big-tech loops", text: "Clarify the problem, state the complexity, code, then test and optimise. Each stage is scored, as a real interviewer would." },
+    { icon: <MessagesSquare />, tag: "Interview", title: "Follow-ups and a panel scorecard", text: "The interviewer pushes back on your answers. A technical critic and a behavioural coach grade you from Strong No Hire to Strong Hire." },
+    { icon: <Download />, tag: "Interview", title: "A report you can keep", text: "Every question, your answer, its score and how to answer it, with sample answers from your own resume. PDF or Word." },
+    { icon: <Mic />, tag: "Voice", title: "Speech that spells your words", text: "Word-for-word transcription that gets your name, college, projects and tools right, and words you add yourself." },
+    { icon: <Users />, tag: "Agents", title: "Every agent works every run", text: "Nothing new? The crew re-checks your open jobs, re-ranks them on your current resume and finishes what's missing. Matches are checked requirement by requirement." },
+    { icon: <Building2 />, tag: "Campus", title: "A portal for placement cells", text: "TPO, HOD and faculty roles, a live pipeline round by round, and AI job matches staff approve. From ₹4,999 a year." },
+  ];
+  return (
+    <Wrap id="whats-new">
+      <SectionHead center eyebrow="What's new" title="Built to the standard big tech hires at." sub="The newest tools for getting shortlisted and getting through the interview, all checked against your own resume." />
+      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+        {items.map((it, i) => (
+          <Reveal key={it.title} delay={(i % 3) * 0.05}>
+            <div className="card flex h-full flex-col gap-2.5 p-5">
+              <div className="flex items-center justify-between">
+                <span className="flex size-9 items-center justify-center rounded-[var(--radius-control)] bg-cobalt-subtle text-cobalt-text [&>svg]:size-4.5">{it.icon}</span>
+                <Badge tone="outline">{it.tag}</Badge>
+              </div>
+              <h3 className="text-[16.5px] leading-snug font-semibold">{it.title}</h3>
+              <p className="text-[13.5px] leading-relaxed text-text-2">{it.text}</p>
+            </div>
+          </Reveal>
+        ))}
+      </div>
     </Wrap>
   );
 }
@@ -813,7 +848,7 @@ export function Faq({ costPerRun }: { costPerRun: string | null }) {
     ["How do you spot scam internships?", "Verifier checks every posting for fee demands, WhatsApp-only hiring, unnamed employers, personal-email recruiters, dead links and ghost-job signals. Postings that ask for money are blocked before they reach you."],
     [
       "How real are the mock interviews?",
-      "They follow the rounds your field actually uses (screening, technical or case, coding for tech roles, project, HR) and run 30, 45 or 60 minutes. Coding answers run in your browser against hidden tests, and an AI code reviewer says whether they're correct and how to improve. The report grades each round against the bar for interns or freshers. Questions refresh weekly from what's rising in real job postings.",
+      "They follow the rounds your field actually uses (screening, technical or case, coding for tech roles, project, HR) and run 30, 45 or 60 minutes. Coding rounds go clarify, complexity, code, test, as in big-tech loops; answers run in your browser against hidden tests and an AI code reviewer says whether they're correct and how to improve. The interviewer asks follow-ups, a panel scores you from Strong No Hire to Strong Hire, and you can download every question with how to answer it (PDF or Word). Questions refresh weekly from what's rising in real job postings.",
     ],
     [
       "Is the ATS score accurate?",
