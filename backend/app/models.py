@@ -887,3 +887,30 @@ class CampusLead(Base):
     plan: Mapped[str] = mapped_column(String(30), default="", server_default="")
     message: Mapped[str] = mapped_column(Text, default="", server_default="")
     created_at: Mapped[datetime] = _now_col()
+
+
+class Dictation(Base):
+    """One spoken answer's dictation metrics (no audio, no text): latency per stage and whether the student edited
+    the result before submitting it (the Dictation Edit Rate)."""
+
+    __tablename__ = "dictations"
+    __table_args__ = (Index("ix_dictations_user_created", "user_id", "created_at"),)
+
+    id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=uuid.uuid4)
+    user_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"))
+    source: Mapped[str] = mapped_column(String(20), default="interview", server_default="interview")
+    model: Mapped[str] = mapped_column(String(60), default="")
+    fallback: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false")
+    retried: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false")
+    audio_ms: Mapped[int | None] = mapped_column(Integer)
+    words: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
+    corrections: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
+    asr_ms: Mapped[int | None] = mapped_column(Integer)
+    server_ms: Mapped[int | None] = mapped_column(Integer)
+    client_ms: Mapped[int | None] = mapped_column(Integer)  # key release to text in the box
+    edited: Mapped[bool | None] = mapped_column(Boolean)
+    edit_ratio: Mapped[float | None] = mapped_column(Float)
+    mode: Mapped[str] = mapped_column(String(12), default="verbatim", server_default="verbatim")
+    guard: Mapped[str] = mapped_column(String(40), default="", server_default="")  # polished: ok / rejected: … / timeout
+    llm_ms: Mapped[int | None] = mapped_column(Integer)
+    created_at: Mapped[datetime] = _now_col()

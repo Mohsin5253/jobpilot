@@ -20,6 +20,7 @@ import { Skeleton } from "@/components/ui/misc";
 import { ScoreRing } from "@/components/ui/score-ring";
 import { api } from "@/lib/api";
 import { requestMic, useDictation, type MicState } from "@/lib/dictation";
+import { useFlow } from "@/lib/flow/use-flow";
 import { cn } from "@/lib/utils";
 
 type Q = { id: string; q: string; jd_line: string; skill: string | null; kind: string; round: number; round_name: string; seconds?: number; trend?: boolean; problem?: Problem };
@@ -447,6 +448,36 @@ function AnswerPanel({
       }
     },
   });
+  // Flow-style push-to-talk (when accurate transcription is available): the whole take is transcribed, fixed and
+  // inserted at the cursor. Otherwise the browser's live captions above are the fallback.
+  const taRef = useRef<HTMLTextAreaElement>(null);
+  const insertAtCursor = (t: string) => {
+    const el = taRef.current;
+    const cur = textRef.current;
+    const a = el && document.activeElement === el ? el.selectionStart : cur.length;
+    const b = el && document.activeElement === el ? el.selectionEnd : cur.length;
+    const before = cur.slice(0, a);
+    const after = cur.slice(b);
+    const glueL = before && !/\s$/.test(before) ? " " : "";
+    const glueR = after && !/^\s/.test(after) ? " " : "";
+    const next = `${before}${glueL}${t}${glueR}${after}`;
+    setText(next);
+    meta.current.voice_chars += t.length + 1;
+    meta.current.spoke = true;
+    head.current?.nod();
+    requestAnimationFrame(() => {
+      const pos = (before + glueL + t).length;
+      el?.focus();
+      el?.setSelectionRange(pos, pos);
+    });
+  };
+  const replaceTake = (from: string, to: string) => {
+    const cur = textRef.current;
+    const i = cur.lastIndexOf(from);
+    if (i >= 0) setText(cur.slice(0, i) + to + cur.slice(i + from.length));
+  };
+  const flow = useFlow({ hint: `${q.q} ${q.jd_line} ${q.skill ?? ""}`, active: ready, onText: insertAtCursor, onReplace: replaceTake });
+  const voice = flow.supported ? flow : dictation;
   const speakToggle = () => {
     if (dictation.listening) return dictation.stop();
     base.current = textRef.current;
@@ -474,6 +505,7 @@ function AnswerPanel({
   };
   const submit = useMutation({
     mutationFn: (answer: string) => {
+      flow.reportEdits(answer); // the Dictation Edit Rate: was the dictated text changed before submitting?
       const m = meta.current;
       return api.post<InterviewSession>(`/interviews/${s.id}/answer`, {
         question_id: q.id,
@@ -499,7 +531,7 @@ function AnswerPanel({
     if (!ready || submit.isPending || submit.isSuccess) return;
     if (left <= 0) {
       toast("Time's up. Your answer so far was submitted.");
-      (dictation.listening ? dictation.stop() : Promise.resolve()).then(() => submit.mutate(textRef.current.trim() || "(No answer given in time)"));
+      (voice.listening ? voice.stop() : Promise.resolve()).then(() => submit.mutate(textRef.current.trim() || "(No answer given in time)"));
       return;
     }
     const t = setTimeout(() => setLeft((x) => x - 1), 1000);
@@ -561,6 +593,7 @@ function AnswerPanel({
       </div>
       <div className="space-y-3 border-t border-border p-5">
         <Textarea
+          ref={taRef}
           value={text}
           onChange={(e) => setText(e.target.value)}
           onKeyDown={onKeyDown}
@@ -574,10 +607,10 @@ function AnswerPanel({
           spellCheck={false}
           autoComplete="off"
           disabled={!ready}
-          readOnly={dictation.listening || dictation.transcribing}
-          placeholder={ready ? "Type your answer, or press Speak and answer out loud…" : "Listen to the question…"}
+          readOnly={voice.listening || voice.transcribing}
+          placeholder={ready ? (flow.supported ? "Type, or hold Right Ctrl (Right Option on a Mac) and talk. Let go and your words appear here." : "Type your answer, or press Speak and answer out loud…") : "Listen to the question…"}
           aria-label="Your answer"
-          className={cn(dictation.listening && "border-[var(--cobalt)]")}
+          className={cn(voice.listening && "border-[var(--cobalt)]")}
         />
         {followUp && (
           <div className="rounded-[var(--radius-card)] border border-[var(--cobalt)]/40 bg-cobalt-subtle/40 p-3 text-[13.5px]" aria-live="polite">
@@ -586,41 +619,63 @@ function AnswerPanel({
             <span className="mt-1 block text-[12px] text-text-3">Answer it under “My answer:” (speak or type). You have an extra minute; both answers are graded together.</span>
           </div>
         )}
-        {!dictation.listening && !dictation.transcribing && dictation.source && (
+        {flow.supported && ready && !voice.listening && !voice.transcribing && !voice.source && (
+          <p className="text-[12px] text-text-3">
+            <kbd className="rounded border border-border px-1 font-mono text-[11px]">Right Ctrl</kbd> hold to talk · double-tap for hands-free · or hold the Speak button. Your name, college and projects are spelled your way.
+            <SpeechModeSwitch mode={flow.mode} onChange={flow.setMode} />
+          </p>
+        )}
+        {!voice.listening && !voice.transcribing && voice.source && (
           <p className="text-[12px] text-text-3" aria-live="polite">
-            {dictation.source === "whisper" ? "✓ Transcribed word for word by Whisper, with your name, college, projects and skills spelled your way." : "Live captions only (the accurate transcriber wasn't available). Read it through and fix any misheard word before you submit."}
-            {!!dictation.corrections.length && (
+            {flow.supported && flow.latencyMs != null && <span className="num mr-1">{(flow.latencyMs / 1000).toFixed(1)} s ·</span>}
+            {voice.source !== "whisper"
+              ? "Live captions only (the accurate transcriber wasn't available). Read it through and fix any misheard word before you submit."
+              : flow.supported && flow.cleaned
+                ? "✓ Polished: fillers, false starts and self-corrections cleaned up, nothing added. Your name, college and projects are spelled your way."
+                : "✓ Transcribed word for word, with your name, college, projects and skills spelled your way."}
+            {flow.supported && flow.cleaned && (
+              <button type="button" onClick={flow.restoreExactWords} className="ml-1 text-cobalt-text hover:underline">
+                Use my exact words
+              </button>
+            )}
+            {!!voice.corrections.length && (
               <span className="mt-0.5 block">
-                Fixed using your profile: {dictation.corrections.slice(0, 4).map((c) => `“${c.heard}” → ${c.fixed}`).join(", ")}
+                Fixed using your profile: {voice.corrections.slice(0, 4).map((c) => `“${c.heard}” → ${c.fixed}`).join(", ")}
               </span>
             )}
             <MyWords />
           </p>
         )}
-        {(dictation.listening || dictation.transcribing || dictation.error) && (
+        {(voice.listening || voice.transcribing || voice.error) && (
           <div className="flex items-center gap-2 text-[12.5px]" aria-live="polite">
-            {dictation.listening && (
+            {voice.listening && (
               <>
                 <span className="flex h-4 items-end gap-0.5" aria-hidden>
                   {[0.55, 1, 0.75, 0.9, 0.6].map((k, i) => (
-                    <span key={i} className="w-1 rounded-full bg-[var(--cobalt)] transition-[height] duration-75" style={{ height: `${Math.max(3, dictation.level * k * 16)}px` }} />
+                    <span key={i} className="w-1 rounded-full bg-[var(--cobalt)] transition-[height] duration-75" style={{ height: `${Math.max(3, voice.level * k * 16)}px` }} />
                   ))}
                 </span>
-                <span className="text-text-2">Listening… speak naturally; press Stop when you finish.</span>
+                <span className="text-text-2">{flow.supported ? (flow.handsFree ? "Hands-free: talk, then press Right Ctrl or Stop." : "Listening… let go when you finish.") : "Listening… speak naturally; press Stop when you finish."}</span>
               </>
             )}
-            {dictation.transcribing && <span className="text-text-2">Making the transcript accurate…</span>}
-            {dictation.error && <span className="text-[var(--your-turn)]">{dictation.error}</span>}
+            {voice.transcribing && <span className="text-text-2">Writing it out…</span>}
+            {voice.error && <span className="text-[var(--your-turn)]">{voice.error}</span>}
           </div>
         )}
         <div className="flex flex-wrap items-center gap-2">
-          <Button onClick={speakToggle} aria-pressed={dictation.listening} disabled={!ready || dictation.transcribing} variant={dictation.listening ? "danger" : "secondary"}>
-            {dictation.listening ? <MicOff /> : <Mic />} {dictation.listening ? "Stop speaking" : "Speak"}
-          </Button>
+          {flow.supported ? (
+            <Button {...flow.buttonHandlers} aria-pressed={flow.listening} disabled={!ready || flow.transcribing} variant={flow.listening ? "danger" : "secondary"} title="Hold to talk, or tap for hands-free">
+              {flow.listening ? <MicOff /> : <Mic />} {flow.listening ? (flow.handsFree ? "Stop" : "Release to finish") : "Hold to speak"}
+            </Button>
+          ) : (
+            <Button onClick={speakToggle} aria-pressed={dictation.listening} disabled={!ready || dictation.transcribing} variant={dictation.listening ? "danger" : "secondary"}>
+              {dictation.listening ? <MicOff /> : <Mic />} {dictation.listening ? "Stop speaking" : "Speak"}
+            </Button>
+          )}
           <Button
             variant="primary"
             loading={submit.isPending || probe.isPending}
-            disabled={!text.trim() || !ready || dictation.listening || dictation.transcribing || probe.isPending}
+            disabled={!text.trim() || !ready || voice.listening || voice.transcribing || probe.isPending}
             onClick={onSubmit}
           >
             {followUp ? "Submit both answers" : "Submit answer"} <ArrowRight />
@@ -920,6 +975,31 @@ function Report({ s }: { s: InterviewSession }) {
 
 
 /** Words speech-to-text should always spell your way (a name, a place, a tool). */
+function SpeechModeSwitch({ mode, onChange }: { mode: "polished" | "verbatim"; onChange: (m: "polished" | "verbatim") => void }) {
+  const opts = [
+    { v: "polished" as const, label: "Polished", tip: "Removes um, uh, false starts and self-corrections (“5, no wait, 6” → 6); adds punctuation and lists. Never adds words." },
+    { v: "verbatim" as const, label: "Word for word", tip: "Exactly what you said, with only your names and terms spelled right." },
+  ];
+  return (
+    <span className="mt-1 flex items-center gap-1.5" role="radiogroup" aria-label="How your speech is written">
+      <span>Write it:</span>
+      {opts.map((o) => (
+        <button
+          key={o.v}
+          type="button"
+          role="radio"
+          aria-checked={mode === o.v}
+          title={o.tip}
+          onClick={() => onChange(o.v)}
+          className={cn("rounded-full border px-2 py-0.5 text-[11.5px]", mode === o.v ? "border-[var(--cobalt)] text-cobalt-text" : "border-border text-text-3 hover:text-text-2")}
+        >
+          {o.label}
+        </button>
+      ))}
+    </span>
+  );
+}
+
 function MyWords() {
   const [open, setOpen] = useState(false);
   const [text, setText] = useState("");

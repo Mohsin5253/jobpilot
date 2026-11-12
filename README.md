@@ -291,6 +291,31 @@ Render (API, workers, Postgres) + Vercel (web). Step-by-step, with every environ
 
 ---
 
+### Voice answers: the Flow-style dictation engine
+
+Spoken interview answers use push-to-talk dictation built on Wispr Flow's published principles
+(`backend/app/dictation/`, `frontend/lib/flow/`):
+
+- **Capture:** hold Right Ctrl (Right Option on a Mac) or the Speak button; double-tap for hands-free. 16 kHz mono with a
+  500 ms pre-roll ring buffer and 250 ms post-roll; energy VAD trims silence and sends nothing when no speech was heard;
+  peak-normalised, with extra gain for quiet voices.
+- **Context-biased ASR:** Whisper's prompt (≤224 tokens, natural sentences, no instructions) carries the question's terms
+  and your dictionary (name, college, employers, projects, skills, and words you add), most important last.
+- **Guards:** silent/looping/stock-phrase segments dropped; a loop retries once without the prompt; ASR falls back to a
+  second model on timeout.
+- **Fixes:** term spellings and a sound-alike match to your dictionary, then by mode:
+  - **Polished** (default): an LLM clean-up (`app/dictation/cleanup.py`) removes fillers and false starts, resolves
+    self-corrections ("Flask, no wait, FastAPI" → FastAPI), adds punctuation, numbered lists and written numbers, and
+    never answers the question. A guardrail validator rejects any rewrite that changes more than 35% of the words,
+    falls outside 0.5–1.3× the length, adds a name or number nobody said, or reads like a reply. Rejections, time-outs
+    (600 ms) and rate limits fall back to the plain text with only um / uh / stutters removed. "Use my exact words"
+    undoes a clean-up.
+  - **Word for word:** an AI pass that may only swap in a dictionary word that sounds like what was heard, within a
+    600 ms budget (short answers skip it).
+- **Metrics, no text:** per-stage latency (p50/p95), the Dictation Edit Rate per mode, and the clean-up's
+  accepted / guard-rejected / timed-out rates (`GET /api/stt/metrics`); no audio or
+  transcript is stored. Frontend unit tests: `npm run test:unit` in `frontend/`.
+
 ## Configuration
 
 | Variable | Default | Purpose |
@@ -298,6 +323,12 @@ Render (API, workers, Postgres) + Vercel (web). Step-by-step, with every environ
 | `LLM_PROVIDER` | `groq` | `groq` or `anthropic` |
 | `GROQ_API_KEY` | — | Enables Groq. Without a key for the chosen provider, agents run offline. |
 | `ANTHROPIC_API_KEY` | — | Used when `LLM_PROVIDER=anthropic` |
+| `STT_MODEL` | `whisper-large-v3-turbo` | Dictation ASR model on Groq (fallback: `whisper-large-v3`) |
+| `STT_TIMEOUT_S` | `6.0` | ASR timeout before the fallback model is tried |
+| `STT_AI_BUDGET_MS` | `600` | Time budget for the AI spelling pass; past it the deterministic text is used |
+| `STT_CLEANUP_MODEL` | `qwen/qwen3.8-27b` | Polished-mode clean-up model (reasoning off via `STT_CLEANUP_REASONING=none`) |
+| `STT_CLEANUP_FALLBACK_MODEL` | `openai/gpt-oss-20b` | Used while the first model is rate-limited (`STT_CLEANUP_FALLBACK_REASONING=low`) |
+| `STT_CLEANUP_BUDGET_MS` | `600` | Clean-up time budget; past it the filler-stripped text is used |
 | `FAST_MODEL` / `SMART_MODEL` | Groq: `openai/gpt-oss-20b` / `openai/gpt-oss-120b`<br/>Claude: `claude-haiku-5-5` / `claude-opus-5-5` | Scoring vs. writing models (empty = provider default) |
 | `LLM_CONCURRENCY` | 4 | Parallel LLM calls per process |
 | `EMBEDDING_BACKEND` | `fastembed` | `fastembed` (local bge-small, 384-d) or `hash` (tests) |
