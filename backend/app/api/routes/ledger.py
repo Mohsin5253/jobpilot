@@ -55,16 +55,33 @@ async def _published(s, key: str) -> list[StipendReport]:
     return list((await s.execute(select(StipendReport).where(StipendReport.company_key == key, StipendReport.status == "published"))).scalars())
 
 
+def _round(v: float, step: int = 1000) -> int:
+    return int(round(v / step) * step)
+
+
 def aggregate(rows: list[StipendReport]) -> dict | None:
-    """None below k = 3: nothing about a company is shown until three students have reported."""
+    """None below k = 3: nothing about a company is shown until three students have reported. Above it, nothing can
+    be traced back to one student by comparing the page before and after a report (differencing):
+    - reports join the figures two at a time, so no two published states differ by a single student;
+    - stipends are rounded to ₹1,000, the count is a band, and there's no exact minimum or maximum;
+    - the middle-half range appears from 10 reports, rates (rounded to 10%) and work modes from 5, and a mode only
+      when at least 2 students reported it."""
     if len(rows) < K_MIN:
         return None
-    stipends = sorted(r.stipend for r in rows)
+    rows = sorted(rows, key=lambda r: (r.created_at or datetime.min.replace(tzinfo=UTC), str(r.id)))
+    n = K_MIN + ((len(rows) - K_MIN) // 2) * 2
+    rows = rows[:n]
+    stipends = sorted(_round(r.stipend) for r in rows)
+    q = statistics.quantiles(stipends, n=4) if n >= 10 else None
+    modes = {m: sum(r.mode == m for r in rows) for m in {r.mode for r in rows}}
     return {
-        "company": rows[0].company, "reports": len(rows), "median_stipend": int(statistics.median(stipends)),
-        "stipend_range": [stipends[0], stipends[-1]], "ppo_rate": round(sum(r.ppo_offered for r in rows) / len(rows), 2),
-        "paid_on_time_rate": round(sum(r.paid_on_time for r in rows) / len(rows), 2),
-        "modes": sorted({r.mode for r in rows}),
+        "company": rows[0].company,
+        "reports_band": "3–4" if n < 5 else "5–9" if n < 10 else "10+",
+        "median_stipend": _round(statistics.median(stipends)),
+        "stipend_range": [_round(q[0]), _round(q[2])] if q else None,
+        "ppo_rate": round(sum(r.ppo_offered for r in rows) / n, 1) if n >= 5 else None,
+        "paid_on_time_rate": round(sum(r.paid_on_time for r in rows) / n, 1) if n >= 5 else None,
+        "modes": sorted(m for m, c in modes.items() if c >= 2) if n >= 5 else [],
     }
 
 
@@ -171,7 +188,8 @@ async def companies(session: SessionDep, q: str = "") -> list[dict]:
         stmt = stmt.where(StipendReport.company_key.like(f"%{company_key(q)}%"))
     keys = (await session.execute(stmt.limit(200))).scalars().all()
     out = [agg for k in keys if (agg := aggregate(await _published(session, k)))]
-    return sorted(out, key=lambda a: -a["reports"])
+    rank = {"10+": 0, "5–9": 1, "3–4": 2}
+    return sorted(out, key=lambda a: (rank[a["reports_band"]], a["company"].lower()))
 
 
 @router.get("/admin/queue")

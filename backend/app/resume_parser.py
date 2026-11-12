@@ -14,26 +14,89 @@ class UnsupportedResume(ValueError):
     pass
 
 
-def extract_text(filename: str, data: bytes) -> str:
+def _pdf_hidden(reader) -> list[str]:
+    """Text a person can't see on the page: white (or near-white) fill, invisible render mode (Tr 3) or a font under
+    2 pt. ATS keyword stuffing hides lists of skills this way; it never counts toward any score."""
+    hidden: list[str] = []
+    for page in reader.pages:
+        state = {"fill": (0.0, 0.0, 0.0), "mode": 0}
+
+        def before(op, args, cm, tm, state=state):
+            try:
+                if op == b"rg" and len(args) == 3:
+                    state["fill"] = tuple(float(a) for a in args)
+                elif op == b"g" and len(args) == 1:
+                    v = float(args[0])
+                    state["fill"] = (v, v, v)
+                elif op == b"k" and len(args) == 4:
+                    c, m, y, k = (float(a) for a in args)
+                    state["fill"] = ((1 - c) * (1 - k), (1 - m) * (1 - k), (1 - y) * (1 - k))
+                elif op == b"Tr" and args:
+                    state["mode"] = int(args[0])
+            except (TypeError, ValueError):
+                pass
+
+        def text(t, cm, tm, font, size, state=state):
+            if not t or not t.strip():
+                return
+            scale = abs(tm[0] * cm[0]) or abs(tm[3] * cm[3]) or 1
+            if state["mode"] == 3 or min(state["fill"]) >= 0.94 or (size or 0) * scale < 2:
+                hidden.append(t.strip())
+
+        try:
+            page.extract_text(visitor_operand_before=before, visitor_text=text)
+        except Exception:  # noqa: BLE001 - a page we can't walk is treated as fully visible
+            continue
+    return [h for h in hidden if len(h) > 1]
+
+
+def _docx_hidden(doc) -> list[str]:
+    hidden = []
+    for p in doc.paragraphs:
+        for r in p.runs:
+            f = r.font
+            white = f.color is not None and f.color.type is not None and str(f.color.rgb or "").upper() in ("FFFFFF", "FEFEFE", "FDFDFD")
+            tiny = f.size is not None and f.size.pt < 2
+            if r.text.strip() and (f.hidden or white or tiny):
+                hidden.append(r.text.strip())
+    return hidden
+
+
+def extract_text_report(filename: str, data: bytes) -> tuple[str, list[str]]:
+    """(the visible text, the hidden text that was removed). Hidden text is excluded from parsing and every score."""
     name = filename.lower()
+    hidden: list[str] = []
     if name.endswith(".pdf"):
         from pypdf import PdfReader
 
         reader = PdfReader(io.BytesIO(data))
         text = "\n".join((page.extract_text() or "") for page in reader.pages)
+        hidden = _pdf_hidden(reader)
     elif name.endswith(".docx"):
         from docx import Document
 
         doc = Document(io.BytesIO(data))
-        text = "\n".join(p.text for p in doc.paragraphs)
+        hidden = _docx_hidden(doc)
+        hidden_set = set(hidden)
+        text = "\n".join("".join(r.text for r in p.runs if r.text.strip() not in hidden_set) if p.runs else p.text for p in doc.paragraphs)
     elif name.endswith((".txt", ".md")):
         text = data.decode("utf-8", errors="replace")
     else:
         raise UnsupportedResume("Upload a PDF, DOCX, TXT or MD file")
+    for h in sorted(set(hidden), key=len, reverse=True):
+        if name.endswith(".pdf"):
+            text = text.replace(h, " ", 1)
+    from app.safety.untrusted import clean
+
+    text = clean(text, html=False)  # zero-width and bidi characters out, NFKC
     text = re.sub(r"[ \t]+", " ", text).strip()
     if len(text) < 80:
         raise UnsupportedResume("Could not read text from this file (is it a scanned image?)")
-    return text
+    return text, hidden
+
+
+def extract_text(filename: str, data: bytes) -> str:
+    return extract_text_report(filename, data)[0]
 
 
 async def structure_resume(text: str, ctx: CallContext) -> ResumeData:

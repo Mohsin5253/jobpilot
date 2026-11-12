@@ -99,10 +99,10 @@ def scan(text: str) -> Scan:
 # ---------- the fence ----------
 
 
-def wrap(text: str, source: str, ident: str | None = None) -> str:
+def wrap(text: str, source: str, ident: str | None = None, html: bool | None = None) -> str:
     """The fence id comes from the content, so the same posting gives the same prompt (repeatable, cacheable scores);
     the content can't forge the fence because any copy of it inside is neutralised."""
-    body = clean(text)
+    body = clean(text, html=False if source in ("candidate_code", "interview_answer") else html)
     ident = ident or hashlib.sha256(body.encode()).hexdigest()[:8]
     body = re.sub(r"<<\s*/?\s*(UNTRUSTED|END)\b[^>]*>>", "[fence removed]", body, flags=re.I)
     src = re.sub(r"[^\w.:-]", "_", source)[:40]

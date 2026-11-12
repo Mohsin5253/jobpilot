@@ -14,6 +14,7 @@ import re
 
 from pydantic import BaseModel, Field
 
+from app.safety import untrusted
 from app.llm import CallContext, LLMOutputError, LLMUnavailable, get_llm
 from app.services.coding_bank import BY_ID, Problem
 
@@ -158,8 +159,8 @@ async def review(problem_id: str, lang: str, code: str, approach: str, results: 
                 system=SYSTEM,
                 prompt=(
                     f"Problem: {p.title} ({p.difficulty})\n{p.statement}\nExpected complexity: {p.hint_complexity}\n\n"
-                    f"Language: {LANG_NAME.get(lang, lang)}\n<code>\n{code[:8000]}\n</code>\n\n"
-                    f"Candidate's written approach: {approach.strip()[:1500] or '(none given)'}\n\n"
+                    f"Language: {LANG_NAME.get(lang, lang)}\n<code>\n{untrusted.wrap(code[:8000], 'candidate_code')}\n</code>\n\n"
+                    f"Candidate's written approach: {untrusted.wrap(approach.strip()[:1500], 'interview_answer') if approach.strip() else '(none given)'}\n\n"
                     + (f"Browser test run: {results.get('passed')}/{results.get('total')} passed.\n{failures}" if results["ran"] else "The code was not executed (language not runnable in the browser): judge it by reading.")
                 ),
             )

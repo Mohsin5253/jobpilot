@@ -139,8 +139,9 @@ def _host(url: str) -> str:
         return ""
 
 
-def assess(job: Job) -> Verdict:
-    """The rule-based verdict for one job: red flags make it suspicious, other signals ask for caution."""
+def assess(job: Job, domain_ages: dict[str, int] | None = None) -> Verdict:
+    """The rule-based verdict for one job: red flags make it suspicious, other signals ask for caution. domain_ages
+    (from RDAP) adds the new-domain check for employers not on a known careers system."""
     v = Verdict()
     red: list[str] = []
     caution: list[str] = []
@@ -183,7 +184,7 @@ def assess(job: Job) -> Verdict:
     # Scam Shield's checks (fees, UPI IDs, lookalike domains, task and fake-government scams, OTP requests...),
     # the same ones students run on WhatsApp offers. A job description mentioning payments in general (a fintech
     # role) isn't a demand for money, so a payment check only counts with an actual UPI ID.
-    v.shield = scam_shield.analyze(_posting_text(job), job.url or "", known_company_domain=job.company_domain)
+    v.shield = scam_shield.analyze(_posting_text(job), job.url or "", known_company_domain=job.company_domain, domain_ages=domain_ages or None)
     for c in v.shield.checks:
         if c.status == "fail" and not (c.id == "upi" and not any("@" in e for e in c.evidence)):
             red.append(c.label)
@@ -225,6 +226,7 @@ async def second_opinion(job: Job, state: PipelineState) -> SecondOpinion | None
             schema=SecondOpinion,
             ctx=ctx_of(state),
             max_tokens=400,
+            cache=True,  # the same posting gets the same second opinion
         )
     except (LLMUnavailable, LLMOutputError):
         return None
@@ -286,7 +288,12 @@ async def run_verifier(state: PipelineState) -> dict:
         async with session_scope() as s:
             jobs = (await s.execute(select(Job).where(Job.id.in_(ids)))).scalars().all()
             fresh = [j for j in jobs if j.legit_checked_at is None or j.legit_checked_at < now - RECHECK_AFTER]
-            verdicts = {j.id: assess(j) for j in fresh}
+            # Domain age for employers that aren't on a known careers system (a days-old domain is a scam signal).
+            from app.services.rdap import ages_for
+
+            off_ats = [j.company_domain for j in fresh if j.company_domain and not any(_host(j.url or "").endswith(a) for a in ATS_HOSTS)]
+            ages = await ages_for(off_ats)
+            verdicts = {j.id: assess(j, {j.company_domain: ages[j.company_domain]} if j.company_domain in ages else None) for j in fresh}
 
             # The ledger: a stipend far from what 3+ students report for this company asks for care (monthly figures only).
             from app.api.routes.ledger import market_check

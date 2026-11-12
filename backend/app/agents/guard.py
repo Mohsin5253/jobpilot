@@ -41,9 +41,45 @@ class BulletVerdict:
     fabricated: list[str] = field(default_factory=list)
     misattributed: list[str] = field(default_factory=list)
     numbers: list[str] = field(default_factory=list)
+    names: list[str] = field(default_factory=list)  # a company, product or title the source never named
+    seniority: str = ""  # a verb upgrade, e.g. "built" -> "led"
 
     def as_dict(self) -> dict:
-        return {"fabricated": self.fabricated, "misattributed": self.misattributed, "numbers": self.numbers}
+        return {"fabricated": self.fabricated, "misattributed": self.misattributed, "numbers": self.numbers, "names": self.names, "seniority": self.seniority}
+
+
+# Seniority ladder: a rewrite may keep or lower the role a line describes, never raise it ("helped" -> "led").
+_LADDER = [
+    (1, r"assist(ed|ing)?|help(ed|ing)?|support(ed|ing)?|contribut(ed|ing)|participat(ed|ing)|shadow(ed|ing)|learn(ed|t|ing)"),
+    (2, r"buil[dt]|built|develop(ed)?|implement(ed)?|creat(ed|e)|design(ed)?|wr(ote|itten)|train(ed)?|serv(ed|e)|forecast(ed)?|extract(ed)?|deliver(ed)?|shipp?(ed)?|ma(de|ke)|dockeriz(ed|e)|deploy(ed)?|ran|scal(ed|e)|cut|add(ed)?|rebuil[dt]|stream(ed)?|reach(ed)?"),
+    (3, r"l(e|)d|lead(ing)?|own(ed)?|manag(ed|e)|head(ed)?|spearhead(ed)?|direct(ed)?|architect(ed)?|supervis(ed|e)|mentor(ed)?|founded|co-?founded"),
+]
+_NAME = re.compile(r"(?<![.!?;:]\s)(?<!^)\b([A-Z][a-zA-Z0-9&]+(?:\s+[A-Z][a-zA-Z0-9&]+)*)")
+_NAME_OK = {"I", "API", "APIs", "REST", "UI", "UX", "CI", "CD", "ML", "AI", "SQL", "ETL", "MVP", "QA", "PR", "PRs", "KPI", "KPIs", "CSV", "JSON", "OOP"}
+
+
+def _rank(text: str) -> int:
+    t = text.lower()
+    return max((r for r, rx in _LADDER if re.search(rf"\b({rx})\b", t)), default=0)
+
+
+def extra_claims(rewritten: str, source: str) -> tuple[list[str], str]:
+    """(new names, seniority upgrade) a rewrite adds over its source: a company, product or title the source never
+    mentions, or a verb higher on the ladder than any in the source line."""
+    src = source.lower()
+    skills = {s.lower() for s in extract_skills(rewritten)}
+    names = []
+    for m in _NAME.finditer(rewritten):
+        name = m.group(1)
+        words = [w for w in name.split() if w not in _NAME_OK]
+        if not words or name.lower() in skills or all(w.lower() in skills for w in words):
+            continue
+        if not all(w.lower() in src for w in words):
+            names.append(name)
+    up = ""
+    if _rank(rewritten) == 3 and _rank(source.split("\n", 1)[-1]) < 3:
+        up = "raises the role (to leading or owning the work)"
+    return sorted(set(names)), up
 
 
 def bullet_contexts(resume: ResumeData) -> dict[str, str]:
@@ -72,7 +108,11 @@ def check_bullet(rewritten: str, source_context: str, resume_skills: set[str]) -
     misattributed = sorted(s for s in used if s in resume_skills and s not in in_source)
     bullet_line = source_context.split("\n", 1)[-1]
     new_numbers = sorted(_numbers(rewritten) - _numbers(bullet_line))
-    return BulletVerdict(ok=not (fabricated or misattributed or new_numbers), fabricated=fabricated, misattributed=misattributed, numbers=new_numbers)
+    names, seniority = extra_claims(rewritten, source_context)
+    return BulletVerdict(
+        ok=not (fabricated or misattributed or new_numbers or names or seniority),
+        fabricated=fabricated, misattributed=misattributed, numbers=new_numbers, names=names, seniority=seniority,
+    )
 
 
 def check_freeform(text: str, resume_skills: set[str]) -> list[str]:
@@ -131,9 +171,11 @@ class ClaimVerdict:
     misattributed: list[str] = field(default_factory=list)
     numbers: list[str] = field(default_factory=list)
     sources: list[str] = field(default_factory=list)  # the valid refs
+    names: list[str] = field(default_factory=list)
+    seniority: str = ""
 
     def as_dict(self) -> dict:
-        return {"reason": self.reason, "fabricated": self.fabricated, "misattributed": self.misattributed, "numbers": self.numbers}
+        return {"reason": self.reason, "fabricated": self.fabricated, "misattributed": self.misattributed, "numbers": self.numbers, "names": self.names, "seniority": self.seniority}
 
 
 def check_claim(rewritten: str, refs: list[str], contexts: dict[str, str], allowed_skills: set[str]) -> ClaimVerdict:
@@ -157,4 +199,9 @@ def check_claim(rewritten: str, refs: list[str], contexts: dict[str, str], allow
         reasons.append(f"moves {', '.join(misattributed)} from elsewhere into this line")
     if numbers:
         reasons.append(f"adds the figure {', '.join(numbers)}, which isn't in the source")
-    return ClaimVerdict(not reasons, "; ".join(reasons).capitalize(), fabricated, misattributed, numbers, valid)
+    names, seniority = extra_claims(rewritten, cited)
+    if names:
+        reasons.append(f"names {', '.join(names)}, which the source doesn't")
+    if seniority:
+        reasons.append(seniority)
+    return ClaimVerdict(not reasons, "; ".join(reasons).capitalize(), fabricated, misattributed, numbers, valid, names, seniority)

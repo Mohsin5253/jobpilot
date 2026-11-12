@@ -5,7 +5,7 @@ from app.agents.matcher import ensure_profile_embedding
 from app.api.deps import SessionDep, UserDep
 from app.llm import CallContext
 from app.models import Profile
-from app.resume_parser import MAX_RESUME_BYTES, UnsupportedResume, extract_text, structure_resume
+from app.resume_parser import MAX_RESUME_BYTES, UnsupportedResume, extract_text_report, structure_resume
 from app.schemas import Preferences, ProfileOut, ProfileUpdate, ResumeData
 from app.services.ingest import ensure_user_targets
 from app.services.ratelimit import hit
@@ -65,12 +65,14 @@ async def upload_resume(user: UserDep, session: SessionDep, file: UploadFile = F
     if len(data) > MAX_RESUME_BYTES:
         raise HTTPException(status.HTTP_413_REQUEST_ENTITY_TOO_LARGE, "Resume must be under 5 MB")
     try:
-        text = extract_text(file.filename or "resume", data)
+        text, hidden = extract_text_report(file.filename or "resume", data)
     except UnsupportedResume as exc:
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, str(exc)) from exc
 
     resume = await structure_resume(text, CallContext(user_id=user.id))
     profile = await _profile(session, user.id)
+    # Text hidden from people (white or tiny fonts: ATS keyword stuffing) is removed and flagged, never scored.
+    profile.preferences = {**(profile.preferences or {}), "resume_hidden_text": {"count": len(hidden), "sample": [h[:60] for h in hidden[:5]]}}
     profile.resume_filename = file.filename
     profile.resume_text = text
     profile.resume = resume.model_dump()

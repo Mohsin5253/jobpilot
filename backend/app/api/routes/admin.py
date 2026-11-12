@@ -194,3 +194,12 @@ async def set_kill_switch(body: KillSwitchIn, admin: AdminDep, session: SessionD
     reset_kill_cache()
     log.warning("admin.kill_switch", on=body.on)
     return {"on": body.on}
+
+
+@router.get("/quality")
+async def quality_dashboard(_: AdminDep, session: SessionDep, days: int = 7) -> dict:
+    """Accuracy and safety signals from metadata only: verdict mix, guard-fire rate, AI failures, approval outcomes,
+    reply rate, cost per run, and alerts on shifts."""
+    from app.services.quality import quality
+
+    return await quality(session, max(1, min(days, 90)))

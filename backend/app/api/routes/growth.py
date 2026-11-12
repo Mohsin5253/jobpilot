@@ -20,6 +20,7 @@ from fastapi.responses import Response
 from pydantic import BaseModel, Field
 from sqlalchemy import func, select
 
+from app.safety import untrusted
 from app.agents.matcher import W_SKILLS, W_SKILLS_OFFLINE, level_factor
 from app.api.deps import AdminDep, RealUserDep, SessionDep, UserDep
 from app.config import settings
@@ -141,7 +142,7 @@ async def grade(q: dict, answer: str, user_id: uuid.UUID, industry: str = "*") -
                 "for an intern/fresher. If the answer includes a follow-up exchange, credit how well the candidate adapted. Give up "
                 "to 3 short, concrete tips.\nRubrics for this question:\n" + as_prompt(retrieve(q.get("kind") or "behavioural", industry, 3))
             ),
-            prompt=f"Job requirement: {q['jd_line']}\nQuestion: {q['q']}\n" + (f"A strong answer covers: {', '.join(q['key_points'])}\n" if q.get("key_points") else "") + f"Answer: {answer[:4000]}",
+            prompt=f"Job requirement: {q['jd_line']}\nQuestion: {q['q']}\n" + (f"A strong answer covers: {', '.join(q['key_points'])}\n" if q.get("key_points") else "") + f"Answer: {untrusted.wrap(answer[:4000], 'interview_answer')}",
         )
         return {**base, "relevance": op.relevance, "specificity": op.specificity, "structure": op.structure, "score": round((op.relevance + op.specificity + op.structure) / 3, 1), "feedback": op.feedback or base["feedback"]}
     except (LLMUnavailable, LLMOutputError):

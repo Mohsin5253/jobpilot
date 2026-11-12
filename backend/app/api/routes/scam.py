@@ -133,22 +133,9 @@ async def _fetch_page(url: str) -> str:
 
 
 async def _domain_age(domain: str) -> int | None:
-    """Days since registration, from public RDAP (cached a day). None when unknown."""
-    hit_ = _rdap_cache.get(domain)
-    if hit_ and hit_[0] > time.monotonic():
-        return hit_[1]
-    age = None
-    try:
-        async with egress.client("rdap", timeout=2, follow_redirects=True) as c:
-            r = await c.get(f"https://rdap.org/domain/{domain}")
-        if r.status_code == 200:
-            for ev in r.json().get("events", []):
-                if ev.get("eventAction") == "registration":
-                    age = (datetime.now(UTC) - datetime.fromisoformat(ev["eventDate"].replace("Z", "+00:00"))).days
-    except (httpx.HTTPError, ValueError, KeyError):
-        pass
-    _rdap_cache[domain] = (time.monotonic() + 86400, age)
-    return age
+    from app.services.rdap import domain_age
+
+    return await domain_age(domain)
 
 
 async def _domain_ages(text: str, url: str) -> dict[str, int]:

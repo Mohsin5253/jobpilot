@@ -56,7 +56,8 @@ async def test_ledger_needs_consent_and_hides_companies_below_three(client, monk
                 assert len(export["stipend_reports"]) == 1  # only this student's own report
     assert all(r["status"] == "published" and r["verified_via"] == "college_email" for r in out)
     [agg] = (await client.get("/api/ledger/companies")).json()
-    assert agg["reports"] == 3 and agg["median_stipend"] == 15000 and agg["ppo_rate"] == 1.0
+    # Banded count, rounded median, no exact min/max, rates only from 5 reports (no single student can be picked out).
+    assert agg["reports_band"] == "3–4" and agg["median_stipend"] == 15000 and agg["stipend_range"] is None and agg["ppo_rate"] is None
     async with session_scope() as s:
         assert "below" in await market_check(s, "Acme Analytics", 5000)
         assert await market_check(s, "Acme Analytics", 14000) is None

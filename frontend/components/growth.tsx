@@ -136,7 +136,7 @@ function GapItem({ g, matchId }: { g: Gap; matchId: string }) {
   );
 }
 
-type Agg = { company: string; reports: number; median_stipend: number; stipend_range: [number, number]; ppo_rate: number; paid_on_time_rate: number; modes: string[] };
+type Agg = { company: string; reports_band: string; median_stipend: number; stipend_range: [number, number] | null; ppo_rate: number | null; paid_on_time_rate: number | null; modes: string[] };
 type Mine = { id: string; company: string; stipend: number; status: string; verified_via: string };
 
 /** Stipend & PPO ledger: share yours (verified), see companies with 3+ reports. */
@@ -178,7 +178,14 @@ export function Ledger() {
                 <span className="num">₹{r.median_stipend.toLocaleString("en-IN")}/mo</span>
               </div>
               <div className="text-[12px] text-subtle">
-                {r.reports} reports · ₹{r.stipend_range[0].toLocaleString("en-IN")}–{r.stipend_range[1].toLocaleString("en-IN")} · PPO {Math.round(r.ppo_rate * 100)}% · paid on time {Math.round(r.paid_on_time_rate * 100)}%
+                {[
+                  `${r.reports_band} reports`,
+                  r.stipend_range && `middle half ₹${r.stipend_range[0].toLocaleString("en-IN")}–${r.stipend_range[1].toLocaleString("en-IN")}`,
+                  r.ppo_rate != null && `PPO ~${Math.round(r.ppo_rate * 100)}%`,
+                  r.paid_on_time_rate != null && `paid on time ~${Math.round(r.paid_on_time_rate * 100)}%`,
+                ]
+                  .filter(Boolean)
+                  .join(" · ")}
               </div>
             </div>
           ))}

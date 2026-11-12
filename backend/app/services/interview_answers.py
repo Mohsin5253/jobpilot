@@ -11,6 +11,7 @@ import re
 
 from pydantic import BaseModel, Field
 
+from app.safety import untrusted
 from app.llm import CallContext, LLMOutputError, LLMUnavailable, get_llm
 from app.logging import log
 from app.schemas import ResumeData
@@ -177,7 +178,7 @@ async def build_guides(s, resume: ResumeData, user_id) -> dict[str, dict]:
                 f"Q{n} [{q.get('round_name', '')} · {q.get('kind', '')}]: {text[:700]}\n"
                 f"  Tests: {q.get('jd_line', '')}\n"
                 + (f"  Strong answers cover: {', '.join(q['key_points'])}\n" if q.get("key_points") else "")
-                + (f"  Candidate's answer: {ans[:500]}\n" if ans and q.get("kind") != "coding" else "")
+                + (f"  Candidate's answer: {untrusted.wrap(ans[:500], 'interview_answer')}\n" if ans and q.get("kind") != "coding" else "")
             )
         try:
             res = await get_llm().structured(

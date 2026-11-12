@@ -284,6 +284,7 @@ export function Reviewer({ draft, index, total, onMove, onApprove, onReject, bus
             </a>
             {draft.kind === "referral" && <AlumniLink company={draft.company} />}
           </div>
+          <RiskFlags draft={draft} />
           {(draft.legit_status === "caution" || draft.legit_status === "suspicious") && (
             <div role="alert" className="mt-2 rounded-[var(--radius-control)] border border-[color-mix(in_oklab,var(--error)_35%,transparent)] bg-[color-mix(in_oklab,var(--error)_10%,transparent)] px-3 py-2 text-[12.5px]">
               <div className="flex items-center gap-1.5 font-semibold text-[var(--error)]">
@@ -504,7 +505,9 @@ export function Reviewer({ draft, index, total, onMove, onApprove, onReject, bus
           </p>
         </div>
       ) : (
-        <div className="shrink-0 border-t border-border px-4 py-3 text-[13px] text-text-2">You rejected this draft {ago(draft.decided_at)}.</div>
+        <div className="shrink-0 border-t border-border px-4 py-3 text-[13px] text-text-2">
+          {draft.status === "voided" ? `Taken out of the queue: ${draft.void_reason ?? "the posting changed"}. Nothing was sent.` : `You rejected this draft ${ago(draft.decided_at)}.`}
+        </div>
       )}
 
       <Dialog open={rejecting} onOpenChange={setRejecting}>
@@ -595,6 +598,33 @@ export function Reviewer({ draft, index, total, onMove, onApprove, onReject, bus
   );
 }
 
+
+/** What the reviewer should weigh before approving: who the email goes to and why that address is trusted, text in
+ * the posting aimed at AI tools, and why a draft was voided or rejected. */
+function RiskFlags({ draft }: { draft: DraftWithJob }) {
+  const flags: { tone: "warn" | "ok" | "info"; text: string }[] = [];
+  if (draft.void_reason) flags.push({ tone: "warn", text: `Voided: ${draft.void_reason}` });
+  if (draft.reject_reason) flags.push({ tone: "info", text: `You rejected it: ${draft.reject_reason}` });
+  if (draft.injection_signals?.length) flags.push({ tone: "warn", text: "This posting contains text aimed at AI tools; it was kept away from the agents" });
+  if (draft.recipient_basis === "rejected") flags.push({ tone: "warn", text: `Recipient not allowed: ${draft.recipient_note}. Choose another contact or type the address yourself.` });
+  else if (draft.recipient_basis) flags.push({ tone: draft.recipient_basis === "entered_by_you" ? "info" : "ok", text: `Recipient: ${draft.recipient_note}` });
+  if (!flags.length) return null;
+  return (
+    <ul className="mt-2 flex flex-wrap gap-1.5" aria-label="Checks before you approve">
+      {flags.map((f) => (
+        <li
+          key={f.text}
+          className={cn(
+            "rounded-full border px-2.5 py-0.5 text-[12px]",
+            f.tone === "warn" ? "border-[color-mix(in_oklab,var(--error)_40%,transparent)] text-[var(--error)]" : f.tone === "ok" ? "border-border text-[var(--success)]" : "border-border text-text-2",
+          )}
+        >
+          {f.text}
+        </li>
+      ))}
+    </ul>
+  );
+}
 
 /** The tailored resume this application sends, shown as the email's attachment: its file, its ATS score for the
  * job against your target, and ways to open it. It's the exact file attached when you send. */

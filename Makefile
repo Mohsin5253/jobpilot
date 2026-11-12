@@ -19,8 +19,9 @@ test:
 	cd backend && uv run pytest -q
 	cd frontend && npm run typecheck
 
-eval:             ## offline evals: match quality + no-fabrication guard
+eval:             ## the eval gate: verifier, tailor traps, egress, red team, recipients, determinism, prompt versions
 	cd backend && uv run python -m evals.run_evals
+	cd backend && EMBEDDING_BACKEND=hash uv run python -m evals.gate
 
 eval-llm:         ## adds Claude fit reviews + live Tailor fabrication rate (uses API credits)
 	cd backend && uv run python -m evals.run_evals --llm

@@ -1,0 +1,20 @@
+{
+  "app.agents.interviewer.SYSTEM": "d297aa943bc9",
+  "app.agents.matcher.REVIEW_SYSTEM": "4da79c4577d3",
+  "app.agents.outreach.REFERRAL_SYSTEM": "0c3574070a67",
+  "app.agents.outreach.SYSTEM": "df5c4282c8ec",
+  "app.agents.researcher.SYSTEM": "f0ce7ea86d61",
+  "app.agents.tailor.SUMMARY_SYSTEM": "902eb1abf3ec",
+  "app.agents.tailor.SYSTEM": "6ae46ede0e87",
+  "app.agents.verifier.SYSTEM": "4bdde9fc21ec",
+  "app.api.routes.resume_tools.REWRITE_SYSTEM": "8b6fdf6620b0",
+  "app.api.routes.scam.SYSTEM": "eaf65ed783d9",
+  "app.dictation.cleanup.SYSTEM": "3d081172fa06",
+  "app.safety.untrusted.SYSTEM_NOTE": "89cb8288415a",
+  "app.services.ats_boost.XYZ_SYSTEM": "a7f37084e081",
+  "app.services.code_review.SYSTEM": "f1c65482f018",
+  "app.services.interview_answers.SYSTEM": "956de816e2dd",
+  "app.services.resume_improve.BULLET_SYSTEM": "ca60ddb4b1ea",
+  "app.services.resume_improve.SUMMARY_SYSTEM": "d6e324bc95c7",
+  "app.services.resume_restructure.SYSTEM": "f22d5f3d91bb"
+}

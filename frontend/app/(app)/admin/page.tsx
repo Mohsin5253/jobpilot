@@ -1,6 +1,7 @@
 "use client";
 
 import { Activity, Building2, Coins, Database, Gauge, Radar, Users } from "lucide-react";
+import { useQuery } from "@tanstack/react-query";
 import { useState, type ReactNode } from "react";
 
 import { Badge } from "@/components/ui/badge";
@@ -9,6 +10,7 @@ import { Card, CardHeader } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { EmptyState, PageHeader, Skeleton } from "@/components/ui/misc";
 import { useAddOfficer, useAdminMetrics, useAdminOrgs, useAdminRights, useCreateOrg, useResolveRight, useSetPlan } from "@/lib/queries";
+import { api } from "@/lib/api";
 import { ago, cn } from "@/lib/utils";
 
 function Stat({ label, value, sub }: { label: string; value: ReactNode; sub?: ReactNode }) {
@@ -138,9 +140,103 @@ export default function AdminPage() {
           </div>
         </Card>
       </div>
+      <Quality />
       <RightsQueue />
       <Colleges />
     </div>
+  );
+}
+
+type QualityData = {
+  window_days: number;
+  verifier: { mix: Record<string, number>; verified_share: number | null; previous_verified_share: number | null; injection_flagged: number };
+  tailor_guard: { tailored: number; bullets: number; reverted: number; revert_rate: number | null };
+  llm: { calls: number; failure_rate: number | null; repair_rate: number | null; by_agent: { agent: string; calls: number; failed: number; repaired: number; p95_ms: number | null }[] };
+  approvals: { events: Record<string, number>; drafts: Record<string, number>; grants: Record<string, number>; rejected: number; rejected_with_reason: number };
+  outcomes: { applied: number; replied: number; reply_rate: number | null };
+  cost: { runs: number; avg_inr_per_run: number | null };
+  alerts: string[];
+};
+
+const pct = (v: number | null | undefined) => (v == null ? "—" : `${Math.round(v * 1000) / 10}%`);
+
+/** Accuracy and safety signals from metadata only (no prompt, reply or email text), with alerts on shifts. */
+function Quality() {
+  const [days, setDays] = useState(7);
+  const { data: q } = useQuery({ queryKey: ["admin-quality", days], queryFn: () => api.get<QualityData>(`/admin/quality?days=${days}`) });
+  if (!q) return null;
+  const mix = Object.entries(q.verifier.mix).sort((a, b) => b[1] - a[1]);
+  return (
+    <Card>
+      <CardHeader
+        icon={<Activity className="size-4" />}
+        title="Quality"
+        description="Accuracy and safety signals from metadata only. Offline accuracy is in the eval gate report (CI)."
+        action={
+          <select value={days} onChange={(e) => setDays(Number(e.target.value))} className="rounded-[var(--radius-control)] border border-border bg-transparent px-2 py-1 text-[12.5px]" aria-label="Window">
+            {[1, 7, 30, 90].map((d) => (
+              <option key={d} value={d}>
+                Last {d} day{d > 1 ? "s" : ""}
+              </option>
+            ))}
+          </select>
+        }
+      />
+      <div className="space-y-4 p-5">
+        {q.alerts.length > 0 && (
+          <ul role="alert" className="space-y-1 rounded-[var(--radius-control)] border border-[color-mix(in_oklab,var(--error)_35%,transparent)] px-3 py-2 text-[13px] text-[var(--error)]">
+            {q.alerts.map((a) => (
+              <li key={a}>· {a}</li>
+            ))}
+          </ul>
+        )}
+        <div className="grid grid-cols-2 gap-3 lg:grid-cols-6">
+          <Stat label="VERIFIED share" value={pct(q.verifier.verified_share)} sub={`was ${pct(q.verifier.previous_verified_share)}`} />
+          <Stat label="Injection-flagged posts" value={q.verifier.injection_flagged} />
+          <Stat label="Guard revert rate" value={pct(q.tailor_guard.revert_rate)} sub={`${q.tailor_guard.reverted} of ${q.tailor_guard.bullets} bullets`} />
+          <Stat label="AI failures" value={pct(q.llm.failure_rate)} sub={`repaired ${pct(q.llm.repair_rate)} · ${q.llm.calls} calls`} />
+          <Stat label="Reply rate" value={pct(q.outcomes.reply_rate)} sub={`${q.outcomes.replied} of ${q.outcomes.applied}`} />
+          <Stat label="Avg cost / run" value={q.cost.avg_inr_per_run == null ? "—" : `₹${q.cost.avg_inr_per_run}`} sub={`${q.cost.runs} runs`} />
+        </div>
+        <div className="grid gap-4 text-[13px] md:grid-cols-3">
+          <div>
+            <div className="mb-1 font-medium">Verdicts</div>
+            {mix.map(([k, v]) => (
+              <div key={k} className="flex justify-between text-text-2">
+                <span>{k}</span>
+                <span className="num">{v}</span>
+              </div>
+            ))}
+          </div>
+          <div>
+            <div className="mb-1 font-medium">Approvals</div>
+            {Object.entries({ ...q.approvals.events, ...Object.fromEntries(Object.entries(q.approvals.grants).map(([k, v]) => [`grant: ${k}`, v])) }).map(([k, v]) => (
+              <div key={k} className="flex justify-between text-text-2">
+                <span>{k}</span>
+                <span className="num">{v}</span>
+              </div>
+            ))}
+            <div className="flex justify-between text-text-2">
+              <span>rejected with a reason</span>
+              <span className="num">
+                {q.approvals.rejected_with_reason} / {q.approvals.rejected}
+              </span>
+            </div>
+          </div>
+          <div>
+            <div className="mb-1 font-medium">AI calls by agent</div>
+            {q.llm.by_agent.map((r) => (
+              <div key={r.agent} className="flex justify-between gap-2 text-text-2">
+                <span>{r.agent}</span>
+                <span className="num">
+                  {r.calls} · {r.failed} failed · p95 {r.p95_ms ?? "—"} ms
+                </span>
+              </div>
+            ))}
+          </div>
+        </div>
+      </div>
+    </Card>
   );
 }
 

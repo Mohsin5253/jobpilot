@@ -72,7 +72,27 @@ def _with_job(d: OutreachDraft, m: JobMatch, j: Job, worth: tuple[int, dict[str,
         ghost_score=j.ghost_score,
         send_worthiness=d.send_worthiness if d.send_worthiness is not None else (worth[0] if worth else None),
         worthiness_parts=worth[1] if worth else {},
+        injection_signals=j.injection_signals or [],
+        **_recipient(d, j),
+        void_reason=d.void_reason,
+        reject_reason=d.reject_reason,
     )
+
+
+def _recipient(d: OutreachDraft, j: Job) -> dict:
+    from app.safety.recipients import recipient_ok
+
+    to = d.to_email or j.recruiter_email
+    if not to:
+        return {"recipient_basis": None, "recipient_note": ""}
+    v = recipient_ok(to, job_recruiter_email=j.recruiter_email, job_url=j.url, company_domain=j.company_domain, contact=d.contact)
+    note = {
+        "posting": "Printed on the posting itself",
+        "company_page": "Listed on the company's own website",
+        "hunter": "A verified address with cited public sources",
+        "entered_by_you": "An address you typed in yourself",
+    }.get(v.basis, v.reason)
+    return {"recipient_basis": v.basis, "recipient_note": note}
 
 
 def _block_scams(j: Job) -> None:

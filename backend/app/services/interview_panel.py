@@ -22,6 +22,7 @@ import re
 
 from pydantic import BaseModel, Field
 
+from app.safety import untrusted
 from app.llm import CallContext, LLMOutputError, LLMUnavailable, get_llm
 from app.services.interview_rubrics import as_prompt, retrieve
 
@@ -71,7 +72,7 @@ async def follow_up(q: dict, answer: str, user_id) -> str:
                 "tests depth: challenge an assumption, add a realistic constraint (budget cut, failed data source, 10x scale, "
                 "a disagreeing stakeholder) or ask what they personally did. Refer to something they actually said. Under 30 words."
             ),
-            prompt=f"Question ({kind}): {q['q']}\nCandidate's answer: {answer[:2000]}",
+            prompt=f"Question ({kind}): {q['q']}\nCandidate's answer: {untrusted.wrap(answer[:2000], 'interview_answer')}",
         )
         text = res.question.strip()
         return text if 5 <= len(text.split()) <= 40 else fallback
@@ -195,7 +196,7 @@ def _transcript(s, kinds: set[str] | None = None, limit: int = 600) -> str:
             continue
         a = (s.answers or {}).get(q["id"], "")
         sc = (s.scores or {}).get(q["id"]) or {}
-        rows.append(f"Q{n} [{q.get('round_name', '')} · {q.get('kind')}]: {q['q'][:300]}\nA{n}: {a[:limit] or '(not answered)'}\nScore: {sc.get('score', '-')}/5")
+        rows.append(f"Q{n} [{q.get('round_name', '')} · {q.get('kind')}]: {q['q'][:300]}\nA{n}: {untrusted.wrap(a[:limit], 'interview_answer') if a else '(not answered)'}\nScore: {sc.get('score', '-')}/5")
     return "\n\n".join(rows)
 
 

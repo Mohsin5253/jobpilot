@@ -211,7 +211,7 @@ export interface Draft {
   contact_id: string | null;
   contact: Contact | null;
   cc_email: string | null;
-  status: "pending" | "approved" | "rejected" | "sent";
+  status: "pending" | "approved" | "rejected" | "sent" | "voided";
   decided_at: string | null;
   sent_at: string | null;
   created_at: string;
@@ -229,6 +229,11 @@ export interface DraftWithJob extends Draft {
   ghost_score?: number | null;
   send_worthiness?: number | null;
   worthiness_parts?: Record<string, number>;
+  injection_signals?: string[];
+  recipient_basis?: "posting" | "company_page" | "hunter" | "entered_by_you" | "rejected" | null;
+  recipient_note?: string;
+  void_reason?: string | null;
+  reject_reason?: string | null;
 }
 
 export interface MatchDetail extends Match {

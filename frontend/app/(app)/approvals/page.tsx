@@ -19,7 +19,7 @@ import type { DraftWithJob } from "@/lib/types";
 import { useMediaQuery } from "@/lib/use-media";
 import { ago, cn } from "@/lib/utils";
 
-type View = "pending" | "approved" | "sent" | "rejected";
+type View = "pending" | "approved" | "sent" | "rejected" | "voided";
 
 function QueueItem({ d, active, onSelect }: { d: DraftWithJob; active: boolean; onSelect: () => void }) {
   return (
@@ -156,6 +156,7 @@ export default function ApprovalsPage() {
                 { value: "approved", label: "Approved" },
                 { value: "sent", label: "Sent" },
                 { value: "rejected", label: "Rejected" },
+                { value: "voided", label: "Voided" },
               ]}
             />
           </div>

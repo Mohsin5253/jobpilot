@@ -68,6 +68,8 @@ _FEE = re.compile(
     # Hinglish
     r"|fees?\s*(jama|deni|dena|bharna|bharo|bhare)|(paise|paisa|amount|charge)\s*(jama|dena|bhejo|bhejna)|(pay|payment)\s*karna\s*(hoga|padega|hai)|ka\s*payment|payment\s*(karo|kare|karein|bhejo)"
     r"|refundable\s*hai|wapas\s*mil\s*jayeg"
+    # "kit ke liye ₹1999 advance dena hoga", "certificate ke liye ₹999 jama karna padega"
+    r"|(rs\.?|inr|₹)\s*\d[\d,]*\s*(/-)?\s*(ka\s*|ki\s*)?(advance\s*)?(dena|dene|jama|bharna|bharo|bhare|bhejna|bhejo|bhej\s*do|pay\s*kar)"
     # Hindi
     r"|पंजीकरण\s*शुल्क|रजिस्ट्रेशन\s*(फीस|शुल्क|चार्ज)|ट्रेनिंग\s*(फीस|शुल्क)|प्रशिक्षण\s*शुल्क|सर्टिफिकेट\s*(फीस|शुल्क)"
     r"|(फीस|शुल्क|राशि|रुपये|पैसे)\s*(जमा|भरें|भरना|दें|देने)|जमा\s*(करें|कराएं|करना|करवाएं)|सिक्योरिटी\s*डिपॉजिट|वापस\s*(कर\s*दी|मिल)"

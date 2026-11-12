@@ -391,6 +391,13 @@ class DraftWithJob(DraftOut):
     legit_status: str | None = None  # verified | caution | suspicious (Verifier v2)
     legit_reasons: list[str] = []
     ghost_score: int | None = None
+    # Risk flags for the reviewer: prompt-injection signals in the posting, the recipient's basis under the contact
+    # policy (posting | company_page | hunter | entered_by_you | rejected) and why, and void / reject reasons.
+    injection_signals: list[str] = []
+    recipient_basis: str | None = None
+    recipient_note: str = ""
+    void_reason: str | None = None
+    reject_reason: str | None = None
     send_worthiness: int | None = None  # 0-100, shown before approval (F5)
     worthiness_parts: dict[str, int] = {}
 

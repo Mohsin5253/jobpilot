@@ -123,6 +123,7 @@ def retry_after_seconds(exc: Exception) -> float:
 class CallContext:
     user_id: uuid.UUID | None = None
     run_id: uuid.UUID | None = None
+    prompt_version: str | None = None  # set per call: which system prompt produced the answer (a hash, not the text)
 
 
 @dataclass
@@ -285,6 +286,10 @@ class LLM:
 
             system = f"{system}\n\n{SYSTEM_NOTE}"
         model = self.model_for(tier)
+        import dataclasses
+        import hashlib as _h
+
+        ctx = dataclasses.replace(ctx, prompt_version=_h.sha256(system.encode()).hexdigest()[:12])
         # Repeatable scores: a cached answer for exactly this model, prompt and schema is reused, so re-running a match
         # on the same resume and posting gives the same result (models don't sample deterministically, even at
         # temperature 0). The key is a hash; the row is deleted with the account and after 30 days.
@@ -403,6 +408,7 @@ class LLM:
                         attempts=attempts,
                         success=success,
                         error=error,
+                        prompt_version=ctx.prompt_version,
                     )
                 )
                 if ctx.run_id:

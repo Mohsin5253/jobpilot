@@ -563,6 +563,7 @@ class LLMCall(Base):
     attempts: Mapped[int] = mapped_column(Integer, default=1)
     success: Mapped[bool] = mapped_column(Boolean, default=True)
     error: Mapped[str | None] = mapped_column(Text)
+    prompt_version: Mapped[str | None] = mapped_column(String(16))  # sha256 of the system prompt (12 hex); never the text
     created_at: Mapped[datetime] = _now_col()
 
 

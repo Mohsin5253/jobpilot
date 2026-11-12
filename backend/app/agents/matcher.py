@@ -8,6 +8,7 @@ Without an LLM the first two still produce a ranked, explained list.
 """
 
 import asyncio
+import json
 import re
 from typing import Literal
 import uuid
@@ -25,7 +26,7 @@ from app.services.usage import usage_for
 from app.llm import CallContext, LLMOutputError, LLMUnavailable, get_llm
 from app.models import Job, JobMatch, Notification, Profile, Stage
 from app.schemas import ResumeData
-from app.skills import adjacent, role_digest, skill_overlap
+from app.skills import adjacent, canonicalize, extract_skills, role_digest, skill_overlap
 from app.services.events import publish
 
 W_SEMANTIC, W_SKILLS, W_LLM = 0.25, 0.25, 0.50
@@ -68,20 +69,46 @@ def _quoted(evidence: str, resume_text: str) -> bool:
     return bool(words) and sum(1 for w in words if w in resume_text) / len(words) >= 0.7
 
 
+def taxonomy_evidence(requirement: str, resume: dict) -> tuple[str, str] | None:
+    """Deterministic first pass: a requirement whose skills (synonyms included: sklearn = scikit-learn, JS =
+    JavaScript) appear in a work or project bullet is met, quoting that bullet; listed only under skills, partial."""
+    wanted = {canonicalize(x).lower() for x in extract_skills(requirement)}
+    if not wanted:
+        return None
+    for section in ("experience", "projects"):
+        for item in resume.get(section) or []:
+            for line in [*(item.get("bullets") or []), ", ".join(item.get("tech") or [])]:
+                if line and wanted & {canonicalize(x).lower() for x in extract_skills(line)}:
+                    return "met", line[:160]
+    listed = [x for x in resume.get("skills") or [] if canonicalize(x).lower() in wanted]
+    return ("partial", listed[0]) if listed else None
+
+
 def audit_review(review: FitReview, resume_json: str) -> FitReview:
-    """Checks every claimed match against the resume (a 'met' without a real quote is downgraded), then blends the
-    holistic score with weighted requirement coverage, so one optimistic guess can't carry the score."""
+    """The fit score is computed here, in code, from the requirements: the model only extracts them and judges each
+    one, and every judgement needs evidence. A 'met' without a real quote from the resume is downgraded; the skill
+    taxonomy then upgrades any requirement the resume provably covers. Score = weighted coverage (must 3, nice 1;
+    met 1, partial 0.5), capped at 55 when most must-haves are missing. With no requirements extracted, the model's
+    holistic score is the fallback."""
     if not review.requirements:
         return review
     text = resume_json.lower()
+    try:
+        resume = json.loads(resume_json)
+    except ValueError:
+        resume = {}
     for r in review.requirements:
         if r.status != "missing" and not _quoted(r.evidence, text):
             r.status = "partial" if r.status == "met" and r.text.lower() in text else "missing"
+        if r.status != "met" and (found := taxonomy_evidence(r.text, resume)) and _CREDIT[found[0]] > _CREDIT[r.status]:
+            r.status, r.evidence = found
+        if r.status == "missing":
+            r.evidence = ""
     total = sum(_WEIGHT[r.kind] for r in review.requirements)
     coverage = sum(_WEIGHT[r.kind] * _CREDIT[r.status] for r in review.requirements) / total if total else 0
     musts = [r for r in review.requirements if r.kind == "must"]
     missing_musts = [r.text for r in musts if r.status == "missing"]
-    score = 0.5 * review.fit_score + 0.5 * coverage * 100
+    score = coverage * 100
     if musts and len(missing_musts) > len(musts) / 2:
         score = min(score, 55)  # most must-haves missing: a stretch at best
     review.fit_score = round(max(0, min(100, score)))
