@@ -11,6 +11,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardHeader } from "@/components/ui/card";
 import { Field, Input } from "@/components/ui/input";
 import { api, ApiError } from "@/lib/api";
+import { useMe } from "@/lib/queries";
 
 type Structure = { campus: string; departments: { id: string; name: string }[]; programs: { id: string; department_id: string; name: string }[]; batches: { id: string; program_id: string; name: string }[] };
 
@@ -32,6 +33,7 @@ function StaffAccess() {
   const target = campus ? { campus_id: campus } : {};
   const [state, setState] = useState<"checking" | "otp" | "notstaff" | "pending" | "noemail">("checking");
   const [otp, setOtp] = useState("");
+  const isAdmin = !!useMe().data?.is_admin;
   const open = useMutation({
     mutationFn: (code?: string) => api.post("/campus/staff-session", code ? { ...target, otp: code } : target),
     onSuccess: () => router.replace(next),
@@ -63,7 +65,13 @@ function StaffAccess() {
             <p className="text-text-2">You're staff here, but your two-step sign-in code couldn't be emailed: email isn't set up on this server yet. Ask JobPilot support to switch it on.</p>
           )}
           {state === "pending" && <p className="text-text-2">Your staff account is waiting for approval by your TPO, Principal or (for a department's own code) its HOD. You'll get a notification.</p>}
-          {state === "notstaff" && (
+          {state === "notstaff" && isAdmin && (
+            <p className="text-text-2">
+              You're a JobPilot admin but not staff at a college, so the portal has no students to show you. Create colleges, appoint TPOs and verify departments in{" "}
+              <Link href="/admin" className="font-medium text-cobalt-text hover:underline">Admin</Link>.
+            </p>
+          )}
+          {state === "notstaff" && !isAdmin && (
             <p className="text-text-2">
               The Campus portal is for approved college staff. Students: your college, internships, roles and awards are in{" "}
               <Link href="/campus-profile" className="font-medium text-cobalt-text hover:underline">Campus profile</Link>.

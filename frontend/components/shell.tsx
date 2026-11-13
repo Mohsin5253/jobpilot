@@ -595,9 +595,10 @@ export function AppShell({ children }: { children: ReactNode }) {
   const t = useT();
   const nav: NavItem[] = [
     ...NAV.map((n) => ({ ...n, label: NAV_KEYS[n.href] ? t(NAV_KEYS[n.href]) : n.label })),
-    // Staff (TPO, HOD, faculty…) see both campus pages; students only theirs. The staff page is also guarded by the
-    // middleware and the API, so hiding the link is convenience, not security.
-    ...(me?.campus_staff ? [{ href: "/campus", label: t("nav.campus_staff"), icon: Building2 }] : []),
+    // Staff (TPO, HOD, faculty…) and JobPilot admins see both campus pages; students only theirs. The staff page is also
+    // guarded by the middleware and the API, so showing or hiding the link is convenience, not security: an admin who
+    // isn't staff at a college lands on staff access (join a college, register a department, or go to Admin).
+    ...(me?.campus_staff || me?.is_admin ? [{ href: me?.campus_staff ? "/campus" : "/staff-access", label: t("nav.campus_staff"), icon: Building2 }] : []),
     ...(me?.is_admin ? [{ href: "/admin", label: "Admin", icon: Gauge }] : []),
   ];
   const current = nav.find((n) => isOn(pathname, n.href));
