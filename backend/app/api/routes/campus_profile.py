@@ -52,7 +52,9 @@ async def overview(user: UserDep) -> dict:
             deg = await s.get(Degree, prog.degree_id) if prog else None
             dept = await s.get(Department, m.department_id) if m.department_id else None
             bat = await s.get(Batch, m.batch_id) if m.batch_id else None
-            out["membership"] = {"id": str(m.id), "campus_id": str(c.id), "campus": c.name, "status": m.status, "department": dept.name if dept else None,
+            from app.campus.models import display_name
+
+            out["membership"] = {"id": str(m.id), "campus_id": str(c.id), "campus": display_name(c), "status": m.status, "department": dept.name if dept else None,
                                  "program": f"{deg.abbreviation} {prog.specialisation}".strip() if prog and deg else None, "batch": f"{bat.admission_year}–{bat.graduation_year}" if bat else None,
                                  "locked": bool(m.roster_student_id), "labels": {"student_id": c.student_id_label, "pending_subjects": c.pending_subjects_label}}
     async with student_session(user.id) as s:
@@ -79,8 +81,10 @@ async def colleges(user: UserDep, q: str) -> list[dict]:
     if len(term) < 2:
         return []
     async with session_scope() as s:
-        rows = (await s.execute(select(Campus).where(func.lower(Campus.name).like(f"%{term}%"), Campus.status == "active").limit(20))).scalars().all()
-    return [{"id": str(c.id), "name": c.name, "city": c.city, "state": c.state} for c in rows]
+        rows = (await s.execute(select(Campus).where(func.lower(Campus.name + " " + Campus.branch).like(f"%{term}%"), Campus.status == "active").order_by(Campus.name, Campus.branch).limit(20))).scalars().all()
+    from app.campus.models import display_name
+
+    return [{"id": str(c.id), "name": display_name(c), "city": c.city, "state": c.state} for c in rows]
 
 
 @router.get("/colleges/{campus_id}/programs")
@@ -99,6 +103,16 @@ async def place_or_waitlist(s, m: CampusMembership) -> str:
     if prog:
         checks.append(("degree", prog.degree_id, str(prog.degree_id)))
     full = [lv for lv, ref, key in checks if ref and (lv, ref) in caps and used.get((lv, key), 0) >= caps[(lv, ref)]]
+    if m.department_id and "department" not in full:
+        # Department plan: an exact count, not the 15-minute rollup, with the department row locked so two students
+        # joining at once can't both take the last seat.
+        limit = (await s.execute(select(Department.plan_limit).where(Department.id == m.department_id).with_for_update())).scalar_one_or_none()
+        if limit:
+            taken = (await s.execute(select(func.count()).select_from(CampusMembership).where(
+                CampusMembership.campus_id == m.campus_id, CampusMembership.department_id == m.department_id, CampusMembership.kind == "student",
+                CampusMembership.status == "active", CampusMembership.id != m.id))).scalar_one()
+            if taken >= limit:
+                full.append("department")
     if not full:
         return "active"
     staff = (await s.execute(select(CampusMembership.user_id).where(CampusMembership.campus_id == m.campus_id, CampusMembership.kind == "staff", CampusMembership.status == "active", CampusMembership.role.in_(["tpo", "principal", "hod"])))).scalars().all()

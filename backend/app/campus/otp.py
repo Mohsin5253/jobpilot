@@ -41,13 +41,13 @@ async def send(email: str, subject: str, body: str) -> bool:
     return await send_system_email(email, subject, body)
 
 
-async def issue(user_id: uuid.UUID, email: str, purpose: str, campus_id: uuid.UUID | None = None) -> None:
+async def issue(user_id: uuid.UUID, email: str, purpose: str, campus_id: uuid.UUID | None = None, department_id: uuid.UUID | None = None) -> None:
     code = f"{secrets.randbelow(1_000_000):06d}"
     async with session_scope() as s:
         await s.execute(text("UPDATE email_otps SET used_at = now() WHERE user_id = :u AND purpose = :p AND used_at IS NULL"), {"u": user_id, "p": purpose})
         from app.campus.models import EmailOtp
 
-        s.add(EmailOtp(id=uuid7(), user_id=user_id, email=email.lower(), purpose=purpose, campus_id=campus_id, code_hash=_h(code, f"{user_id}:{purpose}"), expires_at=datetime.now(UTC) + TTL))
+        s.add(EmailOtp(id=uuid7(), user_id=user_id, email=email.lower(), purpose=purpose, campus_id=campus_id, department_id=department_id, code_hash=_h(code, f"{user_id}:{purpose}"), expires_at=datetime.now(UTC) + TTL))
     sent = await send(email, "Your JobPilot code", f"Your code is {code}. It expires in 10 minutes. If you didn't ask for it, ignore this email.")
     if not sent:
         raise HTTPException(503, "Email isn't set up on this server yet, so the code couldn't be sent")

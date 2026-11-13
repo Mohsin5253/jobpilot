@@ -1,7 +1,7 @@
 "use client";
 
 import { Activity, Building2, Coins, Database, Gauge, Radar, Users } from "lucide-react";
-import { useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState, type ReactNode } from "react";
 
 import { Badge } from "@/components/ui/badge";
@@ -12,6 +12,7 @@ import { EmptyState, PageHeader, Skeleton } from "@/components/ui/misc";
 import { useAddOfficer, useAdminMetrics, useAdminOrgs, useAdminRights, useCreateOrg, useResolveRight, useSetPlan } from "@/lib/queries";
 import { api } from "@/lib/api";
 import { ago, cn } from "@/lib/utils";
+import { toast } from "sonner";
 
 function Stat({ label, value, sub }: { label: string; value: ReactNode; sub?: ReactNode }) {
   return (
@@ -142,6 +143,7 @@ export default function AdminPage() {
       </div>
       <Quality />
       <RightsQueue />
+      <DepartmentRequests />
       <Colleges />
     </div>
   );
@@ -301,6 +303,56 @@ function Colleges() {
             </form>
           </div>
         ))}
+      </div>
+    </Card>
+  );
+}
+
+type DeptRequest = {
+  id: string; college_name: string; branch: string; department_name: string; city: string; state: string; email: string; created_at: string | null;
+  aishe_match: boolean; existing_campus: { id: string; name: string; plan: string; domains: string[]; website: string | null } | null;
+};
+
+/** Departments that registered themselves (Department plan, 300 students). Check the email domain belongs to the
+ * college and the person is staff there before approving. */
+function DepartmentRequests() {
+  const qc = useQueryClient();
+  const { data } = useQuery({ queryKey: ["admin-dept-requests"], queryFn: () => api.get<DeptRequest[]>("/admin/campuses/department-requests") });
+  const [reason, setReason] = useState<Record<string, string>>({});
+  const decide = useMutation({
+    mutationFn: (v: { id: string; approve: boolean }) => api.post(`/admin/campuses/department-requests/${v.id}`, { approve: v.approve, reason: reason[v.id] || null }),
+    onSuccess: (_, v) => (toast.success(v.approve ? "Approved: the department is live" : "Rejected"), qc.invalidateQueries({ queryKey: ["admin-dept-requests"] })),
+    onError: (e: Error) => toast.error(e.message),
+  });
+  return (
+    <Card>
+      <CardHeader icon={<Building2 className="size-4" />} title="Departments waiting for verification" description={`${data?.length ?? 0} waiting · Department plan, 300 students each`} />
+      <div className="space-y-2 p-5">
+        {!data?.length && <p className="text-[13px] text-subtle">Nothing waiting.</p>}
+        {data?.map((r) => {
+          const domain = r.email.split("@")[1];
+          const known = r.existing_campus?.domains.some((d) => domain === d || domain.endsWith(`.${d}`));
+          return (
+            <div key={r.id} className="space-y-2 rounded-[var(--radius-card)] border border-border px-4 py-3">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <div className="text-[14px] font-medium">{r.department_name} · {r.college_name}{r.branch ? ` — ${r.branch}` : ""}</div>
+                <div className="flex gap-1">
+                  <Badge tone={r.aishe_match ? "accent" : "outline"}>{r.aishe_match ? "In AISHE list" : "Typed by hand"}</Badge>
+                  <Badge tone={known ? "accent" : "outline"}>{known ? "Known domain" : "New domain"}</Badge>
+                </div>
+              </div>
+              <div className="text-[12.5px] text-subtle">
+                {r.email} · {[r.city, r.state].filter(Boolean).join(", ") || "no city given"} · {r.created_at ? ago(r.created_at) : ""}
+                {r.existing_campus ? ` · joins ${r.existing_campus.name} (${r.existing_campus.plan} plan)` : " · creates the college"}
+              </div>
+              <div className="flex flex-wrap gap-2">
+                <Input value={reason[r.id] ?? ""} onChange={(e) => setReason({ ...reason, [r.id]: e.target.value })} placeholder="Reason (needed to reject)" className="min-w-48 flex-1" />
+                <Button size="sm" variant="primary" loading={decide.isPending && decide.variables?.id === r.id} onClick={() => decide.mutate({ id: r.id, approve: true })}>Approve</Button>
+                <Button size="sm" disabled={!reason[r.id]?.trim()} onClick={() => decide.mutate({ id: r.id, approve: false })}>Reject</Button>
+              </div>
+            </div>
+          );
+        })}
       </div>
     </Card>
   );

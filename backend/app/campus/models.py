@@ -35,6 +35,8 @@ class Campus(Base):
     id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=uuid7)
     institution_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("institutions.id", ondelete="CASCADE"), index=True)
     name: Mapped[str] = mapped_column(String(300))
+    branch: Mapped[str] = mapped_column(String(120), default="")  # "Engineering", "Law": a branch of a same-named college
+    plan: Mapped[str] = mapped_column(String(20), default="college")  # pilot | department | college | university
     native_name: Mapped[str] = mapped_column(String(300), default="")
     city: Mapped[str] = mapped_column(String(120), default="")
     state: Mapped[str] = mapped_column(String(120), default="")
@@ -57,13 +59,47 @@ class Campus(Base):
     created_at: Mapped[datetime] = _now()
 
 
+MAX_CAMPUS_STUDENTS = 2_000_000  # 20 lakh per college or branch; a university (all its branches) has no plan limit
+DEPARTMENT_PLAN_STUDENTS = 300  # per department on the Department plan
+
+
+def display_name(c: "Campus") -> str:
+    return f"{c.name} — {c.branch}" if c.branch else c.name
+
+
 class Department(Base):
     __tablename__ = "departments"
     id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=uuid7)
     campus_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("campuses.id", ondelete="CASCADE"))
     name: Mapped[str] = mapped_column(String(200))
     native_name: Mapped[str] = mapped_column(String(200), default="")
+    staff_code_hash: Mapped[str | None] = mapped_column(String(64))  # the department's own staff code (joins this department only)
+    staff_code_expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    plan_limit: Mapped[int | None] = mapped_column(Integer)  # 300 on the Department plan
     created_at: Mapped[datetime] = _now()
+
+
+class DepartmentRequest(Base):
+    """A department registering itself (Department plan): HOD's institutional email confirmed, then verified by JobPilot."""
+
+    __tablename__ = "department_requests"
+    id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=uuid7)
+    user_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    aishe_id: Mapped[str | None] = mapped_column(String(20))
+    college_name: Mapped[str] = mapped_column(String(300))
+    branch: Mapped[str] = mapped_column(String(120), default="")
+    department_name: Mapped[str] = mapped_column(String(200))
+    city: Mapped[str] = mapped_column(String(120), default="")
+    state: Mapped[str] = mapped_column(String(120), default="")
+    email: Mapped[str] = mapped_column(String(320))
+    email_verified: Mapped[bool] = mapped_column(Boolean, default=False)
+    status: Mapped[str] = mapped_column(String(12), default="email")  # email | pending | approved | rejected
+    campus_id: Mapped[uuid.UUID | None] = mapped_column()
+    department_id: Mapped[uuid.UUID | None] = mapped_column()
+    reason: Mapped[str | None] = mapped_column(String(300))
+    created_at: Mapped[datetime] = _now()
+    decided_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    decided_by: Mapped[uuid.UUID | None] = mapped_column()
 
 
 class Field(Base):
@@ -353,6 +389,7 @@ class EmailOtp(Base):
     purpose: Mapped[str] = mapped_column(String(20))  # staff_email | staff_login | roster_claim
     code_hash: Mapped[str] = mapped_column(String(64))
     campus_id: Mapped[uuid.UUID | None] = mapped_column()
+    department_id: Mapped[uuid.UUID | None] = mapped_column()
     expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
     attempts: Mapped[int] = mapped_column(Integer, default=0)
     used_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))

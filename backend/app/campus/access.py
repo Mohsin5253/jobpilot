@@ -43,10 +43,20 @@ class StaffCtx:
     dept_ids: list[uuid.UUID] = field(default_factory=list)
     program_ids: list[uuid.UUID] = field(default_factory=list)  # whole programmes (an assignment without a batch)
     batch_ids: list[uuid.UUID] = field(default_factory=list)
+    plan: str = "college"
 
     @property
     def whole_campus(self) -> bool:
         return self.role in WHOLE_CAMPUS
+
+    @property
+    def lead(self) -> bool:
+        """Runs setup, staff, roster and capacity: the TPO / Principal for the whole college, or, on the Department plan,
+        the HOD for their own department(s) only."""
+        return self.whole_campus or (self.role == "hod" and self.plan in ("department", "pilot") and bool(self.dept_ids))
+
+    def owns_department(self, dept_id) -> bool:
+        return self.whole_campus or (self.lead and dept_id in self.dept_ids)
 
 
 def _arr(ids: list[uuid.UUID]) -> str:
@@ -102,6 +112,7 @@ async def load_scope(s, user_id: uuid.UUID, campus_id: uuid.UUID, role: str, mem
     from app.campus.models import Campus, StaffAssignment
 
     ctx = StaffCtx(user_id=user_id, campus_id=campus_id, role=role, membership_id=membership_id)
+    ctx.plan = (await s.execute(select(Campus.plan).where(Campus.id == campus_id))).scalar_one()
     if role == "university_admin":
         inst = (await s.execute(select(Campus.institution_id).where(Campus.id == campus_id))).scalar_one()
         ctx.institution_id = inst
@@ -175,6 +186,11 @@ StaffDep = Annotated[StaffCtx, Depends(staff_ctx)]
 def require(ctx: StaffCtx, *roles: str) -> None:
     if ctx.role not in roles:
         raise HTTPException(403, "Your campus role can't do that")
+
+
+def require_lead(ctx: StaffCtx) -> None:
+    if not ctx.lead:
+        raise HTTPException(403, "Only your TPO or Principal (or, on the Department plan, your HOD) can do that")
 
 
 async def audit(ctx: StaffCtx, action: str, subject_user_id: uuid.UUID | None = None, **detail) -> None:

@@ -1,6 +1,6 @@
 "use client";
 
-import { useMutation } from "@tanstack/react-query";
+import { useMutation, useQuery } from "@tanstack/react-query";
 import { ShieldCheck } from "lucide-react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
@@ -26,18 +26,21 @@ export default function StaffAccessPage() {
  * Staff who aren't members yet join here: staff code + institutional email + approval by the TPO. */
 function StaffAccess() {
   const router = useRouter();
-  const next = useSearchParams().get("next") || "/campus";
-  const [state, setState] = useState<"checking" | "otp" | "notstaff" | "pending">("checking");
+  const params = useSearchParams();
+  const next = params.get("next") || "/campus";
+  const campus = params.get("campus");
+  const target = campus ? { campus_id: campus } : {};
+  const [state, setState] = useState<"checking" | "otp" | "notstaff" | "pending" | "noemail">("checking");
   const [otp, setOtp] = useState("");
   const open = useMutation({
-    mutationFn: (code?: string) => api.post("/campus/staff-session", code ? { otp: code } : {}),
+    mutationFn: (code?: string) => api.post("/campus/staff-session", code ? { ...target, otp: code } : target),
     onSuccess: () => router.replace(next),
     onError: (e: Error) => toast.error(e.message),
   });
   useEffect(() => {
-    api.post<{ needed: boolean }>("/campus/staff-session/otp", {}).then(
+    api.post<{ needed: boolean }>("/campus/staff-session/otp", target).then(
       (r) => (r.needed ? setState("otp") : open.mutate(undefined)),
-      (e: ApiError) => setState(e.status === 403 && /waiting/i.test(e.message) ? "pending" : "notstaff"),
+      (e: ApiError) => setState(e.status === 503 ? "noemail" : e.status === 403 && /waiting/i.test(e.message) ? "pending" : "notstaff"),
     );
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -56,7 +59,10 @@ function StaffAccess() {
               </div>
             </form>
           )}
-          {state === "pending" && <p className="text-text-2">Your staff account is waiting for your TPO or Principal to approve it. You'll get a notification.</p>}
+          {state === "noemail" && (
+            <p className="text-text-2">You're staff here, but your two-step sign-in code couldn't be emailed: email isn't set up on this server yet. Ask JobPilot support to switch it on.</p>
+          )}
+          {state === "pending" && <p className="text-text-2">Your staff account is waiting for approval by your TPO, Principal or (for a department's own code) its HOD. You'll get a notification.</p>}
           {state === "notstaff" && (
             <p className="text-text-2">
               The Campus portal is for approved college staff. Students: your college, internships, roles and awards are in{" "}
@@ -65,7 +71,8 @@ function StaffAccess() {
           )}
         </div>
       </Card>
-      {(state === "notstaff" || state === "pending") && state === "notstaff" && <JoinAsStaff />}
+      {state === "notstaff" && <JoinAsStaff />}
+      {(state === "notstaff" || state === "pending") && <RegisterDepartment />}
     </div>
   );
 }
@@ -97,6 +104,7 @@ function JoinAsStaff() {
         ) : (
           <form onSubmit={(e) => (e.preventDefault(), verify.mutate())} className="space-y-3">
             <p className="text-[13.5px]">Joining <b>{s.campus}</b>. Enter the code sent to {email}.</p>
+            {s.departments.length === 1 && <p className="text-[12.5px] text-text-3">This is a department's own code: you join {s.departments[0].name} only, and its HOD approves you.</p>}
             <Input inputMode="numeric" maxLength={6} value={otp} onChange={(e) => setOtp(e.target.value.replace(/\D/g, ""))} placeholder="6-digit code" aria-label="Code" />
             <Field label="Your role">
               <select value={role} onChange={(e) => setRole(e.target.value)} className="h-10 w-full rounded-[var(--radius-control)] border border-border bg-surface px-3 text-[13px]">
@@ -116,6 +124,85 @@ function JoinAsStaff() {
               </Field>
             )}
             <Button type="submit" variant="primary" loading={verify.isPending} disabled={otp.length !== 6}>Ask to join</Button>
+          </form>
+        )}
+      </div>
+    </Card>
+  );
+}
+
+type Inst = { aishe_id: string; name: string; state: string; district: string };
+type DeptReq = { id: string; college_name: string; branch: string; department_name: string; status: "pending" | "approved" | "rejected"; reason: string | null };
+
+/** Department plan: an HOD registers their own department (up to 300 students). Institutional email first, then a
+ * JobPilot check that the department really belongs to the college; then it opens here. */
+function RegisterDepartment() {
+  const [q, setQ] = useState("");
+  const [inst, setInst] = useState<Inst | null>(null);
+  const [college, setCollege] = useState("");
+  const [branch, setBranch] = useState("");
+  const [dept, setDept] = useState("");
+  const [city, setCity] = useState("");
+  const [email, setEmail] = useState("");
+  const [otp, setOtp] = useState("");
+  const [sent, setSent] = useState(false);
+  const mine = useQuery({ queryKey: ["dept-requests-mine"], queryFn: () => api.get<DeptReq[]>("/campus/department-requests/mine") });
+  const found = useQuery({ queryKey: ["aishe", q], queryFn: () => api.get<Inst[]>(`/campus/institutions/search?q=${encodeURIComponent(q)}`), enabled: q.trim().length >= 3 && !inst });
+  const start = useMutation({
+    mutationFn: () => api.post("/campus/department-requests/start", { aishe_id: inst?.aishe_id ?? null, college_name: inst ? inst.name : college, branch, department_name: dept, city: inst?.district ?? city, state: inst?.state ?? "", email }),
+    onSuccess: () => setSent(true),
+    onError: (e: Error) => toast.error(e.message),
+  });
+  const verify = useMutation({
+    mutationFn: () => api.post("/campus/department-requests/verify", { otp }),
+    onSuccess: () => (toast.success("Email confirmed. We'll verify your department and notify you."), setSent(false), setOtp(""), mine.refetch()),
+    onError: (e: Error) => toast.error(e.message),
+  });
+  const latest = mine.data?.[0];
+  return (
+    <Card>
+      <CardHeader title="Register your department" description="Department plan: one department (for example Computer Science), up to 300 students, unlimited staff. You become its HOD once we've verified it." />
+      <div className="space-y-3 p-5 text-[14px]">
+        {latest && (
+          <p className={latest.status === "rejected" ? "text-[var(--error)]" : "text-text-2"}>
+            {latest.department_name}, {latest.college_name}{latest.branch ? ` — ${latest.branch}` : ""}:{" "}
+            {latest.status === "pending" ? "waiting for verification." : latest.status === "approved" ? "verified. Reload this page to open the portal." : `not approved: ${latest.reason}`}
+          </p>
+        )}
+        {latest?.status === "pending" ? null : !sent ? (
+          <form onSubmit={(e) => (e.preventDefault(), start.mutate())} className="space-y-3">
+            <Field label="College">
+              {inst ? (
+                <div className="flex items-center justify-between gap-2 rounded-[var(--radius-control)] border border-border px-3 py-2 text-[13px]">
+                  <span>{inst.name} · {inst.district}, {inst.state}</span>
+                  <button type="button" onClick={() => setInst(null)} className="text-text-3 hover:text-text">Change</button>
+                </div>
+              ) : (
+                <Input value={q} onChange={(e) => (setQ(e.target.value), setCollege(e.target.value))} placeholder="Search the AISHE list, or type your college's full name" />
+              )}
+            </Field>
+            {!inst && !!found.data?.length && (
+              <div className="max-h-44 divide-y divide-border overflow-y-auto rounded-[var(--radius-control)] border border-border">
+                {found.data.map((i) => (
+                  <button key={i.aishe_id} type="button" onClick={() => setInst(i)} className="block w-full px-3 py-2 text-left text-[13px] hover:bg-elevated">
+                    {i.name} <span className="text-text-3">· {i.district}, {i.state}</span>
+                  </button>
+                ))}
+              </div>
+            )}
+            {!inst && <Field label="City"><Input value={city} onChange={(e) => setCity(e.target.value)} placeholder="Pune" /></Field>}
+            <Field label="Branch (if your college has several, e.g. Engineering or Law)"><Input value={branch} onChange={(e) => setBranch(e.target.value)} placeholder="Engineering" /></Field>
+            <Field label="Department name"><Input value={dept} onChange={(e) => setDept(e.target.value)} placeholder="Computer Science" /></Field>
+            <Field label="Your institutional email"><Input type="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="hod.cs@college.edu.in" /></Field>
+            <Button type="submit" loading={start.isPending} disabled={dept.trim().length < 2 || !email.includes("@") || !(inst || college.trim().length >= 3)}>Send code</Button>
+          </form>
+        ) : (
+          <form onSubmit={(e) => (e.preventDefault(), verify.mutate())} className="space-y-2">
+            <p className="text-text-2">Enter the 6-digit code we sent to {email}.</p>
+            <div className="flex gap-2">
+              <Input inputMode="numeric" maxLength={6} value={otp} onChange={(e) => setOtp(e.target.value.replace(/\D/g, ""))} placeholder="6-digit code" aria-label="Code" />
+              <Button type="submit" variant="primary" loading={verify.isPending} disabled={otp.length !== 6}>Confirm</Button>
+            </div>
           </form>
         )}
       </div>

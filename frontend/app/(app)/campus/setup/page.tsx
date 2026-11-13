@@ -29,15 +29,27 @@ const sel = "h-10 w-full rounded-[var(--radius-control)] border border-border bg
 export default function SetupPage() {
   const qc = useQueryClient();
   const { data: s } = useQuery({ queryKey: ["campus-setup"], queryFn: () => api.get<Setup>("/campus/staff/setup") });
+  const { data: me } = useStaffMe();
   const refresh = () => (qc.invalidateQueries({ queryKey: ["campus-setup"] }), qc.invalidateQueries({ queryKey: ["campus-cap"] }), qc.invalidateQueries({ queryKey: ["campus-staff-me"] }));
   const post = useMutation({ mutationFn: ({ url, body }: { url: string; body: unknown }) => api.post(url, body), onSuccess: refresh, onError: (e: Error) => toast.error(e.message) });
-  if (!s) return null;
+  if (!s || !me) return null;
   const deg = (id: string) => s.degrees.find((d) => d.id === id);
+  // On the Department plan the HOD sets up their own department; the college's other departments stay theirs.
+  const whole = me.whole_campus;
+  const mine = new Set(me.scope.departments.map((d) => d.id));
+  const depts = whole ? s.departments : s.departments.filter((d) => mine.has(d.id));
+  const progs = whole ? s.programs : s.programs.filter((p) => mine.has(p.department_id));
   return (
     <div className="space-y-6">
       <Settings onSaved={refresh} />
+      {whole && <Branches />}
       <Degrees offered={s.degrees} onSaved={refresh} />
-      <Card>
+      {!whole && (
+        <Card>
+          <CardHeader title="3 · Your department" description={`Department plan: ${me.scope.departments.map((d) => `${d.name}, up to ${d.plan_limit ?? 300} students`).join(" · ")}. Another department of your college registers on its own.`} />
+        </Card>
+      )}
+      {whole && <Card>
         <CardHeader title="3 · Departments" description="Each department can run several degrees, and a degree can span departments." />
         <div className="space-y-3 p-5">
           <div className="flex flex-wrap gap-1.5">{s.departments.map((d) => <Badge key={d.id}>{d.name}</Badge>)}</div>
@@ -46,7 +58,7 @@ export default function SetupPage() {
             <Button type="submit"><Plus /> Add</Button>
           </form>
         </div>
-      </Card>
+      </Card>}
       <Card>
         <CardHeader title="4 · Programmes and batches" description="A programme is a department running a degree, in a field (ISCED), with a yearly intake. Students belong to programmes and batches." />
         <div className="space-y-4 p-5">
@@ -58,14 +70,14 @@ export default function SetupPage() {
             }}
             className="grid gap-2 sm:grid-cols-5"
           >
-            <select name="department_id" required className={sel} aria-label="Department"><option value="">Department</option>{s.departments.map((d) => <option key={d.id} value={d.id}>{d.name}</option>)}</select>
+            <select name="department_id" required className={sel} aria-label="Department"><option value="">Department</option>{depts.map((d) => <option key={d.id} value={d.id}>{d.name}</option>)}</select>
             <select name="degree_id" required className={sel} aria-label="Degree"><option value="">Degree</option>{s.degrees.map((d) => <option key={d.id} value={d.id}>{d.abbreviation}</option>)}</select>
             <select name="field_code" className={sel} aria-label="Field"><option value="">Field (ISCED)</option>{s.fields.filter((f) => f.level === "detailed").map((f) => <option key={f.code} value={f.code}>{f.code} · {f.name}</option>)}</select>
             <Input name="specialisation" placeholder="Specialisation (optional)" aria-label="Specialisation" />
             <div className="flex gap-2"><Input name="intake" type="number" min={0} placeholder="Intake / year" aria-label="Intake per year" /><Button type="submit"><Plus /></Button></div>
           </form>
           <div className="space-y-2">
-            {s.programs.map((p) => (
+            {progs.map((p) => (
               <div key={p.id} className="flex flex-wrap items-center gap-2 rounded-[var(--radius-card)] border border-border px-3 py-2 text-[13.5px]">
                 <span className="flex-1">{s.departments.find((d) => d.id === p.department_id)?.name} · {deg(p.degree_id)?.abbreviation} {p.specialisation} {p.field_code && <span className="text-text-3">({p.field_code})</span>}</span>
                 <span className="text-[12px] text-text-3">{s.batches.filter((b) => b.program_id === p.id).map((b) => b.admission_year).join(", ") || "no batches"}</span>
@@ -78,7 +90,7 @@ export default function SetupPage() {
           </div>
         </div>
       </Card>
-      <Capacity setup={s} />
+      <Capacity setup={s} only={whole ? null : mine} />
     </div>
   );
 }
@@ -156,7 +168,7 @@ function Degrees({ offered, onSaved }: { offered: Degree[]; onSaved: () => void 
   );
 }
 
-function Capacity({ setup }: { setup: Setup }) {
+function Capacity({ setup, only }: { setup: Setup; only: Set<string> | null }) {
   const qc = useQueryClient();
   const { data: tree } = useQuery({ queryKey: ["campus-cap"], queryFn: () => api.get<CapNode & { departments: CapNode[] }>("/campus/staff/capacity") });
   const save = useMutation({
@@ -181,7 +193,7 @@ function Capacity({ setup }: { setup: Setup }) {
         <Input
           type="number"
           min={0}
-          max={4000000}
+          max={2000000}
           defaultValue={n.capacity ?? ""}
           placeholder="Capacity"
           className="w-28"
@@ -197,10 +209,56 @@ function Capacity({ setup }: { setup: Setup }) {
   );
   return (
     <Card>
-      <CardHeader title="5 · Seat capacity" description="Total → degree → programme → batch (departments too). A level never exceeds its parent; when it's full, new students wait on a list and you're told. Plan limits are only for billing." />
+      <CardHeader
+        title="5 · Seat capacity"
+        description={only ? "Your department's seats (up to its plan's limit). When it's full, new students wait on a list and you're told." : "Total → degree → programme → batch (departments too). A level never exceeds its parent; when it's full, new students wait on a list and you're told."}
+      />
       <div className="p-5">
-        {row(tree, 0)}
-        {!!tree.departments.length && <div className="mt-3 border-t border-border pt-3">{tree.departments.map((d) => row(d, 1))}</div>}
+        {!only && row(tree, 0)}
+        {!!tree.departments.length && <div className={only ? "" : "mt-3 border-t border-border pt-3"}>{tree.departments.filter((d) => !only || only.has(d.id)).map((d) => row(d, only ? 0 : 1))}</div>}
+      </div>
+    </Card>
+  );
+}
+
+type Branch = { id: string; name: string; branch: string; current: boolean; your_role: string | null; students: number; limit: number };
+
+/** One college name, several branches with different fields (e.g. Engineering and Law): each its own campus with its own
+ * staff, codes, programmes and up to 20 lakh students. */
+function Branches() {
+  const qc = useQueryClient();
+  const { data: me } = useStaffMe();
+  const { data: list } = useQuery({ queryKey: ["campus-branches"], queryFn: () => api.get<Branch[]>("/campus/staff/branches") });
+  const done = () => (qc.invalidateQueries({ queryKey: ["campus-branches"] }), qc.invalidateQueries({ queryKey: ["campus-staff-me"] }), qc.invalidateQueries({ queryKey: ["my-staff-campuses"] }));
+  const name = useMutation({ mutationFn: (branch: string) => api.put("/campus/staff/branch-name", { branch }), onSuccess: done, onError: (e: Error) => toast.error(e.message) });
+  const add = useMutation({ mutationFn: (branch: string) => api.post<{ name: string }>("/campus/staff/branches", { branch }), onSuccess: (r) => (toast.success(`${r.name} added: switch to it from the Branch menu at the top`), done()), onError: (e: Error) => toast.error(e.message) });
+  if (!me) return null;
+  return (
+    <Card>
+      <CardHeader title="Branches" description="Does your college run different fields under the same name (Engineering, Law, Pharmacy…)? Give each branch its own campus: separate staff, codes, programmes and data, up to 20 lakh students each." />
+      <div className="space-y-3 p-5 text-[13.5px]">
+        {!me.campus.branch ? (
+          <form onSubmit={(e: FormEvent<HTMLFormElement>) => { e.preventDefault(); name.mutate(String(new FormData(e.currentTarget).get("branch"))); }} className="flex gap-2">
+            <Input name="branch" required minLength={2} placeholder="Name this branch first, e.g. Engineering" aria-label="This branch's name" />
+            <Button type="submit">Save</Button>
+          </form>
+        ) : (
+          <>
+            <ul className="space-y-1.5">
+              {list?.map((b) => (
+                <li key={b.id} className="flex flex-wrap items-center gap-2 rounded-[var(--radius-card)] border border-border px-3 py-2">
+                  <span className="flex-1">{b.name} {b.current && <Badge tone="accent">You're here</Badge>}</span>
+                  <span className="num text-[12px] text-text-3">{b.students.toLocaleString("en-IN")} of {(b.limit / 100000).toLocaleString("en-IN")} lakh</span>
+                  {!b.your_role && <span className="text-[12px] text-text-3">you're not staff here</span>}
+                </li>
+              ))}
+            </ul>
+            <form onSubmit={(e: FormEvent<HTMLFormElement>) => { e.preventDefault(); add.mutate(String(new FormData(e.currentTarget).get("branch"))); e.currentTarget.reset(); }} className="flex gap-2">
+              <Input name="branch" required minLength={2} placeholder={`Another branch of ${me.campus.college}, e.g. Law`} aria-label="New branch name" />
+              <Button type="submit" loading={add.isPending}><Plus /> Add branch</Button>
+            </form>
+          </>
+        )}
       </div>
     </Card>
   );

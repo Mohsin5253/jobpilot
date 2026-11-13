@@ -26,12 +26,13 @@ from sqlalchemy import func, or_, select, text, update
 from app.api.deps import AdminDep, RealUserDep, UserDep
 from app.campus import jobs as cjobs
 from app.campus import otp
-from app.campus.access import STAFF_ROLES, TWO_FACTOR, StaffDep, audit, mint_staff_token, require, staff_session
+from app.campus.access import STAFF_ROLES, TWO_FACTOR, StaffDep, audit, mint_staff_token, require, require_lead, staff_session
 from app.campus.ids import uuid7
 from app.campus.models import (
     Batch, Campus, CampusDegree, CampusJob, CampusMembership, CampusRollup, CapacityAllocation, CustomField, Degree, Department, Field as FieldRow,
-    Institution, Program, RosterStudent, StaffAssignment, StudentAchievement,
+    DepartmentRequest, Institution, Program, RosterStudent, StaffAssignment, StudentAchievement,
 )
+from app.campus.models import MAX_CAMPUS_STUDENTS, display_name
 from app.campus.rules import RuleError, validate
 from app.db import session_scope
 from app.models import CampusDrive, Notification, Organization, User
@@ -63,8 +64,15 @@ async def staff_join_start(body: JoinStart, user: RealUserDep, request: Request)
     if await otp.locked(user.id, ip):
         raise HTTPException(429, "Too many wrong staff codes. Try again in 15 minutes.")
     async with session_scope() as s:
-        campus = (await s.execute(select(Campus).where(Campus.staff_code_hash == hash_code(body.code)))).scalar_one_or_none()
-        if campus is None or (campus.staff_code_expires_at and campus.staff_code_expires_at < datetime.now(UTC)):
+        h = hash_code(body.code)
+        campus = (await s.execute(select(Campus).where(Campus.staff_code_hash == h))).scalar_one_or_none()
+        expires = campus.staff_code_expires_at if campus else None
+        code_dept = None
+        if campus is None:  # a department's own code (Department plan) joins that department only
+            code_dept = (await s.execute(select(Department).where(Department.staff_code_hash == h))).scalar_one_or_none()
+            if code_dept is not None:
+                campus, expires = await s.get(Campus, code_dept.campus_id), code_dept.staff_code_expires_at
+        if campus is None or (expires and expires < datetime.now(UTC)):
             await otp.record_failure(user.id, ip)
             raise HTTPException(403, "That staff code isn't valid. Ask your TPO for the current code.")
         email = str(body.email).lower()
@@ -77,9 +85,16 @@ async def staff_join_start(body: JoinStart, user: RealUserDep, request: Request)
         existing = (await s.execute(select(CampusMembership).where(CampusMembership.campus_id == campus.id, CampusMembership.user_id == user.id, CampusMembership.kind == "staff"))).scalar_one_or_none()
         if existing and existing.status in ("active", "pending"):
             raise HTTPException(409, "You've already joined this college as staff" + (" (waiting for approval)" if existing.status == "pending" else ""))
-        campus_id, campus_name = campus.id, campus.name
+        campus_id, campus_name = campus.id, display_name(campus)
         structure = await _structure(s, campus_id)
-    await otp.issue(user.id, email, "staff_email", campus_id)
+        dept_id = code_dept.id if code_dept else None
+        if code_dept:  # only this department is offered
+            did = str(dept_id)
+            progs = [p for p in structure["programs"] if p["department_id"] == did]
+            pids = {p["id"] for p in progs}
+            structure = {"departments": [d for d in structure["departments"] if d["id"] == did], "programs": progs, "batches": [b for b in structure["batches"] if b["program_id"] in pids]}
+            campus_name = f"{campus_name} · {code_dept.name}"
+    await otp.issue(user.id, email, "staff_email", campus_id, dept_id)
     return {"campus": campus_name, "otp_sent_to": email, **structure}
 
 
@@ -131,6 +146,14 @@ async def staff_join_verify(body: JoinVerify, user: RealUserDep) -> dict:
         depts = {d.id for d in (await s.execute(select(Department).where(Department.campus_id == campus_id))).scalars()}
         progs = {p.id: p for p in (await s.execute(select(Program).where(Program.campus_id == campus_id))).scalars()}
         bats = {b.id: b for b in (await s.execute(select(Batch).where(Batch.campus_id == campus_id))).scalars()}
+        if row.department_id:  # joined with a department's code: that department, its programmes and batches only
+            if body.role in ("tpo", "principal", "university_admin"):
+                raise HTTPException(403, "A department's code is for its own staff. College-wide roles are given by the TPO or JobPilot.")
+            depts = {row.department_id}
+            progs = {k: p for k, p in progs.items() if p.department_id == row.department_id}
+            bats = {k: b for k, b in bats.items() if b.program_id in progs}
+            if body.role in ("hod", "coordinator") or not (body.program_ids or body.batch_ids):
+                body.department_ids = [row.department_id]
         if not set(body.department_ids) <= depts or not set(body.program_ids) <= set(progs) or not set(body.batch_ids) <= set(bats):
             raise HTTPException(422, "Pick departments, programmes and batches of this college")
         if body.role == "hod" and not body.department_ids:
@@ -147,7 +170,9 @@ async def staff_join_verify(body: JoinVerify, user: RealUserDep) -> dict:
         for b in body.batch_ids:
             prog = progs.get(bats[b].program_id)
             s.add(StaffAssignment(id=uuid7(), campus_id=campus_id, user_id=user.id, role=body.role, department_id=prog.department_id if prog else None, program_id=bats[b].program_id, batch_id=b))
-        tpos = (await s.execute(select(CampusMembership.user_id).where(CampusMembership.campus_id == campus_id, CampusMembership.kind == "staff", CampusMembership.status == "active", CampusMembership.role.in_(["tpo", "principal"])))).scalars().all()
+        tpos = list((await s.execute(select(CampusMembership.user_id).where(CampusMembership.campus_id == campus_id, CampusMembership.kind == "staff", CampusMembership.status == "active", CampusMembership.role.in_(["tpo", "principal"])))).scalars())
+        if row.department_id:  # and the department's HOD, who approves them on the Department plan
+            tpos += list((await s.execute(select(StaffAssignment.user_id).where(StaffAssignment.campus_id == campus_id, StaffAssignment.department_id == row.department_id, StaffAssignment.role == "hod", StaffAssignment.status == "approved"))).scalars())
         for t in tpos:
             s.add(Notification(user_id=t, kind="campus", title="Staff waiting for approval", body=f"{user.name or user.email} asked to join as {body.role}. Review it in the Campus portal."))
         if user.email.lower() == row.email:
@@ -230,12 +255,13 @@ async def _campus(campus_id: uuid.UUID) -> Campus:
 async def staff_me(ctx: StaffDep) -> dict:
     c = await _campus(ctx.campus_id)
     async with session_scope() as s:
-        names = {d.id: d.name for d in (await s.execute(select(Department).where(Department.campus_id == ctx.campus_id))).scalars()}
+        depts = (await s.execute(select(Department).where(Department.campus_id == ctx.campus_id))).scalars().all()
+        names, limits = {d.id: d.name for d in depts}, {d.id: d.plan_limit for d in depts}
     return {
-        "campus": {"id": str(c.id), "name": c.name, "city": c.city, "state": c.state, "student_id_label": c.student_id_label, "pending_subjects_label": c.pending_subjects_label,
+        "campus": {"id": str(c.id), "name": display_name(c), "college": c.name, "branch": c.branch, "institution_id": str(c.institution_id), "city": c.city, "state": c.state, "student_id_label": c.student_id_label, "pending_subjects_label": c.pending_subjects_label,
                    "score_scale": c.score_scale, "term_type": c.term_type, "allowed_email_domains": c.allowed_email_domains, "locale": c.locale},
-        "role": ctx.role, "whole_campus": ctx.whole_campus,
-        "scope": {"departments": [{"id": str(d), "name": names.get(d, "")} for d in ctx.dept_ids], "programs": [str(p) for p in ctx.program_ids], "batches": [str(b) for b in ctx.batch_ids]},
+        "role": ctx.role, "whole_campus": ctx.whole_campus, "plan": ctx.plan, "lead": ctx.lead,
+        "scope": {"departments": [{"id": str(d), "name": names.get(d, ""), "plan_limit": limits.get(d)} for d in ctx.dept_ids], "programs": [str(p) for p in ctx.program_ids], "batches": [str(b) for b in ctx.batch_ids]},
     }
 
 
@@ -255,7 +281,7 @@ SCALE_TYPES = {"cgpa", "gpa", "percentage", "division", "letter", "pass_fail"}
 
 @router.put("/staff/settings")
 async def staff_settings(body: SettingsIn, ctx: StaffDep) -> dict:
-    require(ctx, "tpo", "principal")
+    require_lead(ctx)
     async with session_scope() as s:
         c = await s.get(Campus, ctx.campus_id)
         if body.allowed_email_domains is not None:
@@ -287,13 +313,25 @@ async def staff_settings(body: SettingsIn, ctx: StaffDep) -> dict:
 
 class CodeIn(BaseModel):
     expires_in_days: int | None = Field(default=30, ge=1, le=365)
+    department_id: uuid.UUID | None = None
 
 
 @router.post("/staff/staff-code")
 async def rotate_staff_code(body: CodeIn, ctx: StaffDep) -> dict:
     """A new staff code, shown once; the old one stops working."""
-    require(ctx, "tpo", "principal")
+    require_lead(ctx)
     code = new_staff_code()
+    if not ctx.whole_campus:  # a department lead issues their department's own code
+        dept_id = body.department_id or ctx.dept_ids[0]
+        if dept_id not in ctx.dept_ids:
+            raise HTTPException(403, "Only your own department's code")
+        async with session_scope() as s:
+            d = await s.get(Department, dept_id)
+            d.staff_code_hash = hash_code(code)
+            d.staff_code_expires_at = datetime.now(UTC) + timedelta(days=body.expires_in_days) if body.expires_in_days else None
+            exp = d.staff_code_expires_at
+        await audit(ctx, "staff_code", None, department_id=str(dept_id))
+        return {"code": code, "department_id": str(dept_id), "expires_at": exp.isoformat() if exp else None}
     async with session_scope() as s:
         c = await s.get(Campus, ctx.campus_id)
         c.staff_code_hash = hash_code(code)
@@ -316,6 +354,8 @@ async def staff_members(ctx: StaffDep, status: str = "pending") -> list[dict]:
             await s.execute(
                 select(CampusMembership, User).join(User, User.id == CampusMembership.user_id)
                 .where(CampusMembership.campus_id == ctx.campus_id, CampusMembership.kind == "staff", CampusMembership.status == status)
+                .where(True if ctx.whole_campus else CampusMembership.user_id.in_(
+                    select(StaffAssignment.user_id).where(StaffAssignment.campus_id == ctx.campus_id, StaffAssignment.department_id.in_(ctx.dept_ids or [uuid.UUID(int=0)]))))
                 .order_by(CampusMembership.created_at.desc()).limit(200)
             )
         ).all()
@@ -337,7 +377,7 @@ class MemberDecision(BaseModel):
 async def decide_member(membership_id: str, body: MemberDecision, ctx: StaffDep) -> dict:
     """Approve a pending staff member (TPO / Principal), deactivate one (ends their sessions at once), or change a role.
     Only a TPO or Principal makes someone TPO or Principal; nobody approves or promotes themselves."""
-    require(ctx, "tpo", "principal")
+    require_lead(ctx)
     mid = _uuid(membership_id)
     async with session_scope() as s:
         m = (await s.execute(select(CampusMembership).where(CampusMembership.campus_id == ctx.campus_id, CampusMembership.id == mid, CampusMembership.kind == "staff"))).scalar_one_or_none()
@@ -345,6 +385,10 @@ async def decide_member(membership_id: str, body: MemberDecision, ctx: StaffDep)
             raise HTTPException(404, "No such staff member at your college")
         if m.user_id == ctx.user_id:
             raise HTTPException(403, "You can't approve, deactivate or promote yourself")
+        if not ctx.whole_campus:  # a department lead: only staff of their own department, never TPO / Principal / HOD roles
+            depts = set((await s.execute(select(StaffAssignment.department_id).where(StaffAssignment.campus_id == ctx.campus_id, StaffAssignment.user_id == m.user_id))).scalars())
+            if not depts or not depts <= set(ctx.dept_ids) or m.role in ("tpo", "principal", "hod") or (body.role and body.role not in ("faculty", "coordinator")):
+                raise HTTPException(403, "An HOD manages faculty and coordinators of their own department only")
         if body.action == "approve":
             if not m.email_verified:
                 raise HTTPException(409, "Their institutional email isn't confirmed yet")
@@ -478,9 +522,11 @@ class OfferedIn(BaseModel):
 
 @router.put("/staff/degrees/offered")
 async def set_offered(body: OfferedIn, ctx: StaffDep) -> dict:
-    require(ctx, "tpo", "principal")
+    require_lead(ctx)
     async with session_scope() as s:
         ok = set((await s.execute(select(Degree.id).where(Degree.id.in_(body.degree_ids), or_(Degree.campus_id.is_(None), Degree.campus_id == ctx.campus_id)))).scalars())
+        if not ctx.whole_campus:  # a department lead adds degrees; removing is for the whole college
+            ok |= set((await s.execute(select(CampusDegree.degree_id).where(CampusDegree.campus_id == ctx.campus_id))).scalars())
         await s.execute(text("DELETE FROM campus_degrees WHERE campus_id = :c"), {"c": ctx.campus_id})
         for d in ok:
             s.add(CampusDegree(campus_id=ctx.campus_id, degree_id=d))
@@ -498,7 +544,7 @@ class DegreeIn(BaseModel):
 @router.post("/staff/degrees", status_code=201)
 async def add_degree(body: DegreeIn, ctx: StaffDep) -> dict:
     """A degree the list doesn't have, for this college only."""
-    require(ctx, "tpo", "principal")
+    require_lead(ctx)
     async with session_scope() as s:
         d = Degree(id=uuid7(), campus_id=ctx.campus_id, country_code=None, **body.model_dump())
         s.add(d)
@@ -537,10 +583,10 @@ class ProgramIn(BaseModel):
 @router.post("/staff/programs", status_code=201)
 async def add_program(body: ProgramIn, ctx: StaffDep) -> dict:
     """A department running a degree (Computer Engg -> B.E., M.E., Ph.D.): students belong to programmes."""
-    require(ctx, "tpo", "principal")
+    require_lead(ctx)
     async with session_scope() as s:
         dept = await s.get(Department, body.department_id)
-        if dept is None or dept.campus_id != ctx.campus_id:
+        if dept is None or dept.campus_id != ctx.campus_id or not ctx.owns_department(dept.id):
             raise HTTPException(404, "No such department")
         offered = (await s.execute(select(CampusDegree).where(CampusDegree.campus_id == ctx.campus_id, CampusDegree.degree_id == body.degree_id))).scalar_one_or_none()
         if offered is None:
@@ -657,7 +703,28 @@ async def check_capacity(s, campus_id: uuid.UUID, level: str, ref: uuid.UUID, va
 
 @router.put("/staff/capacity")
 async def set_capacity(body: CapacityIn, ctx: StaffDep) -> dict:
-    require(ctx, "tpo", "principal")
+    require_lead(ctx)
+    if not ctx.whole_campus:
+        if body.level not in ("department", "program", "batch") or body.ref_id is None:
+            raise HTTPException(403, "An HOD sets capacity for their own department, its programmes and batches")
+        async with session_scope() as s:
+            if body.level == "department":
+                dept_of = body.ref_id
+            elif body.level == "program":
+                dept_of = (await s.execute(select(Program.department_id).where(Program.id == body.ref_id))).scalar_one_or_none()
+            else:
+                dept_of = (await s.execute(select(Program.department_id).join(Batch, Batch.program_id == Program.id).where(Batch.id == body.ref_id))).scalar_one_or_none()
+        if dept_of not in ctx.dept_ids:
+            raise HTTPException(403, "That's outside your department")
+    if body.level == "department" and body.ref_id:
+        async with session_scope() as s:
+            d = await s.get(Department, body.ref_id)
+            if d and d.plan_limit and body.capacity > d.plan_limit:
+                raise HTTPException(422, f"The Department plan holds up to {d.plan_limit} students per department. The College plan holds up to 20 lakh.")
+    from app.campus.models import MAX_CAMPUS_STUDENTS
+
+    if body.capacity > MAX_CAMPUS_STUDENTS:
+        raise HTTPException(422, "A college or branch holds up to 20 lakh students. Add another branch for more (Setup → Branches); the University plan has no limit across branches.")
     ref = body.ref_id or ctx.campus_id
     if body.level == "campus":
         ref = ctx.campus_id
@@ -929,7 +996,10 @@ async def roster_import(ctx: StaffDep, file: UploadFile = File(...)) -> dict:
         raise HTTPException(413, "Up to 60 MB per file")
     from app.campus.storage import encrypt, sha256
 
-    job = await cjobs.enqueue(ctx.campus_id, "roster_import", f"roster:{ctx.campus_id}:{sha256(data)}", {"filename": name}, encrypt(data), ctx.user_id)
+    scope = [] if ctx.whole_campus else [str(d) for d in ctx.dept_ids]
+    if not ctx.whole_campus and not scope:
+        raise HTTPException(403, "Ask your HOD or TPO to import the roster")
+    job = await cjobs.enqueue(ctx.campus_id, "roster_import", f"roster:{ctx.campus_id}:{sha256(data)}:{ctx.user_id}", {"filename": name, "department_scope": scope}, encrypt(data), ctx.user_id)
     await audit(ctx, "roster_import", None, job_id=str(job), filename=name, bytes=len(data))
     return {"job_id": str(job)}
 
@@ -1011,6 +1081,82 @@ async def list_drives(ctx: StaffDep) -> list[dict]:
         )
     return [{"id": str(d.id), "company": d.company, "role": d.role, "kind": d.kind, "compensation": d.compensation, "register_by": d.register_by.isoformat() if d.register_by else None,
              "rounds": d.rounds, "rules": (d.eligibility or {}).get("rules", []), "eligible_in_scope": int(counts.get(d.id, 0))} for d in drives]
+
+
+# =============================== branches: one college name, several fields ===============================
+
+
+@router.get("/staff/branches")
+async def list_branches(ctx: StaffDep) -> list[dict]:
+    """Every branch of this college (same institution): e.g. its engineering branch and its law branch."""
+    async with session_scope() as s:
+        me = await s.get(Campus, ctx.campus_id)
+        rows = (await s.execute(select(Campus).where(Campus.institution_id == me.institution_id).order_by(Campus.name, Campus.branch))).scalars().all()
+        mine = dict((await s.execute(select(CampusMembership.campus_id, CampusMembership.role).where(CampusMembership.user_id == ctx.user_id, CampusMembership.kind == "staff", CampusMembership.status == "active"))).all())
+        counts = dict((await s.execute(select(CampusRollup.campus_id, CampusRollup.value).where(CampusRollup.campus_id.in_([r.id for r in rows]), CampusRollup.level == "campus", CampusRollup.metric == "students"))).all())
+    return [{"id": str(c.id), "name": display_name(c), "branch": c.branch, "current": c.id == ctx.campus_id, "your_role": mine.get(c.id), "students": int(counts.get(c.id, 0)),
+             "limit": MAX_CAMPUS_STUDENTS} for c in rows]
+
+
+class BranchIn(BaseModel):
+    branch: str = Field(min_length=2, max_length=120)
+    allowed_email_domains: list[str] | None = Field(default=None, max_length=10)
+
+
+@router.post("/staff/branches", status_code=201)
+async def add_branch(body: BranchIn, ctx: StaffDep) -> dict:
+    """A new branch of this college (same name, its own fields, staff, codes and up to 20 lakh students). You become
+    its TPO; its students and staff are kept separate from this branch's."""
+    require(ctx, "tpo", "principal")
+    import secrets
+
+    async with session_scope() as s:
+        me = await s.get(Campus, ctx.campus_id)
+        if not me.branch:
+            raise HTTPException(409, "Name this branch first (Settings: e.g. 'Engineering'), then add the other one")
+        branch = body.branch.strip()
+        clash = (await s.execute(select(Campus.id).where(Campus.institution_id == me.institution_id, func.lower(Campus.name) == me.name.lower(), func.lower(Campus.branch) == branch.lower()))).first()
+        if clash:
+            raise HTTPException(409, f"{me.name} already has a branch called {branch}")
+        domains = [d.strip().lower().lstrip("@") for d in (body.allowed_email_domains if body.allowed_email_domains is not None else me.allowed_email_domains) if d.strip()]
+        if any(d in otp.PERSONAL_DOMAINS for d in domains):
+            raise HTTPException(422, "Use the college's own email domains")
+        c = Campus(id=uuid7(), institution_id=me.institution_id, name=me.name, branch=branch, city=me.city, state=me.state, country_code=me.country_code,
+                   website=me.website, allowed_email_domains=domains, locale=me.locale, timezone=me.timezone, status=me.status)
+        s.add(c)
+        await s.flush()
+        s.add(Organization(id=c.id, name=display_name(c), slug=f"c-{c.id.hex[-12:]}", invite_code=secrets.token_hex(4).upper()))
+        s.add(CampusMembership(campus_id=c.id, id=uuid7(), institution_id=me.institution_id, user_id=ctx.user_id, kind="staff", role=ctx.role, status="active", email_verified=True))
+    await audit(ctx, "branch_add", None, branch=branch, campus_id=str(c.id))
+    return {"id": str(c.id), "name": display_name(c)}
+
+
+class BranchName(BaseModel):
+    branch: str = Field(min_length=2, max_length=120)
+
+
+@router.put("/staff/branch-name")
+async def name_branch(body: BranchName, ctx: StaffDep) -> dict:
+    require(ctx, "tpo", "principal")
+    async with session_scope() as s:
+        c = await s.get(Campus, ctx.campus_id)
+        clash = (await s.execute(select(Campus.id).where(Campus.institution_id == c.institution_id, Campus.id != c.id, func.lower(Campus.name) == c.name.lower(), func.lower(Campus.branch) == body.branch.strip().lower()))).first()
+        if clash:
+            raise HTTPException(409, "Another branch already has that name")
+        c.branch = body.branch.strip()
+        org = await s.get(Organization, c.id)
+        if org:
+            org.name = display_name(c)
+    return {"name": display_name(c)}
+
+
+@router.get("/my-staff-campuses")
+async def my_staff_campuses(user: UserDep) -> list[dict]:
+    """The colleges and branches where you're active staff (to switch between them in the portal)."""
+    async with session_scope() as s:
+        rows = (await s.execute(select(CampusMembership, Campus).join(Campus, Campus.id == CampusMembership.campus_id)
+                                .where(CampusMembership.user_id == user.id, CampusMembership.kind == "staff", CampusMembership.status == "active"))).all()
+    return [{"id": str(c.id), "name": display_name(c), "role": m.role} for m, c in rows]
 
 
 @router.get("/staff/round-templates")
@@ -1160,6 +1306,94 @@ async def proof_file(campus_id: str, file_id: str, exp: int, sig: str, user: Use
     return Response(data, media_type=f.mime, headers={"cache-control": "private, max-age=60", "x-content-type-options": "nosniff", "content-disposition": "inline"})
 
 
+# =============================== Department plan: a department registers itself ===============================
+# The HOD gives the college, branch and department name and confirms an institutional email; JobPilot verifies it by
+# hand (the domain belongs to that college, the person is staff there); then the department is live with 300 seats.
+
+
+class DeptRequestIn(BaseModel):
+    aishe_id: str | None = Field(default=None, max_length=20)
+    college_name: str = Field(default="", max_length=300)
+    branch: str = Field(default="", max_length=120)
+    department_name: str = Field(min_length=2, max_length=200)
+    city: str = Field(default="", max_length=120)
+    state: str = Field(default="", max_length=120)
+    email: EmailStr
+
+
+def _dept_req_json(r: DepartmentRequest) -> dict:
+    return {"id": str(r.id), "college_name": r.college_name, "branch": r.branch, "department_name": r.department_name, "city": r.city, "state": r.state,
+            "email": r.email, "aishe_id": r.aishe_id, "status": r.status, "reason": r.reason, "campus_id": str(r.campus_id) if r.campus_id else None,
+            "created_at": r.created_at.isoformat() if r.created_at else None, "decided_at": r.decided_at.isoformat() if r.decided_at else None}
+
+
+async def _find_campus(s, aishe_id: str | None, name: str, branch: str) -> Campus | None:
+    q = select(Campus).where(func.lower(Campus.branch) == branch.strip().lower())
+    q = q.where(Campus.aishe_id == aishe_id) if aishe_id else q.where(func.lower(Campus.name) == name.strip().lower())
+    return (await s.execute(q.limit(1))).scalar_one_or_none()
+
+
+@router.post("/department-requests/start")
+async def dept_request_start(body: DeptRequestIn, user: RealUserDep) -> dict:
+    await hit("staff_join", str(user.id))
+    email = str(body.email).lower()
+    if otp.personal(email):
+        raise HTTPException(422, "Use your college email (not Gmail, Yahoo and so on): it's how we verify the department belongs to the college")
+    from app.models import RefInstitution
+
+    async with session_scope() as s:
+        ref = await s.get(RefInstitution, body.aishe_id) if body.aishe_id else None
+        college = (ref.name if ref else body.college_name).strip()
+        if not college:
+            raise HTTPException(422, "Pick your college from the list or type its name")
+        campus = await _find_campus(s, ref.aishe_id if ref else None, college, body.branch)
+        if campus and campus.allowed_email_domains and not otp.domain_allowed(email, campus.allowed_email_domains):
+            raise HTTPException(422, f"Use an email at {', '.join('@' + d for d in campus.allowed_email_domains)}, the domain this college uses")
+        if campus:
+            taken = (await s.execute(select(Department.id).where(Department.campus_id == campus.id, func.lower(Department.name) == body.department_name.strip().lower(), Department.plan_limit.is_not(None)))).scalar_one_or_none()
+            if taken:
+                raise HTTPException(409, "This department is already registered. Ask its HOD for the department's staff code to join it.")
+        await s.execute(update(DepartmentRequest).where(DepartmentRequest.user_id == user.id, DepartmentRequest.status == "email").values(status="rejected", reason="Replaced by a newer request"))
+        r = DepartmentRequest(id=uuid7(), user_id=user.id, aishe_id=ref.aishe_id if ref else None, college_name=college, branch=body.branch.strip(), department_name=body.department_name.strip(),
+                              city=body.city or (ref.district if ref else ""), state=body.state or (ref.state if ref else ""), email=email, campus_id=campus.id if campus else None)
+        s.add(r)
+    await otp.issue(user.id, email, "dept_request", campus.id if campus else None)
+    return {"id": str(r.id), "otp_sent_to": email}
+
+
+class OtpIn(BaseModel):
+    otp: str = Field(min_length=6, max_length=6)
+
+
+@router.post("/department-requests/verify")
+async def dept_request_verify(body: OtpIn, user: RealUserDep) -> dict:
+    row = await otp.check(user.id, "dept_request", body.otp)
+    async with session_scope() as s:
+        r = (await s.execute(select(DepartmentRequest).where(DepartmentRequest.user_id == user.id, DepartmentRequest.status == "email", DepartmentRequest.email == row.email)
+                             .order_by(DepartmentRequest.created_at.desc()).limit(1).with_for_update())).scalar_one_or_none()
+        if r is None:
+            raise HTTPException(404, "Start the registration again")
+        r.email_verified, r.status = True, "pending"
+        for a in await _admin_ids(s):
+            s.add(Notification(user_id=a, kind="campus", title="A department asked to join", body=f"{r.department_name}, {r.college_name}{' · ' + r.branch if r.branch else ''} ({r.email}). Review it in Admin → Departments."))
+        out = _dept_req_json(r)
+    return out
+
+
+@router.get("/department-requests/mine")
+async def dept_request_mine(user: UserDep) -> list[dict]:
+    async with session_scope() as s:
+        rows = (await s.execute(select(DepartmentRequest).where(DepartmentRequest.user_id == user.id, DepartmentRequest.status != "email").order_by(DepartmentRequest.created_at.desc()).limit(10))).scalars().all()
+    return [_dept_req_json(r) for r in rows]
+
+
+async def _admin_ids(s) -> list[uuid.UUID]:
+    from app.config import settings
+
+    emails = [e.lower() for e in settings.admin_emails]
+    return list((await s.execute(select(User.id).where(or_(User.is_admin.is_(True), func.lower(User.email).in_(emails or [""]))))).scalars())
+
+
 # =============================== JobPilot admin: create a campus, appoint the first TPO ===============================
 
 
@@ -1172,6 +1406,7 @@ class CampusCreate(BaseModel):
     website: str | None = Field(default=None, max_length=200)
     allowed_email_domains: list[str] = Field(default_factory=list, max_length=10)
     institution_id: uuid.UUID | None = None  # a campus of an existing university group
+    branch: str = Field(default="", max_length=120)  # e.g. "Engineering" or "Law" for a college with several branches
 
 
 admin = APIRouter(prefix="/admin/campuses", tags=["admin"])
@@ -1194,15 +1429,15 @@ async def create_campus(body: CampusCreate, _: AdminDep) -> dict:
             await s.flush()
             inst_id = inst.id
         domains = [d.strip().lower().lstrip("@") for d in body.allowed_email_domains if d.strip() and d.strip().lower().lstrip("@") not in otp.PERSONAL_DOMAINS]
-        c = Campus(id=uuid7(), institution_id=inst_id, name=name, city=body.city or (ref.district if ref else ""), state=body.state or (ref.state if ref else ""),
+        c = Campus(id=uuid7(), institution_id=inst_id, name=name, branch=body.branch.strip(), city=body.city or (ref.district if ref else ""), state=body.state or (ref.state if ref else ""),
                    country_code=body.country_code.upper(), aishe_id=ref.aishe_id if ref else None, website=body.website, allowed_email_domains=domains,
                    status="active" if ref else "review")
         s.add(c)
         await s.flush()
         import secrets
 
-        s.add(Organization(id=c.id, name=name, slug=f"c-{c.id.hex[-12:]}", invite_code=secrets.token_hex(4).upper()))
-    return {"id": str(c.id), "name": name, "status": c.status, "aishe_match": bool(ref)}
+        s.add(Organization(id=c.id, name=display_name(c), slug=f"c-{c.id.hex[-12:]}", invite_code=secrets.token_hex(4).upper()))
+    return {"id": str(c.id), "name": display_name(c), "status": c.status, "aishe_match": bool(ref)}
 
 
 class TpoIn(BaseModel):
@@ -1225,6 +1460,109 @@ async def appoint(campus_id: str, body: TpoIn, _: AdminDep) -> dict:
         m.role, m.status, m.email_verified = body.role, "active", True
         await sync_legacy(s, c.id, u.id, body.role)
     return {"ok": True}
+
+
+@admin.post("/{campus_id}/approve")
+async def approve_campus(campus_id: str, _: AdminDep) -> dict:
+    """A college added by hand (not found in the AISHE list) is reviewed, then listed for students. Its branches too."""
+    async with session_scope() as s:
+        c = await s.get(Campus, _uuid(campus_id))
+        if c is None:
+            raise HTTPException(404, "No such campus")
+        n = (await s.execute(update(Campus).where(Campus.institution_id == c.institution_id, func.lower(Campus.name) == c.name.lower(), Campus.status == "review").values(status="active"))).rowcount
+    return {"approved": n}
+
+
+@admin.get("/department-requests")
+async def dept_requests(_: AdminDep, status: Literal["pending", "approved", "rejected"] = "pending") -> list[dict]:
+    async with session_scope() as s:
+        rows = (await s.execute(select(DepartmentRequest).where(DepartmentRequest.status == status).order_by(DepartmentRequest.created_at).limit(200))).scalars().all()
+        out = []
+        for r in rows:
+            j = _dept_req_json(r)
+            c = await s.get(Campus, r.campus_id) if r.campus_id else await _find_campus(s, r.aishe_id, r.college_name, r.branch)
+            j["existing_campus"] = {"id": str(c.id), "name": display_name(c), "plan": c.plan, "domains": c.allowed_email_domains, "website": c.website} if c else None
+            j["aishe_match"] = bool(r.aishe_id)
+            out.append(j)
+    return out
+
+
+class DeptDecision(BaseModel):
+    approve: bool
+    reason: str | None = Field(default=None, max_length=300)
+
+
+@admin.post("/department-requests/{request_id}")
+async def decide_dept_request(request_id: str, body: DeptDecision, admin_user: AdminDep) -> dict:
+    """Approve: the college (and branch) is found or created on the Department plan, the department gets 300 seats and
+    the requester becomes its HOD. On a college already on the College plan, the department joins under its TPO."""
+    if not body.approve and not (body.reason or "").strip():
+        raise HTTPException(422, "Say why, so the HOD knows what to fix")
+    import secrets
+
+    from app.campus.models import DEPARTMENT_PLAN_STUDENTS
+
+    async with session_scope() as s:
+        r = (await s.execute(select(DepartmentRequest).where(DepartmentRequest.id == _uuid(request_id)).with_for_update())).scalar_one_or_none()
+        if r is None or r.status != "pending":
+            raise HTTPException(404, "No such pending request")
+        r.decided_at, r.decided_by, r.reason = datetime.now(UTC), admin_user.id, (body.reason or "").strip() or None
+        if not body.approve:
+            r.status = "rejected"
+            s.add(Notification(user_id=r.user_id, kind="campus", title="Department registration not approved", body=f"{r.department_name}: {r.reason}"))
+            return {"status": "rejected"}
+        c = await s.get(Campus, r.campus_id) if r.campus_id else await _find_campus(s, r.aishe_id, r.college_name, r.branch)
+        domain = r.email.rsplit("@", 1)[-1].lower()
+        if c is None:
+            from app.models import RefInstitution
+
+            ref = await s.get(RefInstitution, r.aishe_id) if r.aishe_id else None
+            inst = Institution(id=uuid7(), name=ref.university if ref and ref.university else r.college_name, type="college_group" if ref and ref.university else "standalone", country_code="IN")
+            s.add(inst)
+            await s.flush()
+            c = Campus(id=uuid7(), institution_id=inst.id, name=r.college_name, branch=r.branch, city=r.city, state=r.state, country_code="IN", aishe_id=r.aishe_id,
+                       allowed_email_domains=[domain], status="active", plan="department")
+            s.add(c)
+            await s.flush()
+            s.add(Organization(id=c.id, name=display_name(c), slug=f"c-{c.id.hex[-12:]}", invite_code=secrets.token_hex(4).upper()))
+        else:
+            if c.status == "review":
+                c.status = "active"  # a person at the college confirmed it exists
+            if domain not in [d.lower() for d in c.allowed_email_domains or []] and not otp.domain_allowed(r.email, c.allowed_email_domains or []):
+                c.allowed_email_domains = [*(c.allowed_email_domains or []), domain][:10]
+            if c.plan == "college" and not (await s.execute(select(CampusMembership.id).where(CampusMembership.campus_id == c.id, CampusMembership.kind == "staff", CampusMembership.status == "active", CampusMembership.role.in_(["tpo", "principal"])).limit(1))).scalar_one_or_none():
+                c.plan = "department"  # nobody runs it as a whole college yet: departments run themselves
+        d = (await s.execute(select(Department).where(Department.campus_id == c.id, func.lower(Department.name) == r.department_name.lower()))).scalar_one_or_none()
+        if d is None:
+            d = Department(id=uuid7(), campus_id=c.id, name=r.department_name)
+            s.add(d)
+            await s.flush()
+        d.plan_limit = DEPARTMENT_PLAN_STUDENTS
+        a = (await s.execute(select(CapacityAllocation).where(CapacityAllocation.campus_id == c.id, CapacityAllocation.level == "department", CapacityAllocation.ref_id == d.id))).scalar_one_or_none()
+        if a is None:
+            s.add(CapacityAllocation(id=uuid7(), campus_id=c.id, level="department", ref_id=d.id, capacity=DEPARTMENT_PLAN_STUDENTS, updated_by=admin_user.id))
+        else:
+            a.capacity = min(a.capacity, DEPARTMENT_PLAN_STUDENTS)
+        m = (await s.execute(select(CampusMembership).where(CampusMembership.campus_id == c.id, CampusMembership.user_id == r.user_id, CampusMembership.kind == "staff"))).scalar_one_or_none()
+        if m is None:
+            m = CampusMembership(campus_id=c.id, id=uuid7(), institution_id=c.institution_id, user_id=r.user_id, kind="staff")
+            s.add(m)
+        if m.role not in ("tpo", "principal"):
+            m.role = "hod"
+        m.status, m.email_verified, m.department_id = "active", True, m.department_id or d.id
+        has = (await s.execute(select(StaffAssignment).where(StaffAssignment.campus_id == c.id, StaffAssignment.user_id == r.user_id, StaffAssignment.department_id == d.id))).scalar_one_or_none()
+        if has is None:
+            s.add(StaffAssignment(id=uuid7(), campus_id=c.id, user_id=r.user_id, role="hod", department_id=d.id, status="approved", approved_by=admin_user.id, approved_at=datetime.now(UTC)))
+        else:
+            has.status, has.role, has.approved_by, has.approved_at = "approved", "hod", admin_user.id, datetime.now(UTC)
+        await sync_legacy(s, c.id, r.user_id, m.role, r.department_name)
+        r.status, r.campus_id, r.department_id = "approved", c.id, d.id
+        s.add(Notification(user_id=r.user_id, kind="campus", title="Your department is verified", body=f"{r.department_name}, {display_name(c)} is live with {DEPARTMENT_PLAN_STUDENTS} student seats. Open Campus (Staff) to set it up and invite your faculty."))
+        out = {"status": "approved", "campus_id": str(c.id), "department_id": str(d.id), "plan": c.plan}
+    from app.campus.access import forget_scope
+
+    forget_scope(r.user_id)
+    return out
 
 
 @admin.get("/aishe")

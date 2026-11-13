@@ -479,3 +479,153 @@ def test_no_hardcoded_engineering_assumptions_in_campus_code():
                 line = src[: m.start()].count("\n") + 1
                 bad.append(f"{f.relative_to(ROOT.parent)}:{line}: {m.group(0)}")
     assert not bad, bad
+
+
+# ---------------------------------------- branches and the 20-lakh college limit ----------------------------------------
+
+
+async def test_one_college_with_an_engineering_and_a_law_branch(world, client):
+    assert (await _call(client, "POST", "/api/campus/staff/branches", world.tpo, json={"branch": "Law"})).status_code == 409  # name this branch first
+    assert (await world.put("/api/campus/staff/branch-name", {"branch": "Engineering"}))["name"].endswith("— Engineering")
+    law = await world.post("/api/campus/staff/branches", {"branch": "Law"})
+    assert law["name"] == "Test College of Engineering — Law"
+    assert (await _call(client, "POST", "/api/campus/staff/branches", world.tpo, json={"branch": "law"})).status_code == 409  # no duplicates
+    branches = await world.get("/api/campus/staff/branches")
+    assert {b["branch"] for b in branches} == {"Engineering", "Law"} and all(b["limit"] == 2_000_000 for b in branches)
+    # The TPO switches to the Law branch: its own staff session, its own (empty) students, its own fields.
+    mine = (await _call(client, "GET", "/api/campus/my-staff-campuses", world.tpo_h)).json()
+    assert len(mine) == 2
+    r = await _call(client, "POST", "/api/campus/staff-session/otp", world.tpo_h, json={"campus_id": law["id"]})
+    assert r.json()["needed"]
+    r = await _call(client, "POST", "/api/campus/staff-session", world.tpo_h, json={"campus_id": law["id"], "otp": CODES[world.tpo_email]})
+    law_tpo = {**world.tpo_h, "x-staff-token": r.json()["staff_token"]}
+    me = (await _call(client, "GET", "/api/campus/staff/me", law_tpo)).json()
+    assert me["campus"]["branch"] == "Law" and me["campus"]["college"] == "Test College of Engineering"
+    assert (await _call(client, "GET", "/api/campus/staff/students?limit=50", law_tpo)).json()["items"] == []  # engineering students stay separate
+    llb = next(d for d in (await _call(client, "GET", "/api/campus/staff/degrees?q=L.L.B.", law_tpo)).json() if d["abbreviation"] == "L.L.B.")
+    assert (await _call(client, "PUT", "/api/campus/staff/degrees/offered", law_tpo, json={"degree_ids": [llb["id"]]})).status_code == 200
+    # Students find both branches by the college's name (once JobPilot has reviewed a college added by hand).
+    stu = await _user(client, "lawstudent@gmail.com")
+    assert (await _call(client, "GET", "/api/campus-profile/colleges?q=Test College", stu)).json() == []
+    assert (await _call(client, "POST", f"/api/admin/campuses/{world.campus_id}/approve", world.admin)).json()["approved"] == 2
+    found = (await _call(client, "GET", "/api/campus-profile/colleges?q=Test College", stu)).json()
+    assert {f["name"] for f in found} == {"Test College of Engineering — Engineering", "Test College of Engineering — Law"}
+
+
+async def test_each_college_or_branch_holds_up_to_20_lakh_students(world):
+    assert (await _call(world.client, "PUT", "/api/campus/staff/capacity", world.tpo, json={"level": "campus", "capacity": 2_500_000})).status_code == 422
+    await world.put("/api/campus/staff/capacity", {"level": "campus", "capacity": 2_000_000})
+    tree = await world.get("/api/campus/staff/capacity")
+    assert tree["capacity"] == 2_000_000
+
+
+# ---------------------------------------- the Department plan ----------------------------------------
+
+
+async def _register_department(client, admin: dict, email: str, department: str, college: str = "Sunrise Institute of Technology", branch: str = "Engineering") -> tuple[dict, dict]:
+    h = await _user(client, email)
+    r = await _call(client, "POST", "/api/campus/department-requests/start", h, json={"college_name": college, "branch": branch, "department_name": department, "city": "Nagpur", "state": "Maharashtra", "email": email})
+    assert r.status_code == 200, r.text
+    r = await _call(client, "POST", "/api/campus/department-requests/verify", h, json={"otp": CODES[email]})
+    assert r.status_code == 200 and r.json()["status"] == "pending", r.text
+    req = next(x for x in (await _call(client, "GET", "/api/admin/campuses/department-requests", admin)).json() if x["email"] == email)
+    r = await _call(client, "POST", f"/api/admin/campuses/department-requests/{req['id']}", admin, json={"approve": True})
+    assert r.status_code == 200, r.text
+    return h, r.json()
+
+
+async def test_a_department_registers_itself_and_is_live_after_verification(client):
+    admin = await _user(client, "admin@jobpilot.example")
+    h = await _user(client, "hod.cs@sunrise.ac.in")
+    body = {"college_name": "Sunrise Institute of Technology", "branch": "Engineering", "department_name": "Computer Science", "email": "hod.cs@gmail.com"}
+    assert (await _call(client, "POST", "/api/campus/department-requests/start", h, json=body)).status_code == 422  # personal email
+    body["email"] = "hod.cs@sunrise.ac.in"
+    assert (await _call(client, "POST", "/api/campus/department-requests/start", h, json=body)).status_code == 200
+    assert (await _call(client, "POST", "/api/campus/department-requests/verify", h, json={"otp": "000000" if CODES["hod.cs@sunrise.ac.in"] != "000000" else "111111"})).status_code == 422
+    r = await _call(client, "POST", "/api/campus/department-requests/verify", h, json={"otp": CODES["hod.cs@sunrise.ac.in"]})
+    assert r.json()["status"] == "pending"
+    # Pending: no portal access yet, and only JobPilot admins see the queue.
+    assert (await _call(client, "POST", "/api/campus/staff-session/otp", h, json={})).status_code in (403, 404)
+    assert (await _call(client, "GET", "/api/admin/campuses/department-requests", h)).status_code == 403
+    mine = (await _call(client, "GET", "/api/campus/department-requests/mine", h)).json()
+    assert [m["status"] for m in mine] == ["pending"]
+    queue = (await _call(client, "GET", "/api/admin/campuses/department-requests", admin)).json()
+    req = next(x for x in queue if x["email"] == "hod.cs@sunrise.ac.in")
+    assert req["existing_campus"] is None and req["department_name"] == "Computer Science"
+    assert (await _call(client, "POST", f"/api/admin/campuses/department-requests/{req['id']}", admin, json={"approve": False})).status_code == 422  # a rejection needs a reason
+    ok = (await _call(client, "POST", f"/api/admin/campuses/department-requests/{req['id']}", admin, json={"approve": True})).json()
+    assert ok["plan"] == "department"
+    hod = await _staff_token(client, h, "hod.cs@sunrise.ac.in")
+    me = (await _call(client, "GET", "/api/campus/staff/me", hod)).json()
+    assert me["role"] == "hod" and me["lead"] and not me["whole_campus"] and me["plan"] == "department"
+    assert me["scope"]["departments"] == [{"id": ok["department_id"], "name": "Computer Science", "plan_limit": 300}]
+    assert me["campus"]["name"] == "Sunrise Institute of Technology — Engineering"
+    # 300 seats per department; the HOD can't size the whole college.
+    cap = lambda b: _call(client, "PUT", "/api/campus/staff/capacity", hod, json=b)  # noqa: E731
+    assert (await cap({"level": "department", "ref_id": ok["department_id"], "capacity": 301})).status_code == 422
+    assert (await cap({"level": "department", "ref_id": ok["department_id"], "capacity": 300})).status_code == 200
+    assert (await cap({"level": "campus", "capacity": 5000})).status_code == 403
+    # Registering the same department twice is refused.
+    again = await _user(client, "someone@sunrise.ac.in")
+    assert (await _call(client, "POST", "/api/campus/department-requests/start", again, json=body | {"email": "someone@sunrise.ac.in"})).status_code == 409
+
+
+async def test_departments_of_one_college_share_a_campus_and_stay_apart(client):
+    admin = await _user(client, "admin@jobpilot.example")
+    cs_h, cs = await _register_department(client, admin, "hod.cs@sunrise.ac.in", "Computer Science")
+    ecs_h, ecs = await _register_department(client, admin, "hod.ecs@sunrise.ac.in", "Electronics and Computer Science")
+    assert cs["campus_id"] == ecs["campus_id"] and cs["department_id"] != ecs["department_id"]
+    hod_cs = await _staff_token(client, cs_h, "hod.cs@sunrise.ac.in")
+    hod_ecs = await _staff_token(client, ecs_h, "hod.ecs@sunrise.ac.in")
+    # Each HOD sets up their own department: degrees, programmes, batches. Not the other's.
+    be = next(d for d in (await _call(client, "GET", "/api/campus/staff/degrees?q=B.E.", hod_cs)).json() if d["abbreviation"] == "B.E.")
+    assert (await _call(client, "PUT", "/api/campus/staff/degrees/offered", hod_cs, json={"degree_ids": [be["id"]]})).status_code == 200
+    prog = {"degree_id": be["id"], "field_code": "0613", "duration_years": 4, "intake_per_year": 60}
+    assert (await _call(client, "POST", "/api/campus/staff/programs", hod_cs, json=prog | {"department_id": ecs["department_id"]})).status_code in (403, 404)
+    p_cs = (await _call(client, "POST", "/api/campus/staff/programs", hod_cs, json=prog | {"department_id": cs["department_id"]})).json()["id"]
+    b_cs = (await _call(client, "POST", "/api/campus/staff/batches", hod_cs, json={"program_id": p_cs, "admission_year": 2024})).json()["id"]
+    assert (await _call(client, "PUT", "/api/campus/staff/capacity", hod_ecs, json={"level": "department", "ref_id": cs["department_id"], "capacity": 100})).status_code == 403
+    # Roster: an HOD imports their own department; another department's rows are errors.
+    csv_text = (
+        "Roll No,Name,Department,Degree,Admission Year,College Email\n"
+        "CS-1,Asha Rao,Computer Science,B.E.,2024,asha@student.sunrise.ac.in\n"
+        "CS-2,Bilal Khan,Computer Science,B.E.,2024,bilal@student.sunrise.ac.in\n"
+        "CS-3,Chitra Iyer,Computer Science,B.E.,2024,chitra@student.sunrise.ac.in\n"
+        "E-1,Dev Patil,Electronics and Computer Science,,2024,dev@student.sunrise.ac.in\n"
+    )
+    r = await _call(client, "POST", "/api/campus/staff/roster/import", hod_cs, files={"file": ("roster.csv", csv_text.encode(), "text/csv")})
+    assert r.status_code == 202, r.text
+    await cjobs.run_pending(10)
+    job = (await _call(client, "GET", f"/api/campus/staff/jobs/{r.json()['job_id']}", hod_cs)).json()
+    assert job["result"]["imported"] == 3 and job["error_count"] == 1
+    assert (await _call(client, "GET", "/api/campus/staff/students?limit=50", hod_ecs)).json()["items"] == []
+    assert len((await _call(client, "GET", "/api/campus/staff/students?limit=50", hod_cs)).json()["items"]) == 3
+    # The department's own staff code: faculty join this department only, and its HOD approves them.
+    code = (await _call(client, "POST", "/api/campus/staff/staff-code", hod_cs, json={"expires_in_days": 30})).json()
+    assert code["department_id"] == cs["department_id"]
+    other = await _user(client, "prof2@sunrise.ac.in")
+    await _call(client, "POST", "/api/campus/staff-join/start", other, json={"code": code["code"], "email": "prof2@sunrise.ac.in"})
+    r = await _call(client, "POST", "/api/campus/staff-join/verify", other, json={"otp": CODES["prof2@sunrise.ac.in"], "role": "tpo"})
+    assert r.status_code in (403, 422)  # a department code never makes a TPO
+    fac = await _user(client, "prof@sunrise.ac.in")
+    start = (await _call(client, "POST", "/api/campus/staff-join/start", fac, json={"code": code["code"], "email": "prof@sunrise.ac.in"})).json()
+    assert [d["name"] for d in start["departments"]] == ["Computer Science"] and start["campus"].endswith("· Computer Science")
+    r = await _call(client, "POST", "/api/campus/staff-join/verify", fac, json={"otp": CODES["prof@sunrise.ac.in"], "role": "faculty", "batch_ids": [b_cs]})
+    assert r.status_code == 200, r.text
+    assert (await _call(client, "GET", "/api/campus/staff/members?status=pending", hod_ecs)).json() == []  # not their department
+    m = next(x for x in (await _call(client, "GET", "/api/campus/staff/members?status=pending", hod_cs)).json() if x["email"] == "prof@sunrise.ac.in")
+    assert (await _call(client, "POST", f"/api/campus/staff/members/{m['membership_id']}", hod_ecs, json={"action": "approve"})).status_code == 403
+    assert (await _call(client, "POST", f"/api/campus/staff/members/{m['membership_id']}", hod_cs, json={"action": "approve", "role": "tpo"})).status_code == 403  # no promotions to TPO
+    assert (await _call(client, "POST", f"/api/campus/staff/members/{m['membership_id']}", hod_cs, json={"action": "approve"})).status_code == 200
+    prof = await _staff_token(client, fac, "prof@sunrise.ac.in")
+    assert len((await _call(client, "GET", "/api/campus/staff/students?limit=50", prof)).json()["items"]) == 3  # their Computer Science batch
+    # Seats: when the department is full, the next student waits (never a silent block). Exact count, not the rollup.
+    async with session_scope() as s:
+        await s.execute(text("UPDATE departments SET plan_limit = 2 WHERE id = :d"), {"d": cs["department_id"]})
+    statuses = []
+    for name in ("asha", "bilal", "chitra"):
+        stu = await _user(client, f"{name}@gmail.com")
+        mail = f"{name}@student.sunrise.ac.in"
+        assert (await _call(client, "POST", "/api/campus-profile/claim/start", stu, json={"campus_id": cs["campus_id"], "college_email": mail})).status_code == 200
+        statuses.append((await _call(client, "POST", "/api/campus-profile/claim/verify", stu, json={"otp": CODES[mail]})).json()["status"])
+    assert statuses == ["active", "active", "waitlisted"]

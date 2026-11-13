@@ -132,6 +132,7 @@ async def _roster_import(job_id: uuid.UUID) -> None:
         job = await s.get(CampusJob, job_id)
         campus = await s.get(Campus, job.campus_id)
         data, filename, by = decrypt(job.blob), job.payload.get("filename", "roster.csv"), job.created_by
+        dept_scope = {uuid.UUID(d) for d in job.payload.get("department_scope") or []}
         depts = {d.name.lower(): d.id for d in (await s.execute(select(Department).where(Department.campus_id == campus.id))).scalars()}
         progs = (await s.execute(select(Program, Degree).join(Degree, Degree.id == Program.degree_id).where(Program.campus_id == campus.id))).all()
         batches = {(b.program_id, b.admission_year): b for b in (await s.execute(select(Batch).where(Batch.campus_id == campus.id))).scalars()}
@@ -198,6 +199,8 @@ async def _roster_import(job_id: uuid.UUID) -> None:
         dept_id = depts.get((r.get("department") or "").strip().lower()) if r.get("department") else None
         if r.get("department") and not dept_id:
             problems.append(("department", f"no department called '{r['department']}' (add it in Setup first)"))
+        if dept_scope and dept_id not in dept_scope:
+            problems.append(("department", "outside your department (an HOD imports their own department's students)"))
         prog = by_prog.get((dept_id, (r.get("degree") or "").strip().lower())) if dept_id and r.get("degree") else None
         if r.get("degree") and dept_id and not prog:
             problems.append(("degree", f"'{r['degree']}' isn't a programme of this department (add it in Setup first)"))

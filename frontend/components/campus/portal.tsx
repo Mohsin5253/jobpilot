@@ -15,10 +15,13 @@ import { api } from "@/lib/api";
 import { cn } from "@/lib/utils";
 
 export type StaffMe = {
-  campus: { id: string; name: string; city: string; state: string; student_id_label: string; pending_subjects_label: string | null; score_scale: { type: string; max?: number } | null; term_type: string; allowed_email_domains: string[]; locale: string };
+  campus: { id: string; name: string; college: string; branch: string; institution_id: string; city: string; state: string; student_id_label: string; pending_subjects_label: string | null; score_scale: { type: string; max?: number } | null; term_type: string; allowed_email_domains: string[]; locale: string };
   role: "tpo" | "principal" | "hod" | "faculty" | "coordinator" | "university_admin";
   whole_campus: boolean;
-  scope: { departments: { id: string; name: string }[]; programs: string[]; batches: string[] };
+  plan: "pilot" | "department" | "college" | "university";
+  /** Runs setup, staff, roster and seats: the TPO / Principal, or the HOD on the Department plan. */
+  lead: boolean;
+  scope: { departments: { id: string; name: string; plan_limit: number | null }[]; programs: string[]; batches: string[] };
 };
 export const ROLE_LABEL: Record<StaffMe["role"], string> = { tpo: "TPO", principal: "Principal", hod: "HOD", faculty: "Faculty", coordinator: "Placement coordinator", university_admin: "University admin" };
 
@@ -26,7 +29,7 @@ export function useStaffMe() {
   return useQuery({ queryKey: ["campus-staff-me"], queryFn: () => api.get<StaffMe>("/campus/staff/me"), staleTime: 60_000 });
 }
 
-const TABS: { href: string; label: string; roles?: StaffMe["role"][] }[] = [
+const TABS: { href: string; label: string; roles?: StaffMe["role"][]; lead?: boolean }[] = [
   { href: "/campus", label: "Dashboard" },
   { href: "/campus/students", label: "Students" },
   { href: "/campus/verify", label: "Verification queue" },
@@ -34,18 +37,32 @@ const TABS: { href: string; label: string; roles?: StaffMe["role"][] }[] = [
   { href: "/campus/pipeline", label: "AI proposals" },
   { href: "/campus/import", label: "Roster import", roles: ["tpo", "principal", "hod"] },
   { href: "/campus/staff", label: "Staff", roles: ["tpo", "principal", "hod"] },
-  { href: "/campus/setup", label: "Setup", roles: ["tpo", "principal"] },
+  { href: "/campus/setup", label: "Setup", lead: true },
 ];
 
 export function PortalNav() {
   const pathname = usePathname();
   const { data: me } = useStaffMe();
+  const { data: mine } = useQuery({ queryKey: ["my-staff-campuses"], queryFn: () => api.get<{ id: string; name: string; role: string }[]>("/campus/my-staff-campuses"), staleTime: 60_000 });
   return (
     <div className="space-y-3">
       <div className="flex flex-wrap items-baseline justify-between gap-2">
         <div>
           <div className="eyebrow">Campus portal{me ? ` · ${ROLE_LABEL[me.role]}${me.scope.departments.length && !me.whole_campus ? ` · ${me.scope.departments.map((d) => d.name).join(", ")}` : ""}` : ""}</div>
           <h1 className="font-display text-[clamp(24px,3vw,32px)] leading-tight">{me?.campus.name ?? "Campus"}</h1>
+          {mine && mine.length > 1 && (
+            <label className="mt-1 flex items-center gap-2 text-[13px] text-text-2">
+              Branch
+              <select
+                value={me?.campus.id ?? ""}
+                onChange={(e) => (window.location.href = `/staff-access?campus=${e.target.value}&next=/campus`)}
+                className="h-9 rounded-[var(--radius-control)] border border-border bg-surface px-2 text-[13px]"
+                aria-label="Switch college or branch"
+              >
+                {mine.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+              </select>
+            </label>
+          )}
         </div>
         <button
           type="button"
@@ -59,7 +76,7 @@ export function PortalNav() {
         </button>
       </div>
       <nav aria-label="Campus portal" className="-mx-1 flex gap-1 overflow-x-auto pb-1">
-        {TABS.filter((t) => !t.roles || (me && t.roles.includes(me.role))).map((t) => {
+        {TABS.filter((t) => (t.lead ? !!me?.lead : !t.roles || (me && t.roles.includes(me.role)))).map((t) => {
           const on = t.href === "/campus" ? pathname === "/campus" : pathname.startsWith(t.href);
           return (
             <Link key={t.href} href={t.href} aria-current={on ? "page" : undefined} className={cn("shrink-0 rounded-full px-3.5 py-2 text-[13px]", on ? "bg-elevated font-medium text-text" : "text-text-2 hover:text-text")}>

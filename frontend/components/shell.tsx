@@ -379,7 +379,7 @@ function SidebarBody({
         <ul className="space-y-0.5">
           {nav.map((item) => {
             const n = count(item, overview);
-            const on = pathname.startsWith(item.href);
+            const on = isOn(pathname, item.href);
             const Icon = item.icon;
             return (
               <li key={item.href}>
@@ -437,13 +437,13 @@ function SidebarBody({
 
 function TabBar({ nav, overview, pathname, onMore }: { nav: NavItem[]; overview?: Overview; pathname: string; onMore: () => void }) {
   const tabs = TABS.map((h) => nav.find((n) => n.href === h)!).filter(Boolean);
-  const moreOn = !TABS.some((h) => pathname.startsWith(h));
+  const moreOn = !TABS.some((h) => isOn(pathname, h));
   const cell = "relative flex h-16 flex-col items-center justify-center gap-1 text-[11px] font-medium transition-colors duration-[var(--dur-fast)]";
   return (
     <nav aria-label="Main" className="fixed inset-x-0 bottom-0 z-40 border-t border-border bg-surface/92 pb-[env(safe-area-inset-bottom)] backdrop-blur-xl md:hidden">
       <ul className="grid grid-cols-5">
         {tabs.map((item) => {
-          const on = pathname.startsWith(item.href);
+          const on = isOn(pathname, item.href);
           const n = count(item, overview);
           const Icon = item.icon;
           return (
@@ -569,6 +569,11 @@ function IconButton({ label, onClick, className, children }: { label: string; on
   );
 }
 
+/** "/campus" is on for /campus and /campus/... but not for /campus-profile (a different page). */
+function isOn(pathname: string, href: string): boolean {
+  return pathname === href || pathname.startsWith(href.endsWith("/") ? href : `${href}/`);
+}
+
 export function AppShell({ children }: { children: ReactNode }) {
   const pathname = usePathname();
   const { data: me } = useMe();
@@ -590,10 +595,12 @@ export function AppShell({ children }: { children: ReactNode }) {
   const t = useT();
   const nav: NavItem[] = [
     ...NAV.map((n) => ({ ...n, label: NAV_KEYS[n.href] ? t(NAV_KEYS[n.href]) : n.label })),
-    ...(me?.campus_staff ? [{ href: "/campus", label: "Campus portal", icon: Building2 }] : []),
+    // Staff (TPO, HOD, faculty…) see both campus pages; students only theirs. The staff page is also guarded by the
+    // middleware and the API, so hiding the link is convenience, not security.
+    ...(me?.campus_staff ? [{ href: "/campus", label: t("nav.campus_staff"), icon: Building2 }] : []),
     ...(me?.is_admin ? [{ href: "/admin", label: "Admin", icon: Gauge }] : []),
   ];
-  const current = nav.find((n) => pathname.startsWith(n.href));
+  const current = nav.find((n) => isOn(pathname, n.href));
   const body = { nav, overview, me, pathname, onLogout: logout };
 
   return (

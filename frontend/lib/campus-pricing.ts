@@ -16,12 +16,14 @@ export const CAMPUS_PILOT_STUDENTS = 200;
 export const CAMPUS_DEPARTMENT_INR = 4999;
 export const CAMPUS_DEPARTMENT_STUDENTS = 300;
 export const CAMPUS_COLLEGE_INR = 29999;
-export const CAMPUS_COLLEGE_STUDENTS = 2000;
+export const CAMPUS_COLLEGE_STUDENTS = 2_000_000; // 20 lakh, per college or per branch
 export const CAMPUS_UNIVERSITY_INR = 99999;
 export const CAMPUS_GOVT_DISCOUNT = 25; // % off for government and government-aided colleges
 export const CAMPUS_REFUND_DAYS = 30;
 
 export const inr = (n: number) => `₹${n.toLocaleString("en-IN")}`;
+/** 20,00,000 -> "20 lakh"; smaller numbers as they are. */
+export const students = (n: number) => (n >= 100_000 && n % 100_000 === 0 ? `${n / 100_000} lakh` : n.toLocaleString("en-IN"));
 /** The lowest paid campus price, for the landing page's "from" figure. */
 export const CAMPUS_FROM_INR = CAMPUS_DEPARTMENT_INR;
 
@@ -43,7 +45,7 @@ export const CAMPUS_PLANS: CampusPlan[] = [
     per: "per year",
     note: `One department, up to ${CAMPUS_DEPARTMENT_STUDENTS} students · unlimited staff`,
     bestFor: "A single HOD running placements",
-    features: ["Everything in Pilot", "Jobs posted from recruiter links, matched to students in minutes", "Department-scoped views", "Precision report on the AI's proposals", "Email support"],
+    features: ["Everything in Pilot", "Register your department yourself: live after we verify it", "The HOD runs it: setup, staff, roster and seats", "Jobs posted from recruiter links, matched to students in minutes", "Precision report on the AI's proposals", "Email support"],
     cta: "Get started",
   },
   {
@@ -51,10 +53,11 @@ export const CAMPUS_PLANS: CampusPlan[] = [
     name: "College",
     price: inr(CAMPUS_COLLEGE_INR),
     per: "per year",
-    note: `Whole college, up to ${CAMPUS_COLLEGE_STUDENTS.toLocaleString("en-IN")} students · unlimited staff`,
+    note: `Whole college or one branch, up to ${students(CAMPUS_COLLEGE_STUDENTS)} students · unlimited staff`,
     bestFor: "The whole placement cell",
     features: [
-      "Every department, unlimited TPO / HOD / faculty accounts",
+      "Every department and field, unlimited TPO / HOD / faculty accounts",
+      "Up to 20 lakh students: degrees, departments, programmes and batches set up your way",
       "Department-scoped views for HODs and faculty",
       "Live updates to every staff dashboard as students move through rounds",
       "Audit log of every staff view of student data",
@@ -68,9 +71,9 @@ export const CAMPUS_PLANS: CampusPlan[] = [
     name: "University",
     price: inr(CAMPUS_UNIVERSITY_INR),
     per: "per university / year",
-    note: "One price for the whole university: every campus and constituent college, unlimited students and staff",
+    note: "One price for the whole university: every campus, branch and constituent college, no limit on students or staff",
     bestFor: "Universities and college groups",
-    features: ["Everything in College, for every campus", "Each campus with its own staff, codes and data", "Combined placement reports across campuses, on request", "Data processing agreement (DPDP Act)", "A named success manager"],
+    features: ["Everything in College, for every campus and branch", "Branches with different fields under one name (e.g. Engineering and Law), each with its own staff, codes and data", "Combined placement reports across campuses, on request", "Data processing agreement (DPDP Act)", "A named success manager"],
     cta: "Talk to us",
   },
 ];
@@ -102,7 +105,15 @@ export const CAMPUS_FAQ: { q: string; a: string }[] = [
   },
   {
     q: "How is the University plan priced?",
-    a: `One flat price per university (${inr(CAMPUS_UNIVERSITY_INR)} a year), however many campuses, constituent colleges, students or staff it has.`,
+    a: `One flat price per university (${inr(CAMPUS_UNIVERSITY_INR)} a year), however many campuses, branches, constituent colleges, students or staff it has: there's no student limit.`,
+  },
+  {
+    q: "Our college has an engineering branch and a law branch under the same name. How does that work?",
+    a: `Each branch is set up as its own campus under your college's name: its own fields, degrees, departments, staff, staff code and data, and up to ${students(CAMPUS_COLLEGE_STUDENTS)} students each. Your TPO adds a branch in Campus → Setup and switches between them in the portal. The College plan covers one branch; the University plan covers them all.`,
+  },
+  {
+    q: "Can one department sign up without the whole college?",
+    a: `Yes, on the Department plan. The HOD registers the department (for example Computer Science or Electronics and Computer Science) in Campus (Staff) with an email on the college's own domain. We check it belongs to that college and then it's live with ${CAMPUS_DEPARTMENT_STUDENTS} student seats and its own staff code. Several departments of one college can each have their own plan. When a department is full, new students wait on a list rather than being turned away silently.`,
   },
   { q: "Do students pay anything?", a: "No. Students use JobPilot free; Pro stays optional for them. The college plan covers the placement-cell tools." },
 ];
