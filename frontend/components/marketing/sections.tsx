@@ -13,7 +13,7 @@ import { StatusPill } from "@/components/ui/status-dot";
 import type { AgentKey } from "@/config/agents";
 import { useStartDemo } from "@/lib/demo";
 import { cn } from "@/lib/utils";
-import { CAMPUS_COLLEGE_INR, CAMPUS_FROM_INR, CAMPUS_UNIVERSITY_INR, inr } from "@/lib/campus-pricing";
+import { CAMPUS_COLLEGE_INR, CAMPUS_COLLEGE_STUDENTS, CAMPUS_DEPARTMENT_INR, CAMPUS_DEPARTMENT_STUDENTS, CAMPUS_FROM_INR, CAMPUS_UNIVERSITY_INR, inr, students } from "@/lib/campus-pricing";
 
 // The one place the plan numbers live. Payments aren't live yet: Pro is switched on by hand during the beta.
 const FREE_SENDS_DEFAULT = 5;
@@ -514,7 +514,13 @@ export function WhatsNew() {
     { icon: <Download />, tag: "Interview", title: "A report you can keep", text: "Every question, your answer, its score and how to answer it, with sample answers from your own resume. PDF or Word." },
     { icon: <Mic />, tag: "Voice", title: "Speech that spells your words", text: "Word-for-word transcription that gets your name, college, projects and tools right, and words you add yourself." },
     { icon: <Users />, tag: "Agents", title: "Every agent works every run", text: "Nothing new? The crew re-checks your open jobs, re-ranks them on your current resume and finishes what's missing. Matches are checked requirement by requirement." },
-    { icon: <Building2 />, tag: "Campus", title: "A portal for placement cells", text: "TPO, HOD and faculty roles, a live pipeline round by round, and AI job matches staff approve. From ₹4,999 a year." },
+    { icon: <Building2 />, tag: "Campus", title: "Any college, any field", text: "Engineering, law, commerce, nursing, arts or medicine: degrees come from the national list, and each college sets its own grading scale, departments and batches." },
+    { icon: <ShieldCheck />, tag: "Campus", title: "A staff-only portal, verified", text: "Staff join with the college's code and an email on its own domain, then wait for approval. TPOs sign in with a one-time code, and every view of a student is logged." },
+    { icon: <GitBranch />, tag: "Campus", title: "Branches under one college name", text: `An engineering branch and a law branch can each run as their own campus, with up to ${students(CAMPUS_COLLEGE_STUDENTS)} students each. The University plan has no student limit.` },
+    { icon: <Users />, tag: "Campus", title: "Departments can sign up on their own", text: `An HOD registers their department, for example Computer Science, and it goes live once we verify it: ${CAMPUS_DEPARTMENT_STUDENTS} students, its own staff code, from ${inr(CAMPUS_DEPARTMENT_INR)} a year.` },
+    { icon: <Trophy />, tag: "Campus", title: "Internships, roles and awards", text: "Students add them with proof and staff verify them. Staff see a student by name only if that student chooses to share with the college; otherwise only totals." },
+    { icon: <Target />, tag: "Campus", title: "Built for 40 lakh students", text: "Tested with 40 lakh student records. No student is silently turned away: when seats run out, they join a waitlist and staff are told." },
+    { icon: <BadgeCheck />, tag: "Campus", title: "One account, the right pages", text: "Everyone gets Campus (Student). Teachers and placement staff also get Campus (Staff); students never see it." },
   ];
   return (
     <Wrap id="whats-new">
@@ -789,6 +795,7 @@ export function Campus() {
             "Internship-to-PPO tracking",
             "A cohort dashboard for officers; student rows only with their consent",
             "TPO, HOD and faculty roles; AI job matches staff approve",
+            "Sign up as a whole college, one branch or one department",
           ]}
         />
         <Link href="/campus-pricing" className={buttonClass({ variant: "secondary", className: "mt-6" })}>
