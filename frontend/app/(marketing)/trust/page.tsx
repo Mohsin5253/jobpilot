@@ -184,7 +184,7 @@ export default async function TrustPage() {
             "What the agents make for you: matches, tailored resumes, drafts and your application tracker.",
             "Your mailbox connection, if you add one: for Gmail, a Google token that can only send email; for other providers, an app password. Either is encrypted with a key kept outside the database, and used only to send what you approve, at least 90 seconds apart.",
             "Your consents: each purpose you agreed to, when, and which version of the notice you saw.",
-            "If you join your college’s workspace: placement officers see only totals unless you choose to share. That choice is enforced by the database itself, and every officer view is logged.",
+            "If you join your college’s workspace, your college’s own records about you (name, roll number, programme, batch, score) are visible to the placement staff responsible for you. What you create in JobPilot (applications, resume, matches, internships, roles, awards) is shown to them by name only if you choose to share it; otherwise they see only totals. Both rules are enforced by the database itself, and every staff view is logged.",
             "Run traces and AI usage records: which agent ran, how long it took, tokens and cost.",
             "Proof Link opens: the time and browser family only (for example “chrome-mobile”), counted on our server. No IP addresses, cookies or tracking pixels.",
           ]}

@@ -86,6 +86,12 @@ class Worker:
         self.scheduler.add_job(refresh_question_trends, "cron", day_of_week="sun", hour=4, minute=40, id="question-trends", replace_existing=True, max_instances=1)
         # Proof-of-skills pack: re-read linked GitHub / Codeforces profiles once a week.
         self.scheduler.add_job(refresh_evidence, "cron", hour=4, minute=20, id="evidence", replace_existing=True, max_instances=1)
+        # Campus v2: roster imports, eligibility and rollups off the request path; audit-log partitions ahead of time.
+        from app.campus.jobs import maintenance as campus_maintenance
+        from app.campus.jobs import run_pending as campus_jobs
+
+        self.scheduler.add_job(campus_jobs, "interval", seconds=5, id="campus-jobs", replace_existing=True, max_instances=1, kwargs={"limit": 5})
+        self.scheduler.add_job(campus_maintenance, "cron", minute=7, id="campus-maintenance", replace_existing=True, max_instances=1)
         self.scheduler.start()
         self._tasks = [asyncio.create_task(self._slot(i)) for i in range(WORKER_CONCURRENCY)]
         log.info("worker.started", worker=self.id, slots=WORKER_CONCURRENCY)

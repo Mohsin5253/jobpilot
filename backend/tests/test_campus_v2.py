@@ -15,15 +15,33 @@ DATA = Path(__file__).resolve().parents[1] / "evals" / "data"
 FIELDS = ["company", "role", "compensation", "min_cgpa", "branches", "max_backlogs", "grad_years", "register_by", "rounds"]
 
 
+# An engineering college's departments, with the aliases its TPO would add in Setup: data, not product code.
+ENGINEERING = {
+    "CSE": "Computer Science and Engineering (CSE, CS, Computer Science, Computer Engineering, Computer Engg, Comp Engg, Comp)",
+    "IT": "Information Technology (IT)",
+    "ECE": "Electronics and Communication (ECE, ENTC, E&TC, EXTC, Electronics & Telecommunication, Electronics and Telecommunication, Electronics & Communication, Electronics and Tele)",
+    "EEE": "Electrical and Electronics (EEE, Electrical & Electronics)",
+    "EE": "Electrical Engineering (EE, Electrical Engg, Electrical)",
+    "MECH": "Mechanical (Mech, Mechanical Engineering)",
+    "CIVIL": "Civil Engineering (Civil)",
+    "AIDS": "AI and Data Science (AI&DS, AIDS, AI & DS, AI and DS, Artificial Intelligence and Data Science, Artificial Intelligence & Data Science)",
+    "AIML": "AI and Machine Learning (AIML, AI&ML, AI & ML, AI and ML, Artificial Intelligence and Machine Learning, Artificial Intelligence & Machine Learning)",
+    "CHEM": "Chemical Engineering (Chemical)",
+    "MCA": "MCA",
+}
+CODE = {v: k for k, v in ENGINEERING.items()}
+
+
 def _accuracy(name: str) -> tuple[int, int]:
     ok = tot = 0
     for line in (DATA / name).read_text().splitlines():
         row = json.loads(line)
-        p, e = parse_circular(row["text"], today=date(2026, 11, 10)), row["expected"]
+        p, e = parse_circular(row["text"], today=date(2026, 11, 10), departments=list(ENGINEERING.values())), row["expected"]
         got = {
-            "company": p["company"], "role": p["role"], "compensation": p["compensation"], "min_cgpa": p["eligibility"].get("min_cgpa"),
-            "branches": sorted(p["eligibility"].get("branches", [])), "max_backlogs": p["eligibility"].get("max_backlogs"),
-            "grad_years": p["eligibility"].get("grad_years", []), "register_by": p["register_by"], "rounds": [r["name"] for r in p["rounds"]],
+            "company": p["company"], "role": p["role"], "compensation": p["compensation"],
+            "min_cgpa": p["eligibility"].get("min_score") if p["eligibility"].get("score_type") == "points" else None,
+            "branches": sorted(CODE[b] for b in p["eligibility"].get("departments", [])), "max_backlogs": p["eligibility"].get("max_pending_subjects"),
+            "grad_years": p["eligibility"].get("graduation_years", []), "register_by": p["register_by"], "rounds": [r["name"] for r in p["rounds"]],
         }
         for f in FIELDS:
             tot += 1
@@ -89,7 +107,7 @@ async def test_dashboard_aggregates_everyone_but_lists_only_sharers_and_is_audit
         assert ev.action == "tpo_view" and ev.detail == {"rows": 1}
 
     parsed = (await client.post("/api/college/drives/parse", json={"text": (DATA / "drive_circulars.jsonl").read_text().splitlines()[1] and json.loads((DATA / "drive_circulars.jsonl").read_text().splitlines()[1])["text"]})).json()
-    assert parsed["company"] == "Persistent Systems" and parsed["eligibility"]["min_cgpa"] == 7.0
+    assert parsed["company"] == "Persistent Systems" and parsed["eligibility"]["min_score"] == 7.0 and parsed["eligibility"]["score_type"] == "points"
     body = {"company": parsed["company"], "role": parsed["role"], "compensation": parsed["compensation"], "eligibility": {"min_cgpa": 7.0, "branches": ["CSE"], "max_backlogs": 1, "grad_years": [2027]}, "rounds": []}
     r = (await client.post("/api/college/drives", json=body)).json()
     assert r["notified"] == 1  # the eligible student who shares; the other isn't notified

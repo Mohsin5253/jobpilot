@@ -183,4 +183,22 @@ async def public_proof(slug: str, session: SessionDep) -> dict:
     resume = ResumeData.model_validate(p.resume or {})
     edu = resume.education[0] if resume.education else None
     headline = " · ".join(x for x in [(edu.degree if edu else ""), (edu.school if edu else "")] if x)
-    return public_view(p.evidence or {}, resume.name or "JobPilot candidate", headline)
+    view = public_view(p.evidence or {}, resume.name or "JobPilot candidate", headline)
+    # Entries the student's college verified and the student chose to show: "Verified by <college>". Never stipends.
+    from sqlalchemy import text as _text
+
+    rows = (
+        await session.execute(
+            _text("SELECT a.kind, a.sub_type, a.category, a.title, a.organisation, a.level, a.position, a.start_date, a.end_date, a.ongoing, c.name AS college "
+                  "FROM student_achievements a JOIN campuses c ON c.id = a.campus_id WHERE a.user_id = :u AND a.status = 'verified' AND a.show_on_proof_page "
+                  "ORDER BY a.start_date DESC NULLS LAST LIMIT 30"),
+            {"u": p.user_id},
+        )
+    ).all()
+    view["college_verified"] = [
+        {"kind": r.kind, "type": r.sub_type or r.category, "title": r.title, "organisation": r.organisation, "level": r.level, "position": r.position,
+         "start": r.start_date.isoformat() if r.start_date else None, "end": r.end_date.isoformat() if r.end_date else None, "ongoing": r.ongoing,
+         "verified_by": r.college}
+        for r in rows
+    ]
+    return view

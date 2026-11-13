@@ -1,0 +1,202 @@
+aishe_id,abbreviation,name,aishe_level,isced_level,isced_fields
+001,Acharya,Acharya,3,7,022
+002,Alankar,Alankar,4,6,022
+003,Anu Parangat,Anu Parangat,2,7,0232 031
+004,Ayurveda Vachaspati,Ph.D in Ayurveda,1,8,0912
+005,Ayurvedacharya,Ayurvedacharya,4,6,0912
+006,B.A.,Bachelor of Arts,4,6,02
+007,B.A. B.Ed.,"Bachelor of Arts, Bachelor of Education",8,6,011
+008,B.Agri.,Bachelor of Agriculture,4,6,0811
+009,B.Architecture,Bachelor of Architecture,4,6,071
+010,B.Ch.E.,Bachelor of Chemical Engineering,4,6,071
+011,B.Chem.Tech.,Bachelor of Chemical Technology,4,6,071
+012,B.Com.,Bachelor of Commerce,4,6,0411
+013,B.Com. B.Ed.,"Bachelor of Commerce, Bachelor of Education",8,6,011
+014,B.Com. L.L.B.,"Bachelor of Commerce, Bachelor of Law",8,6,0421
+015,B.Dance,Bachelor of Dance,4,6,0213
+016,B.Des.,Bachelor of Design,4,6,0212
+017,B.Ed.,Bachelor of Education,4,6,011
+018,B.J.M.C.,Bachelor of Journalism and Mass Communication,4,6,0321
+019,B.Lib.I.Sc.,Bachelor of Library & Information Science,4,6,0322
+020,B.Lib.Sc.,Bachelor of Library Science,4,6,0322
+021,B.Litt.,Bachelor of Literature,4,6,0232
+022,B.Mus.,Bachelor of Music,4,6,0213
+023,B.Nat.(Ayu),Bachelor of Ayurved in Naturopathy,4,6,0912
+024,B.Nat.(Yogic Sciences),Bachelor of Naturopathy and Yogic Sciences,4,6,1014
+025,B.Optom.,Bachelor of Clinical Optometry,4,6,0912
+026,B.Pharm.(Ayu.),Bachelor of Ayurved in Pharmacy,4,6,0912
+027,B.Pharm.,Bachelor of Pharmacy,4,6,0912
+028,B.Plan.,Bachelor of Planning,4,6,071
+029,B.S.Course,Bachelor of Science (Physician Assistant and Emergency & Trauma Care Management),4,6,0912
+030,B.Sc.,Bachelor of Science,4,6,0212 0221 0223 0314 0322 05 0532 061 0811 0831 0841 0912 1011 1031 1032
+031,B.Sc.(Nursing),Bachelor of Science in Nursing,4,6,0912
+032,B.Sc.(Sericulture),Bachelor of Science in Sericulture,4,6,0811
+033,B.Sc. B.Ed.,"Bachelor of Science, Bachelor of Education",8,6,011
+034,B.Stat.,Bachelor of Statistics,4,6,05
+035,B.Tech M.Tech,"Bachelor of Technology, Master of Technology",8,7,071
+036,B.Tech.,Bachelor of Technology,4,6,071
+037,B.V.Sc.,Bachelor of Veterinary Science,4,6,0841
+038,B.V.Sc.&A.H.,Bachelor of Veterinary Science & Animal Husbandry,4,6,0841
+039,B.A. L.L.B.,"Bachelor of Arts, Bachelor of Law or Laws",8,6,0421
+040,B.A.M.,Bachelor of Ayurved Medicine,4,6,0912
+041,B.A.M.S.,Bachelor of Ayurved Medicine & Surgery,4,6,0912
+042,B.A.S.L.P.,Bachelor of Audiology and Speech Language Pathology,4,6,0912
+043,B.B.A.,Bachelor of Business Administration,4,6,0413
+044,B.B.M.,Bachelor of Business Management,4,6,0413
+045,B.B.S.,Bachelor of Business Studies,4,6,0413
+046,B.C.A.,Bachelor of Computer Applications,4,6,061
+047,B.C.E.,Bachelor of Civil Engineering,4,6,071
+048,B.C.L.,Bachelor of Civil Law,4,6,0421
+049,B.D.S.,Bachelor of Dental Surgery,4,6,0912
+050,B.E.,Bachelor of Engineering,4,6,071
+051,B.F.A.,Bachelor of Fine Arts,4,6,0213
+052,B.F.Sc.,Bachelor of Fisheries Science,4,6,0831
+053,B.G.L.,Bachelor of General Law,4,6,0421
+054,B.H.M.,Bachelor of Hotel Management,4,6,0413
+055,B.H.M.C.T.,Bachelor of Hotel Management and Catering Technology,4,6,0413
+056,B.H.M.S.,Bachelor of Homeopathic Medicine and Surgery,4,6,0912
+057,B.H.M.T.T.,"Bachelor of Hotel Management, Travel and Tourism",4,6,0413
+058,B.H.T.M.,Bachelor of Hotel and Tourism Management,4,6,0413
+059,B.I.B.F.,Bachelor of International Business and Finance,4,6,0413
+060,B.I.M.,Bachelor of Indian Medicine,4,6,0912
+061,B.J.,Bachelor of Journalism,4,6,0321
+062,B.L.,Bachelor of Law or Laws,4,6,0421
+063,B.M.M.,Bachelor of Multi Media,4,6,0213
+064,B.O.L.,Bachelor of Oriental Learning,4,6,022
+065,B.O.T.,Bachelor of Occupational Therapy,4,6,0912
+066,B.P.A.,Bachelor of Performing Arts,4,6,0213
+067,B.P.E.,Bachelor of Physical Education,4,6,1014
+068,B.P.Ed.,Bachelor of Physical Education,4,6,1014
+069,B.P.S.,Bachelor of Professional Studies,4,6,0411
+070,B.P.T.,Bachelor of Physiotherapy,4,6,0912
+071,B.S. M.S.,"Bachelor of Science, Master of Science",8,7,05 061 071
+072,B.S.M.S.,Bachelor of Sridhar Medicine and Surgery,4,6,0912
+073,B.S.S.,Bachelor in Social Sciences,4,6,031
+074,B.S.W.,Bachelor of Social Work,4,6,0923
+075,B.U.M.S.,Bachelor of Unani Medicine and Surgery,4,6,0912
+076,Certificate,Certificate,7,4,011 0212 0213 022 0221 0223 0231 0232 031 0314 0321 0322 0411 0413 0421 05 0532 061 071 0811 0831 0841 0912 0921 0923 1011 1014 1031 1032
+077,C.P.A.,Certified Public,3,7,0411
+078,D.Litt.,Doctor of Literature,1,8,0232
+079,D.Mus.,Doctor of Music,1,8,0213
+080,D.Phil.,Doctor of Philosophy,1,8,031
+081,D.Sc.,Doctor of Science,1,8,05
+082,Diploma,Diploma,6,5,011 0212 0213 022 0221 0223 0231 0232 031 0314 0321 0322 0411 0413 0421 05 0532 061 071 0811 0831 0841 0912 0921 0923 1011 1014 1031 1032
+083,D.M.,Doctor of Medicine,1,8,0912
+084,D.O.L.,Doctor of Oriental Learning,1,8,022
+085,Hindi Shiksha Visharad,Hindi Shiksha Visharad,4,6,011
+086,Integrated Ph.D,Integrated Doctor of Philosophy,8,8,011 0212 0213 022 0221 0223 0231 0232 031 0314 0321 0322 0411 0413 0421 05 0532 061 071 0811 0831 0841 0912 0923 1011 1014 1031 1032
+087,L.L.B.,Bachelor of Law or Laws,4,6,0421
+088,L.L.D.,Doctor of Laws,1,8,0421
+089,L.L.M.,Master of Law or Laws,3,7,0421
+090,M.A. B.Ed.,"Master of Arts, Bachelor of Education",8,7,011
+091,M.Arch.,Master of Architecture,3,7,071
+092,M.Ch.,Master of Chirurgiae,1,8,0912
+093,M.Com.,Master of Commerce,3,7,0411
+094,M.Com. B.Ed.,"Master of Commerce, Bachelor of Education",8,7,011
+095,M.Dance,Master of Dance,3,7,0213
+096,M.Des.,Master of Design,3,7,0212
+097,M.Ed.,Master of Education,3,7,011
+098,M.F.M.,Master of Financial Management,3,7,0413
+099,M.F.T.,Master of Foreign Trade,3,7,0411
+100,M.H.R.D.,Master of Human Resource Development,3,7,0413
+101,M.I.B.,Master of International Business,3,7,0413
+102,M.Lib.Sc.,Master of Library Science,3,7,0322
+103,M.Litt.,Master of Literature or Master of Letters,3,7,0232
+104,M.Mgt.,Master of Management,3,7,0413
+105,M.Mkt.M.,Master of Marketing Management,3,7,0413
+106,M.Mus.,Master of Music,3,7,0213
+107,M.Optom.,Master of Optometry,3,7,0912
+108,M.Pharm.,Master of Pharmacy,3,7,0912
+109,M.Phil.,Master of Philosophy,2,7,011 0212 0213 022 0221 0223 0231 0232 031 0314 0321 0322 0411 0413 0421 05 0532 061 071 0811 0831 0841 0912 0921 0923 1011 1014 1031 1032
+110,M.Plan.,Master of Planning,3,7,071
+111,M.Sc.,Master of Science,3,7,0212 0221 0223 031 0314 05 0532 061 0811 0831 0841 0912 0921 1011 1031 1032
+112,M.Sc.(Medical Bio,Chemistry)-Master of Science in Medical Bio-Chemistry,3,7,05
+113,M.Sc.(Medical Microbiology),Master of Science in Medical Microbiology,3,7,05
+114,M.Sc.(Medical Pharmacology),Master of Science in Medical Pharmacology,3,7,0912
+115,M.Sc.(Medical Physiology),Master of Science in Medical Physiology,3,7,0912
+116,M.Sc. B.Ed.,"Master of Science, Bachelor of Education",8,7,011
+117,M.Sc. Nursing,Master of Science in Nursing,3,7,0912
+118,M.Sc. Tech.,Master of Science in Technology,3,7,05
+119,M.Sc. Tech.(Applied Geo,Physics)-Master of Science in Technology (Applied Geo-Physics),3,7,05
+120,M.Sc.(Medical Anatomy),Master of Science in Medical Anatomy,3,7,0912
+121,M.Stat.,Master of Statistics,3,7,05
+122,M.Tech.,Master of Technology,3,7,071
+123,M.V.Sc.,Master of Veterinary Sciences,3,7,0841
+124,M.A.,Master of Arts,3,7,011 0212 022 0221 0223 0231 0232 031 0314 0321 0322 0921 1031
+125,M.A.M.S.,Master of Ayurved in Medicine and Surgery,3,7,0912
+126,M.B.A.,Master of Business Administration,3,7,0413
+127,M.B.A.(Pharma. Tech.),Master of Business Administration in Pharmaceutical Technology,3,7,0413
+128,M.B.A.(Tech.),Master of Business Administration in Technology,3,7,0413
+129,M.B.B.S.,Bachelor of Medicine and Bachelor of Surgery,4,6,0912
+130,M.C.A.,Master of Computer Applications,3,7,061
+131,M.D.,Doctor of Medicine,3,7,0912
+132,M.D.S.,Master of Dental Surgery,3,7,0912
+133,M.E.,Master of Engineering,3,7,071
+134,M.F.Sc.,Master of Fishery Science,3,7,0831
+135,M.F.A.,Master of Fine Arts,3,7,0213
+136,M.H.A.,Master of Hospital Administration,3,7,0413
+137,M.H.M.S.,Master of Homeopathic Medicine and Science,3,7,0912
+138,M.J.,Master of Journalism,3,7,0321
+139,M.J.M.C.,Master of Journalism and Mass Communication,3,7,0321
+140,M.L.,Master of Laws,3,7,0421
+141,M.L.I.Sc.,Master of Library & Information Science,3,7,0322
+142,M.M.C.,Master in Mass Communication,3,7,0321
+143,M.O.L.,Master of Oriental Learning,3,7,022
+144,M.O.T.,Master of Occupational Therapy,3,7,0912
+145,M.P.Ed.,Master of Physical Education,3,7,1014
+146,M.P.A.,Master of Performing Arts,3,7,0213
+147,M.P.E.,Master of Physical Education,3,7,1014
+148,M.P.H.,Master of Public Health,3,7,0912
+149,M.P.S.,Master of Population Studies,3,7,031
+150,M.P.T.,Master of Physiotherapy,3,7,0912
+151,M.S.,Master of Science,3,7,05 061 071
+152,M.S.,Master of Surgery,3,7,0912
+153,M.S.W.,Master of Social Work,3,7,0923
+154,M.U.M.S.,Master of Unani Medicine and Surgery,3,7,0912
+155,PG Diploma,Post Graduate Diploma,5,7,011 0212 0213 022 0221 0223 0231 0232 031 0314 0321 0322 0411 0413 0421 05 0532 061 071 0811 0831 0841 0912 0921 0923 1011 1014 1031 1032
+156,Parangat,Parangat,3,7,0232 031
+157,Ph.D.,Doctor of Philosophy,1,8,011 0212 0213 022 0221 0223 0231 0232 031 0314 0321 0322 0411 0413 0421 05 0532 061 071 0811 0831 0841 0912 0921 0923 1011 1014 1031 1032
+158,Samaj Karya Parangat,Samaj Karya Parangat,3,7,0923
+159,Samaj Vidya Parangat,Samaj Vidya Parangat,3,7,031
+160,Samaj Vidya Visharad,Samaj Vidya Visharad,4,6,0923
+161,Shastri,Shastri,4,6,022
+162,Shiksha Acharya,Shiksha Acharya,3,7,011
+163,Shiksha Shastri,Shiksha Shastri,4,6,011
+164,Shiksha Visharad,Shiksha Visharad,4,6,011
+165,Shikshan Parangat,Shikshan Parangat,3,7,011
+166,Vachaspati,Vachaspati,3,7,0912
+167,Vidhya Nishnanat,Vidhya Nishnanat,4,6,022
+168,Vidhya Praveena,Vidhya Praveena,4,6,022
+169,Vidya Vachaspati,Vidya Vachaspati,1,8,022
+170,Vidya Varidhi,Vidya Varidhi,1,8,022
+171,Vidhyalankar,Vidhyalankar,4,6,022
+172,Visharad,Visharad,4,6,022
+173,B.Sc. L.L.B.,"Bachelor of Science, Bachelor of Law or Laws",8,6,0421
+174,M.Q.P.M.,Master of Quality and Productivity Management,3,7,0413
+175,A.N.M.,Auxiliary Nurse & Midwife,6,5,0912
+176,B.A.(Hons),Bachelor of Arts (Honors),4,6,011 0212 0213 022 0221 0223 0231 0232 031 0314 0321 0322 1011 1031
+177,B.B.A. L.L.B.,"Bachelor of Business Administration, Bachelor of Law or Laws",8,6,0421
+178,B.F.Tech.,Bachelor of Fashion Technology,4,6,0212
+179,B.H.A.,Bachelor of Hospital Administration,4,6,0912
+180,B.Sc.(Hons),Bachelor of Science (Honors),4,6,031 0314 05 061
+181,B.Sc.(Post Basic),B.Sc (Post Basic),4,6,0912
+182,D.Ed.,Diploma in Education,6,5,011
+183,D.Pharma,Diploma in Pharmacy,6,5,0912
+184,G.N.M.,General Nursing & Midwifery,6,5,0912
+185,Integrated M.A.,Integrated Master of Arts,8,7,031
+186,Integrated M.B.A.,Integrated Master of Business Administration,8,7,0413
+187,Integrated M.C.A.,Integrated Master of Computer Applications,8,7,061
+188,Integrated M.Sc.,Integrated Master of Science,8,7,05 061
+189,M.T.P.M.,Master in Transportation Planning and Management,3,7,071
+190,M.U.P.,Master of Urban Planning,3,7,071
+191,P.G.D.M.,Post-Graduate Diploma in Management,3,7,0413
+192,P.G.P.,Post-Graduate Programme in Management,3,7,0413
+193,Pharm.D.,Doctor of Pharmacy,3,7,0912
+194,B.S.A.,Bachelor of System Administration,4,6,061
+195,B.Voc.,Bachelor of Vocational Education,4,6,011
+196,B.S.A.,Bachelor in Shipping Management,4,6,0413
+197,D.Voc.,Diploma in Vocational Education,6,5,011
+198,M.F.M.,Master of Fashion Management,3,7,0413
+199,M.F.Tech.,Master of Fashion Technology,3,7,0212
+200,B.N.Y.S.,Bachelor of Naturopathy and Yogic Sciences,4,6,0912
+201,B.M.S.,Bachelor of Management Studies,4,6,0413

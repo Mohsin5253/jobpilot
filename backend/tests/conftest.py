@@ -29,6 +29,7 @@ os.environ.update(
     ADMIN_EMAILS="",
     SCAM_FETCH_URLS="false",
     SCAM_RDAP_ENABLED="false",
+    CAMPUS_PARTITIONS="4",
     EGRESS_THROTTLE_ENABLED="false",  # tests/test_v10_safety.py turns it on for the rate-limit test
 )
 
@@ -40,7 +41,7 @@ from sqlalchemy import text  # noqa: E402
 
 from app.db import engine  # noqa: E402
 
-TABLES = "ai_feature_cache, approval_grants, system_flags, dictations, campus_leads, campus_placements, question_bank, industry_trends, audit_events, transparency_daily, alumni, gap_projects, interview_sessions, stipend_reports, payment_events, payments, whatsapp_events, proof_link_views, proof_links, approval_events, quotas, scam_reports, verifications, rights_requests, drive_statuses, campus_drives, org_members, organizations, api_tokens, consents, mail_accounts, password_resets, rate_limits, board_probes, source_targets, company_contacts, notifications, skill_questions, reminders, outreach_drafts, tailored_resumes, llm_calls, job_matches, agent_runs, jobs, profiles, users"
+TABLES = "staff_view_audit_log, drive_eligibility, campus_proof_files, student_achievements, roster_students, campus_memberships, campus_rollups, campus_jobs, email_otps, campus_custom_fields, staff_assignments, capacity_history, capacity_allocations, batches, programs, campus_degrees, departments, campuses, institutions, ai_feature_cache, approval_grants, system_flags, dictations, campus_leads, campus_placements, question_bank, industry_trends, audit_events, transparency_daily, alumni, gap_projects, interview_sessions, stipend_reports, payment_events, payments, whatsapp_events, proof_link_views, proof_links, approval_events, quotas, scam_reports, verifications, rights_requests, drive_statuses, campus_drives, org_members, organizations, api_tokens, consents, mail_accounts, password_resets, rate_limits, board_probes, source_targets, company_contacts, notifications, skill_questions, reminders, outreach_drafts, tailored_resumes, llm_calls, job_matches, agent_runs, jobs, profiles, users"
 
 
 @pytest.fixture(scope="session", autouse=True)
@@ -55,6 +56,7 @@ async def clean_db():
     import app.services.ingest as ingest
 
     async with engine.begin() as conn:
+        await conn.execute(text("DELETE FROM degrees WHERE campus_id IS NOT NULL"))
         await conn.execute(text(f"TRUNCATE {TABLES} CASCADE"))
     ingest._last_sync = None
     yield

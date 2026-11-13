@@ -14,6 +14,7 @@ jobs:
     defaults: { run: { working-directory: backend } }
     env:
       TEST_DATABASE_URL: postgresql+psycopg://postgres:postgres@localhost:5432/jobpilot_test
+      CAMPUS_PARTITIONS: "4"  # fewer partitions in the test database (production keeps 32)
     steps:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v6

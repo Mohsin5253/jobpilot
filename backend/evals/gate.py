@@ -41,6 +41,7 @@ THRESHOLDS: dict[str, tuple[str, float]] = {
     "recipients.accuracy": (">=", 1.0),
     "determinism.identical": (">=", 1.0),
     "prompts.unchanged": (">=", 1.0),
+    "matcher_fields.min_field_accuracy": (">=", 1.0),  # every field, not just the average
     "guard.recall": (">=", 1.0),
     "scam_shield.accuracy": (">=", 0.95),
 }
@@ -142,6 +143,36 @@ def suite_prompts() -> dict:
     return {"prompts": len(current), "unchanged": float(not changed), "_changed": changed}
 
 
+def suite_fields() -> dict:
+    """Per-field Matcher ranking on non-tech job descriptions: fit > near miss > unrelated, for every field."""
+    import asyncio
+
+    from app.agents.matcher import blend
+    from app.embeddings import cosine, get_embedder
+    from app.skills import extract_skills, job_embedding_text, skill_overlap
+    from evals.datasets.fields import FIELDS
+
+    embedder = get_embedder()
+
+    async def score(jd_title: str, jd: str, resume: str) -> float:
+        rv, jv = await embedder.embed_one(resume), await embedder.embed_one(job_embedding_text(jd_title, "", jd))
+        _, _, skills = skill_overlap(extract_skills(resume), extract_skills(f"{jd_title} {jd}"))
+        return blend(embedder.to_score(cosine(rv, jv)), skills, None)
+
+    async def run_all():
+        out = {}
+        for name, (title, jd, fit, near, far) in FIELDS.items():
+            a, b, c = await score(title, jd, fit), await score(title, jd, near), await score(title, jd, far)
+            out[name] = ((a > b) + (a > c) + (b >= c)) / 3  # fit first, near miss not below the unrelated resume
+            out[f"_{name}"] = (round(a, 1), round(b, 1), round(c, 1))
+        return out
+
+    res = asyncio.run(run_all())
+    per = {k: v for k, v in res.items() if not k.startswith("_")}
+    return {"fields": len(per), "min_field_accuracy": min(per.values()), "mean_accuracy": sum(per.values()) / len(per),
+            **{f"field_{k}": v for k, v in per.items()}, "_scores": {k[1:]: v for k, v in res.items() if k.startswith("_")}}
+
+
 def suite_legacy() -> dict:
     from evals.run_evals import eval_guard, eval_scam_shield
 
@@ -158,6 +189,7 @@ def run() -> dict[str, dict]:
         "recipients": suite_recipients(),
         "determinism": suite_determinism(),
         "prompts": suite_prompts(),
+        "matcher_fields": suite_fields(),
     }
     legacy = suite_legacy()
     out["guard"] = {"recall": legacy["guard.recall"], "precision": legacy["guard.precision"]}

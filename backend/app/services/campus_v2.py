@@ -33,19 +33,6 @@ async def officer_scope(org_id):
 
 # ── Drive-circular parser ───────────────────────────────────────────────────────────────────────────────────────
 
-BRANCHES = {
-    "CSE": r"\b(cse|computer\s*(science|engineering|engg)|comp\.?\s*engg?|comp\b|cs\b)",
-    "IT": r"\b(it\b|information\s*technology)",
-    "ECE": r"\b(ece|electronics\s*(and|&)\s*communication|e\s*&\s*tc|entc|extc|electronics\s*(and|&)\s*tele)",
-    "EEE": r"\b(eee|electrical\s*(and|&)\s*electronics)",
-    "EE": r"\b(ee\b|electrical\s*engg?|electrical(?!\s*(and|&)))",
-    "MECH": r"\b(mech(anical)?)\b",
-    "CIVIL": r"\bcivil\b",
-    "AIDS": r"\b(ai\s*(and|&)\s*ds|ai\s*&\s*data\s*science|artificial\s*intelligence\s*(and|&)\s*data\s*science)",
-    "AIML": r"\b(ai\s*(and|&)?\s*ml|aiml|artificial\s*intelligence\s*(and|&)\s*machine\s*learning)",
-    "CHEM": r"\bchemical\b",
-    "MCA": r"\bmca\b",
-}
 _MONTHS = {m: i for i, m in enumerate(["jan", "feb", "mar", "apr", "may", "jun", "jul", "aug", "sep", "oct", "nov", "dec"], 1)}
 _ROUND_WORDS = [
     ("aptitude", r"aptitude|online\s*(test|assessment)|written\s*test|\boa\b"),
@@ -81,7 +68,34 @@ def _date(s: str, today: date) -> date | None:
     return None
 
 
-def parse_circular(raw: str, today: date | None = None) -> dict:
+def _aliases(name: str) -> list[str]:
+    """'Electronics and Telecommunication (ENTC, E&TC)' -> the name and its aliases. Colleges add aliases in Setup."""
+    m = re.match(r"^(.*?)\s*\((.*)\)\s*$", name)
+    base, extra = (m.group(1), m.group(2)) if m else (name, "")
+    return [a.strip() for a in [base, *extra.split(",")] if a.strip()]
+
+
+def match_departments(names: list[str], text_: str) -> list[str]:
+    """The college's departments a circular names, by name or alias. All-caps aliases (IT, EE) match case-sensitively;
+    where two match the same words, the longer wins ("Electrical & Electronics" isn't also "Electrical")."""
+    hits: list[tuple[int, int, str]] = []
+    for name in names:
+        for alias in _aliases(name):
+            flags = 0 if alias.isupper() and len(alias) <= 4 else re.I
+            pat = re.escape(alias).replace(r"\ ", r"\s*").replace("&", r"\s*&\s*")
+            for m in re.finditer(rf"(?<![\w&]){pat}(?![\w&])", text_, flags):
+                hits.append((m.start(), m.end(), name))
+    hits.sort(key=lambda h: (h[0], -(h[1] - h[0])))
+    kept: list[tuple[int, int, str]] = []
+    for h in hits:
+        if any(h[0] < k[1] and k[0] < h[1] and (k[1] - k[0]) > (h[1] - h[0]) for k in kept):
+            continue
+        kept = [k for k in kept if not (k[0] < h[1] and h[0] < k[1] and (h[1] - h[0]) > (k[1] - k[0]))]
+        kept.append(h)
+    return sorted({k[2] for k in kept})
+
+
+def parse_circular(raw: str, today: date | None = None, departments: list[str] | None = None) -> dict:
     """Structured drive from a placement-cell circular (PDF text or a WhatsApp forward). Rules first; works offline."""
     today = today or datetime.now(UTC).date()
     t = raw.replace("\r", "")
@@ -112,26 +126,30 @@ def parse_circular(raw: str, today: date | None = None) -> dict:
     elig: dict = {}
     m = re.search(r"(?i)(\d(?:\.\d{1,2})?)\s*(?:cgpa|cpi|sgpa|gpa|pointer)|(?:cgpa|cpi|gpa|pointer)\s*(?:of\s*)?(?:>=|≥|above|:|-|minimum|min\.?)?\s*(\d(?:\.\d{1,2})?)", flat)
     if m:
-        elig["min_cgpa"] = float(m.group(1) or m.group(2))
+        elig["min_score"], elig["score_type"] = float(m.group(1) or m.group(2)), "points"  # in the scale the circular uses
     m = re.search(r"(?i)(\d{2})\s*%\s*(?:and above\s*)?(?:throughout|aggregate|in all|& above|or above|minimum)?", flat)
     if m:
         elig["min_percent"] = int(m.group(1))
+        if "min_score" not in elig:
+            elig["min_score"], elig["score_type"] = float(m.group(1)), "percentage"
     branch_text = _field(t, "branch(?:es)?", "eligible branch(?:es)?", "streams?", "departments?", "eligibility") or flat
     if re.search(r"(?i)all\s*branch|any\s*branch|all\s*(?:engineering\s*)?streams", branch_text):
-        elig["branches"] = []
+        elig["departments"] = []
     else:
-        elig["branches"] = [b for b, pat in BRANCHES.items() if re.search(pat, branch_text, re.I)]
+        # Matched against the college's own department names (and their initials) by the caller: no built-in list.
+        elig["departments_text"] = branch_text[:500]
+        elig["departments"] = match_departments(departments or [], branch_text)
     if re.search(r"(?i)no\s*(?:active|live|current)?\s*backlogs?|zero\s*backlogs?|without\s*(?:any\s*)?backlogs?", flat):
-        elig["max_backlogs"] = 0
+        elig["max_pending_subjects"] = 0
     else:
         m = re.search(r"(?i)(?:max(?:imum)?|upto|up to|<=|≤)\s*(\d)\s*(?:active\s*)?backlogs?|(\d)\s*(?:active\s*)?backlogs?\s*(?:allowed|permitted)", flat)
         if m:
-            elig["max_backlogs"] = int(m.group(1) or m.group(2))
+            elig["max_pending_subjects"] = int(m.group(1) or m.group(2))
     years = re.findall(r"(?i)(20\d\d)\s*(?:batch|pass(?:ing)?[- ]?out|graduat)", flat)
     years += re.findall(r"(?i)(?:batch|pass(?:ing)?[- ]?out|graduating)\s*(?:year)?\s*(?:of|:|-)?\s*(20\d\d)", flat)
     for a, b in re.findall(r"(?i)(20\d\d)\s*(?:and|&|,|/)\s*(20\d\d)\s*(?:batch|pass)", flat):
         years += [a, b]
-    elig["grad_years"] = sorted({int(y) for y in years})
+    elig["graduation_years"] = sorted({int(y) for y in years})
 
     deadline_text = _field(t, r"last date(?: to (?:apply|register))?", r"registration (?:deadline|closes|last date)", "deadline", "apply by", "register by")
     if not deadline_text:

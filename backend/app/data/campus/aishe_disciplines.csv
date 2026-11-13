@@ -1,0 +1,36 @@
+aishe_id,name,isced_code
+01,Agriculture,0811
+02,Area Studies,0314
+03,Commerce,0411
+04,Criminology & Forensic Science,1032
+05,Defence Studies,1031
+06,Education,011
+07,Engineering & Technology,071
+08,Fashion Technology,0212
+09,Fine Arts,0213
+10,Foreign Language,0231
+11,Gandhian Studies,0223
+12,Home Science,1011
+13,Indian Language,0232
+14,Journalism & Mass Communication,0321
+15,Law,0421
+16,Library & Information Science,0322
+17,Linguistics,0232
+18,Management,0413
+19,Marine Science / Oceanography,0532
+20,Medical Science,0912
+21,Oriental Learning,022
+22,Physical Education,1014
+23,Religious Studies,0221
+24,Science,05
+25,Social Science,031
+26,Social Work,0923
+27,Women Studies,0314
+28,Arts,02
+29,Cultural Studies,0314
+30,Design,0212
+31,Fisheries Science,0831
+32,IT & Computer,061
+34,Veterinary & Animal Sciences,0841
+35,Disability Studies,0921
+99,Others  Category,

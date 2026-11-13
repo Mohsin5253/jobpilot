@@ -44,7 +44,7 @@ import { Tooltip, TooltipProvider } from "@/components/ui/tooltip";
 import { api, signOut } from "@/lib/api";
 import { useT, type Key } from "@/lib/i18n";
 import { useLiveUpdates } from "@/lib/live";
-import { isActive, useCampus, useMe, useOverview, useProfile, useStartRun } from "@/lib/queries";
+import { isActive, useMe, useOverview, useProfile, useStartRun } from "@/lib/queries";
 import type { Overview, User } from "@/lib/types";
 import { useMediaQuery } from "@/lib/use-media";
 import { cn } from "@/lib/utils";
@@ -65,7 +65,7 @@ export interface NavItem {
 
 const NAV_KEYS: Record<string, Key> = {
   "/dashboard": "nav.dashboard", "/jobs": "nav.matches", "/approvals": "nav.approvals", "/skills": "nav.skills", "/tracker": "nav.tracker",
-  "/insights": "nav.insights", "/campus": "nav.campus", "/proof": "nav.proof", "/runs": "nav.runs", "/settings": "nav.settings",
+  "/insights": "nav.insights", "/campus-profile": "nav.campus", "/proof": "nav.proof", "/runs": "nav.runs", "/settings": "nav.settings",
 };
 
 const NAV: NavItem[] = [
@@ -81,7 +81,7 @@ const NAV: NavItem[] = [
   },
   { href: "/tracker", label: "Tracker", icon: KanbanSquare },
   { href: "/insights", label: "Insights", icon: ChartLine },
-  { href: "/campus", label: "Campus", icon: GraduationCap },
+  { href: "/campus-profile", label: "Campus", icon: GraduationCap },
   { href: "/proof", label: "Proof pack", icon: BadgeCheck },
   { href: "/stipends", label: "Stipends", icon: IndianRupee },
   { href: "/billing", label: "Plans & billing", icon: CreditCard },
@@ -573,7 +573,6 @@ export function AppShell({ children }: { children: ReactNode }) {
   const pathname = usePathname();
   const { data: me } = useMe();
   const { data: overview } = useOverview();
-  const { data: campus } = useCampus();
   const last = overview?.last_run;
   useRunSync(last ? `${last.id}:${last.status}:${last.steps.map((s) => s.status[0]).join("")}` : undefined);
   useLiveUpdates();
@@ -591,7 +590,7 @@ export function AppShell({ children }: { children: ReactNode }) {
   const t = useT();
   const nav: NavItem[] = [
     ...NAV.map((n) => ({ ...n, label: NAV_KEYS[n.href] ? t(NAV_KEYS[n.href]) : n.label })),
-    ...(campus?.college?.role === "officer" ? [{ href: "/college", label: "College", icon: Building2 }] : []),
+    ...(me?.campus_staff ? [{ href: "/campus", label: "Campus portal", icon: Building2 }] : []),
     ...(me?.is_admin ? [{ href: "/admin", label: "Admin", icon: Gauge }] : []),
   ];
   const current = nav.find((n) => pathname.startsWith(n.href));

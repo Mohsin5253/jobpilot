@@ -18,7 +18,7 @@ PURPOSES = {
     "sending": "Send the applications I approve from my own mailbox",
     "public_proof": "Publish my proof-of-skills page at a link I can share",
     "whatsapp": "Send me a daily WhatsApp digest of my best new matches",
-    "college_share": "Share my placement progress with my college's placement cell",
+    "college_share": "Share what I create in JobPilot (applications, matches, internships, roles, awards and proof) with my college's placement staff, by name",
     "ledger": "Add my stipend and PPO reports to the anonymous company ledger",
 }
 
@@ -50,8 +50,8 @@ NOTICE: dict[str, dict[str, str]] = {
         "withdraw": "Reply STOP on WhatsApp, or switch this off in Settings.",
     },
     "college_share": {
-        "data": "Your application progress, drive registrations and outcomes.",
-        "why": "So your college's placement cell can support you. Without this they only see anonymous totals.",
+        "data": "Your applications, matches, drive registrations and outcomes, and the internships, roles and awards you add with their proof. (Your college's own records about you, such as roll number, programme and score, are the college's and visible to the staff responsible for you either way.)",
+        "why": "So your college's placement staff can support you and verify your entries. Without this they see only anonymous totals of what you create in JobPilot.",
         "retention": "Until you withdraw or leave the college workspace. Withdrawal removes you from their views within 24 hours.",
         "withdraw": "Switch this off in Campus or Settings → Privacy.",
     },

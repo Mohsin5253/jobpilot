@@ -152,6 +152,7 @@ class UserOut(BaseModel):
     plan: str = "free"
     is_demo: bool = False
     is_admin: bool = False
+    campus_staff: bool = False  # an active or pending staff membership at a college (shows the Campus portal link)
     expires_at: datetime | None = None
     adult_confirmed_at: datetime | None = None
     language: str = "en"

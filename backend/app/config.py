@@ -56,7 +56,7 @@ class Settings(BaseSettings):
     rate_limits_enabled: bool = True
     # Rupees per US dollar, for showing AI cost (billed in USD) in ₹ on the landing page. Not a price.
     usd_inr_rate: float = 88.0
-    consent_version: str = "2026-11"  # bump when the privacy notice changes; users re-confirm
+    consent_version: str = "2026-11-b"  # bump when the privacy notice changes; users re-confirm ("-b": campus college records vs JobPilot data)
     extension_origin_regex: str = r"chrome-extension://[a-p]{32}"  # the Chrome autofill extension calls the API directly
 
     # Proof-of-skills pack (official public APIs). A token raises GitHub's limit from 60 to 5,000 requests / hour.

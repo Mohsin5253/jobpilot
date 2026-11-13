@@ -10,8 +10,8 @@ export const metadata: Metadata = {
 };
 
 const HOW = [
-  { t: "Students join with your invite code", d: "They choose whether to share their progress with the college. Only those who do appear by name." },
-  { t: "Staff join with your staff code", d: "HODs and faculty see their department; the TPO sees the whole college. Every staff view is logged." },
+  { t: "Import your roster; students claim it", d: "Your records (name, roll no., programme, score) are yours to see in scope. What students add in JobPilot appears by name only if they share it." },
+  { t: "Unlimited verified staff", d: "Staff code + college email + your approval. HODs see their department, faculty their batches, the TPO the whole college. Every staff view is logged." },
   { t: "Post a job, get ranked students", d: "Paste a recruiter's link and description. JobPilot ranks your students for it and proposes the best fits." },
   { t: "Approve, then track every round", d: "Approved students are shortlisted and told. Move them through Round 1, Technical, HR to Placed; dashboards update live." },
 ];

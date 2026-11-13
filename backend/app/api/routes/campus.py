@@ -325,7 +325,14 @@ async def parse_drive(member: OfficerDep, request: Request) -> dict:
         text_in = CircularIn.model_validate(await request.json()).text
     if not text_in.strip():
         raise HTTPException(422, "Paste the circular or upload the PDF")
-    return parse_circular(text_in)
+    from sqlalchemy import select as _select
+
+    from app.campus.models import Department
+    from app.db import session_scope as _scope
+
+    async with _scope() as s_:
+        names = list((await s_.execute(_select(Department.name).where(Department.campus_id == member.org_id))).scalars())
+    return parse_circular(text_in, departments=names)
 
 
 class AlumniIn(BaseModel):

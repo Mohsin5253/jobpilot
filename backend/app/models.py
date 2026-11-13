@@ -64,6 +64,7 @@ class User(Base):
 
     id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=uuid.uuid4)
     email: Mapped[str] = mapped_column(String(320), unique=True, index=True)
+    email_verified_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))  # confirmed by a one-time code
     name: Mapped[str] = mapped_column(String(200), default="")
     password_hash: Mapped[str] = mapped_column(String(200))
     created_at: Mapped[datetime] = _now_col()
@@ -950,3 +951,6 @@ class SystemFlag(Base):
     value: Mapped[str] = mapped_column(String(200))
     updated_at: Mapped[datetime] = _now_col()
     updated_by: Mapped[str | None] = mapped_column(String(320))
+
+
+from app.campus.models import *  # noqa: E402,F401,F403  (Campus v2 tables, registered on the same metadata)

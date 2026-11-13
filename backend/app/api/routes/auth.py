@@ -96,7 +96,15 @@ async def logout_all(user: RealUserDep, response: Response, session: SessionDep)
 
 @router.get("/me", response_model=UserOut)
 async def me(user: UserDep) -> UserOut:
-    return user_out(user)
+    from sqlalchemy import select as _select
+
+    from app.campus.models import CampusMembership
+    from app.db import session_scope
+
+    out = user_out(user)
+    async with session_scope() as s:
+        out.campus_staff = (await s.execute(_select(CampusMembership.id).where(CampusMembership.user_id == user.id, CampusMembership.kind == "staff", CampusMembership.status.in_(["active", "pending"])).limit(1))).first() is not None
+    return out
 
 
 @router.post("/change-password", response_model=TokenOut)

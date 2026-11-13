@@ -8,6 +8,7 @@ export interface User {
   plan: "free" | "pro";
   is_demo: boolean;
   is_admin: boolean;
+  campus_staff?: boolean;
   expires_at: string | null;
   adult_confirmed_at?: string | null;
   language?: "en" | "hi" | "mr";

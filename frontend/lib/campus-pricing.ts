@@ -31,7 +31,7 @@ export const CAMPUS_PLANS: CampusPlan[] = [
     name: "Pilot",
     price: "₹0",
     per: "one placement season",
-    note: `Up to ${CAMPUS_PILOT_STUDENTS} students · 1 TPO + 3 staff`,
+    note: `Up to ${CAMPUS_PILOT_STUDENTS} students · unlimited staff`,
     bestFor: "Trying it with one batch",
     features: ["Student invite code and staff code", "Drives with automatic eligibility checks", "Live placement pipeline", "AI match proposals for staff to approve"],
     cta: "Start a free pilot",
@@ -41,7 +41,7 @@ export const CAMPUS_PLANS: CampusPlan[] = [
     name: "Department",
     price: inr(CAMPUS_DEPARTMENT_INR),
     per: "per year",
-    note: `One department, up to ${CAMPUS_DEPARTMENT_STUDENTS} students · HOD + 5 faculty`,
+    note: `One department, up to ${CAMPUS_DEPARTMENT_STUDENTS} students · unlimited staff`,
     bestFor: "A single HOD running placements",
     features: ["Everything in Pilot", "Jobs posted from recruiter links, matched to students in minutes", "Department-scoped views", "Precision report on the AI's proposals", "Email support"],
     cta: "Get started",
@@ -90,11 +90,11 @@ export const CAMPUS_TERMS: string[] = [
 export const CAMPUS_FAQ: { q: string; a: string }[] = [
   {
     q: "Can staff see every student's data?",
-    a: "No. Staff see college-wide numbers for everyone, but a student's name, applications and pipeline only if that student chose to share their progress with the college. The database itself enforces this, and every staff view is written to an audit log.",
+    a: "Two kinds of data, two rules. College records (name, roll number, degree, department, batch, score and pending subjects) come from your college and are visible to authorised staff for the students in their scope. Everything a student creates in JobPilot (applications, resume, matches, internships, roles, awards and proof files) is shown to staff by name only if that student chooses to share it with the college; otherwise staff see only totals. The database enforces both rules, and every staff view is written to an audit log.",
   },
   {
     q: "Who can join as staff?",
-    a: "HODs and faculty join with your college's staff code, and you can require an email on your college domain. The code is stored only as a hash and shown once when issued. TPO access is granted by us or by another TPO, never self-selected.",
+    a: "Only verified staff: they need your college's staff code (locked after repeated wrong tries), must confirm an email on your college's own domain (personal addresses like Gmail are refused), and get no access until the TPO or Principal approves them. Students can't open the staff portal. The code is stored only as a hash and shown once. TPO access is granted by us or by another TPO, and TPOs and Principals confirm a one-time code each time they sign in.",
   },
   {
     q: "What do the AI match proposals do?",

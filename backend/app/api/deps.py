@@ -31,7 +31,10 @@ async def current_user(request: Request, session: SessionDep) -> User:
     # Active users drive what the shared ingester fetches; recorded at most hourly to keep reads read-only.
     if not user.last_seen_at or now - user.last_seen_at > timedelta(hours=1):
         user.last_seen_at = now
-        await session.commit()
+    # End the read transaction: the connection goes back to the pool instead of being held for the whole request while
+    # the route opens its own sessions (under load, holding both starves the pool). expire_on_commit is off, so `user`
+    # stays usable; routes that use the request session simply start a new transaction.
+    await session.commit()
     return user
 
 

@@ -95,22 +95,23 @@ def email_allowed(org: Organization, email: str) -> bool:
 # ---------- scope ----------
 
 
-def _norm_dept(s: str) -> str:
-    from app.services.campus_v2 import BRANCHES
+_GENERIC = {"engineering", "engg", "eng", "department", "dept", "of", "and", "the", "in", "studies", "school", "faculty"}
+
+
+def _dept_words(s: str) -> set[str]:
+    """v1 department text as its distinctive words (v2 scopes by department ids, not names)."""
     import re
 
-    low = (s or "").lower()
-    for code, rx in BRANCHES.items():
-        if re.search(rx, low):
-            return code
-    return low.strip()
+    return {w for w in re.findall(r"[a-z0-9]+", (s or "").lower()) if w not in _GENERIC}
 
 
 def in_department(member: OrgMember, academics: dict | None) -> bool:
-    """TPOs see everyone; HODs and teachers with a department see students of that branch."""
+    """TPOs see everyone; HODs and teachers with a department see students of that department ("Mechanical" is
+    "Mechanical Engineering": same distinctive words, generic ones like 'engineering' ignored)."""
     if role_of(member) == "tpo" or not member.department.strip():
         return True
-    return _norm_dept(member.department) == _norm_dept((academics or {}).get("branch", ""))
+    a, b = _dept_words(member.department), _dept_words((academics or {}).get("branch", ""))
+    return bool(a and b) and (a <= b or b <= a)
 
 
 async def staff_ids(session, org_id) -> list[uuid.UUID]:
@@ -206,6 +207,40 @@ def _guardrails(job: Job, prefs: Preferences) -> tuple[float, list[str]]:
     return f, notes
 
 
+async def campus_evidence(campus_id, user_ids: list) -> dict:
+    """Internships, roles and awards of sharing students (rejected ones left out), each labelled verified or
+    self-reported: verified entries count as evidence; self-reported ones are always marked as such."""
+    from sqlalchemy import text as _text
+
+    from app.db import session_scope
+
+    if not user_ids:
+        return {}
+    async with session_scope() as s:
+        rows = (
+            await s.execute(
+                _text("SELECT user_id, kind, sub_type, category, title, organisation, level, position, status FROM student_achievements "
+                      "WHERE campus_id = :c AND user_id = ANY(:u) AND shares_with_college AND status <> 'rejected' ORDER BY status DESC, start_date DESC NULLS LAST"),
+                {"c": campus_id, "u": list(user_ids)},
+            )
+        ).all()
+    out: dict = {}
+    for r in rows:
+        out.setdefault(r.user_id, []).append({"kind": r.kind, "type": r.sub_type or r.category, "title": r.title, "organisation": r.organisation, "level": r.level,
+                                              "position": r.position, "status": r.status})
+    return {k: v[:12] for k, v in out.items()}
+
+
+def _with_campus(resume_json: str, entries: list[dict]) -> str:
+    import json as _json
+
+    if not entries:
+        return resume_json
+    data = _json.loads(resume_json)
+    data["college_record_entries"] = entries  # status: "verified" by the college, or "self_reported"
+    return _json.dumps(data)[:12000]
+
+
 async def propose_for_job(session, org: Organization, job: Job, member: OrgMember | None, ctx_user: uuid.UUID | None) -> int:
     """Stage 1 retrieves the nearest sharing students in scope; stage 2 reviews each; guardrails apply; the best
     become proposals for staff to approve."""
@@ -233,7 +268,8 @@ async def propose_for_job(session, org: Organization, job: Job, member: OrgMembe
         resume = ResumeData.model_validate(p.resume or {})
         cands.append((u, p, resume, embedder.to_score(1.0 - float(d if d is not None else 1.0))))
     ctx = CallContext(user_id=ctx_user)
-    reviews = await asyncio.gather(*(review_fit(job, resume_for_prompt(r), ctx) for _, _, r, _ in cands))
+    evidence = await campus_evidence(org.id, [u.id for u, _, _, _ in cands])
+    reviews = await asyncio.gather(*(review_fit(job, _with_campus(resume_for_prompt(r), evidence.get(u.id, [])), ctx) for u, _, r, _ in cands))
     rows = []
     for (u, p, resume, semantic), review in zip(cands, reviews):
         strengths, gaps, skills = skill_overlap(resume.skills, job.skills or [])
@@ -251,6 +287,7 @@ async def propose_for_job(session, org: Organization, job: Job, member: OrgMembe
             "requirements": [r.model_dump() for r in review.requirements][:10] if review else [],
             "explanation": (review.explanation if review else "")[:400],
             "guardrails": notes,
+            "campus_evidence": {"verified": sum(e["status"] == "verified" for e in evidence.get(u.id, [])), "self_reported": sum(e["status"] == "self_reported" for e in evidence.get(u.id, []))},
         }
         rows.append((score, u, reasoning))
     rows.sort(key=lambda r: -r[0])

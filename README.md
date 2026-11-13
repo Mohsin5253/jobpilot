@@ -329,6 +329,26 @@ Wispr Flow's published principles (`backend/app/dictation/`, `frontend/lib/flow/
   accepted / guard-rejected / timed-out rates (`GET /api/stt/metrics`); no audio or
   transcript is stored. Frontend unit tests: `npm run test:unit` in `frontend/`.
 
+### Campus v2: colleges of any field, at 40 lakh students
+
+Campus mode (`backend/app/campus/`, `frontend/app/(app)/campus/**`, `/campus-profile`) works for any college:
+engineering, medical, law, commerce, arts, nursing, design, ITI or a foreign university. See
+`docs/campus-v2-plan.md`, and for measured scale results `docs/campus-load-test.md`.
+
+- **Structure as data:**
+  - fields are UNESCO ISCED-F 2013, levels are ISCED 2011, and degrees come from AISHE 2015-16 plus common international ones;
+  - each college has its own grading scale (never converted), its own label for pending subjects (backlog, ATKT, KT…) and its own student-ID label;
+  - eligibility rules are data, evaluated in background jobs.
+- **Staff-only portal (`/campus/**`):** joining needs a staff code (locks after 5 wrong tries), an institutional-email OTP (personal domains refused) and TPO approval. TPOs and Principals use 2FA. Every login, view, approval, verification and export is audit-logged.
+- **Students (`/campus-profile`):** they claim the roster the college imported, or pick a programme for staff to confirm. They add only internships, roles and awards, with proof. Entries stay Self-reported until verified, and editing resets them.
+- **Database enforcement:**
+  - row-level security runs on per-transaction settings (no subqueries), under the `jobpilot_campus` role;
+  - large tables are hash-partitioned (32), the audit log by month;
+  - ids are UUIDv7;
+  - lists use keyset pagination, dashboards are pre-aggregated, and imports and eligibility run as Postgres-queue jobs.
+- **Scale scripts:** `scripts/seed_scale.py` (40 lakh), `scripts/explain_campus.py` (plans under RLS), `scripts/loadtest_campus.py`.
+- **Reference data:** rebuilt from the AISHE export with `python -m scripts.import_aishe "<folder>"`.
+
 ## Configuration
 
 | Variable | Default | Purpose |
@@ -342,6 +362,7 @@ Wispr Flow's published principles (`backend/app/dictation/`, `frontend/lib/flow/
 | `STT_CLEANUP_MODEL` | `qwen/qwen3.8-27b` | Polished-mode clean-up model (reasoning off via `STT_CLEANUP_REASONING=none`) |
 | `STT_CLEANUP_FALLBACK_MODEL` | `openai/gpt-oss-20b` | Used while the first model is rate-limited (`STT_CLEANUP_FALLBACK_REASONING=low`) |
 | `STT_CLEANUP_BUDGET_MS` | `600` | Clean-up time budget; past it the filler-stripped text is used |
+| `CAMPUS_PARTITIONS` | `32` | Hash partitions per large campus table, read when migration 0030 runs (tests use 4) |
 | `FAST_MODEL` / `SMART_MODEL` | Groq: `openai/gpt-oss-20b` / `openai/gpt-oss-120b`<br/>Claude: `claude-haiku-5-5` / `claude-opus-5-5` | Scoring vs. writing models (empty = provider default) |
 | `LLM_CONCURRENCY` | 4 | Parallel LLM calls per process |
 | `EMBEDDING_BACKEND` | `fastembed` | `fastembed` (local bge-small, 384-d) or `hash` (tests) |
