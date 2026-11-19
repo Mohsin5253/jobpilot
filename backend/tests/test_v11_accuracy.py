@@ -97,7 +97,7 @@ def test_match_fit_is_computed_in_code_from_evidence():
     assert by["scikit-learn"].status == "met" and "sklearn regression" in by["scikit-learn"].evidence
     assert by["Docker"].status == "missing" and by["Docker"].evidence == ""  # no MET without a real resume span
     assert by["SQL"].status == "partial"  # listed under skills only
-    assert out.fit_score == round((3 * 1 + 3 * 0 + 1 * 0.5) / 7 * 100)  # the model's 97 plays no part
+    assert out.fit_score == round((3 * 1 + 3 * 0 + 1 * 0.5) / 7 * 100 * 0.9)  # the model's 97 plays no part; one must-have missing
 
 
 def test_guard_reverts_new_names_and_seniority_upgrades():

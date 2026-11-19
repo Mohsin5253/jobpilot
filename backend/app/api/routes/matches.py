@@ -11,7 +11,7 @@ from app.api.deps import SessionDep, UserDep
 from app.config import settings
 from app.models import CompanyContact, DraftStatus, Job, JobMatch, OutreachDraft, Profile, ProofLink, Stage, TailoredResume
 from app.llm import CallContext
-from app.schemas import BulletDecision, ContactOut, ContactsOut, DraftOut, JobOut, MatchDetail, MatchOut, MatchPage, MatchUpdate, ResumeData, RunOut, TailoredOut
+from app.schemas import BulletDecision, ContactOut, ContactsOut, DraftOut, JobOut, MatchDetail, MatchOut, MatchPage, MatchUpdate, Preferences, ResumeData, RunOut, TailoredOut
 from app.services.contacts import find_contacts, rank
 from app.services import resume_doc
 from app.services.runs import enqueue_run
@@ -87,6 +87,11 @@ async def list_matches(
     if not include_closed:
         # Not listed by its source for 4+ days -> filled or closed. Jobs you're already pursuing stay visible.
         base = base.where(or_(Job.last_seen_at >= datetime.now(UTC) - timedelta(days=4), JobMatch.stage.in_(ACTIVE_STAGES)))
+        # Older than your Freshness setting (posted date known): hidden, even if a board still lists it. Jobs you've
+        # shortlisted or are pursuing stay.
+        prefs = (await session.execute(select(Profile.preferences).where(Profile.user_id == user.id))).scalar_one_or_none() or {}
+        max_age = int(prefs.get("max_age_days") or Preferences.model_fields["max_age_days"].default)
+        base = base.where(or_(Job.posted_at.is_(None), Job.posted_at >= datetime.now(UTC) - timedelta(days=max_age), JobMatch.stage.in_((Stage.shortlisted, *ACTIVE_STAGES))))
 
     total = (await session.execute(select(func.count()).select_from(base.subquery()))).scalar_one()
     order = {
@@ -208,6 +213,12 @@ async def prepare(match_id: uuid.UUID, user: UserDep, session: SessionDep, body:
     confirmed (keywords you've used, your real figures) is saved first, and the tailored version is only sent if it
     reaches the target."""
     m = await _get(session, user.id, match_id)
+    # The agents never write for these (see agents.common.safe_job): say so now instead of a run that ends with nothing.
+    job = await session.get(Job, m.job_id)
+    if job.legit_status == "suspicious":
+        raise HTTPException(409, "Scam Shield flagged this posting as suspicious, so JobPilot won't prepare an application for it. Check the warning on the job, or apply on the company's own site.")
+    if job.injection_signals:
+        raise HTTPException(409, "This posting contains hidden instructions aimed at AI tools, so JobPilot won't write an application for it. You can still apply on the company's own site.")
     from app.services.usage import enforce_run_limit
 
     await enforce_run_limit(session, user)

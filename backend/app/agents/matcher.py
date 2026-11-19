@@ -84,11 +84,14 @@ def taxonomy_evidence(requirement: str, resume: dict) -> tuple[str, str] | None:
     return ("partial", listed[0]) if listed else None
 
 
+MISSING_MUST_FACTOR = 0.9
+
+
 def audit_review(review: FitReview, resume_json: str) -> FitReview:
     """The fit score is computed here, in code, from the requirements: the model only extracts them and judges each
     one, and every judgement needs evidence. A 'met' without a real quote from the resume is downgraded; the skill
     taxonomy then upgrades any requirement the resume provably covers. Score = weighted coverage (must 3, nice 1;
-    met 1, partial 0.5), capped at 55 when most must-haves are missing. With no requirements extracted, the model's
+    met 1, partial 0.5), less 10% per missing must-have, capped at 55 when most are missing. With no requirements extracted, the model's
     holistic score is the fallback."""
     if not review.requirements:
         return review
@@ -108,7 +111,10 @@ def audit_review(review: FitReview, resume_json: str) -> FitReview:
     coverage = sum(_WEIGHT[r.kind] * _CREDIT[r.status] for r in review.requirements) / total if total else 0
     musts = [r for r in review.requirements if r.kind == "must"]
     missing_musts = [r.text for r in musts if r.status == "missing"]
-    score = coverage * 100
+    # Each missing must-have costs 10% of the score. Averaging alone let generic must-haves (Git, REST APIs) carry a
+    # role whose defining ones were missing (an iOS internship without Swift or Xcode scored 50); measured on the
+    # labelled set this lifts bucket accuracy with the review from 0.75 to 0.90 (evals/run_evals.py --llm).
+    score = coverage * 100 * MISSING_MUST_FACTOR ** len(missing_musts)
     if musts and len(missing_musts) > len(musts) / 2:
         score = min(score, 55)  # most must-haves missing: a stretch at best
     review.fit_score = round(max(0, min(100, score)))

@@ -105,7 +105,7 @@ class Preferences(BaseModel):
     tracks: list[Track] = Field(default_factory=lambda: ["technical", "non_technical"])
     internships_only: bool = True  # internships, trainee, graduate / new-grad and entry-level roles
     remote_ok: bool = True
-    max_age_days: int = Field(default=45, ge=1, le=365)  # skip postings older than this (when the date is known)
+    max_age_days: int = Field(default=14, ge=1, le=365)  # skip and hide postings older than this (when the date is known)
     min_score: int = Field(default=60, ge=0, le=100)
     # The ATS score a tailored resume must reach for its job before it's sent (0 = no gate).
     ats_target: int = Field(default=0, ge=0, le=100)

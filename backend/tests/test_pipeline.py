@@ -289,3 +289,37 @@ async def test_match_list_flags_approved_and_sent_drafts(authed):
     row = next(m for m in (await authed.get("/api/matches", params={"stage": "applied"})).json()["items"] if m["id"] == first["match_id"])
     assert row["sent_draft"]
     assert (await authed.get(f"/api/matches/{first['match_id']}")).json()["sent_draft"]
+
+
+async def test_prepare_says_why_it_wont_write_for_a_flagged_posting(authed):
+    from sqlalchemy import text as sql
+
+    from app.db import session_scope
+
+    await _upload(authed)
+    await authed.post("/api/runs")
+    await _work()
+    m = (await authed.get("/api/matches")).json()["items"][-1]
+    async with session_scope() as s:
+        await s.execute(sql("UPDATE jobs SET legit_status = 'suspicious' WHERE id = :j"), {"j": m["job"]["id"]})
+    r = await authed.post(f"/api/matches/{m['id']}/prepare")
+    assert r.status_code == 409 and "Scam Shield" in r.json()["detail"]
+
+
+async def test_jobs_older_than_the_freshness_setting_are_hidden(authed):
+    from datetime import UTC, datetime, timedelta
+
+    from sqlalchemy import text as sql
+
+    from app.db import session_scope
+
+    await _upload(authed)
+    await authed.post("/api/runs")
+    await _work()
+    found = (await authed.get("/api/matches", params={"stage": "found"})).json()["items"]
+    old = found[0]
+    async with session_scope() as s:
+        await s.execute(sql("UPDATE jobs SET posted_at = :t WHERE id = :j"), {"t": datetime.now(UTC) - timedelta(days=22), "j": old["job"]["id"]})
+    ids = [i["id"] for i in (await authed.get("/api/matches", params={"stage": "found"})).json()["items"]]
+    assert old["id"] not in ids  # 22 days old, default freshness 14
+    assert old["id"] in [i["id"] for i in (await authed.get("/api/matches", params={"stage": "found", "include_closed": True})).json()["items"]]
