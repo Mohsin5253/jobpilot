@@ -289,12 +289,12 @@ export function MatchDetail({ id, compact = false }: { id: string; compact?: boo
                 <p className="max-w-sm text-[13.5px] text-text-2">
                   {preparing ? "Tailor is rewriting your bullets and Outreach is drafting the email…" : "I tailor automatically for jobs above your minimum fit score. Want this one anyway?"}
                 </p>
-                <PrepareDialog matchId={m.id} loading={prepare.isPending || preparing} disabled={busy} />
+                <PrepareDialog matchId={m.id} loading={prepare.isPending || preparing} disabled={preparing} waiting={busy && !preparing} />
                 {!preparing && lastRun?.trigger === "prepare" && lastRun.status === "failed" && <p className="max-w-sm text-[12.5px] text-[var(--error)]">The last attempt failed: {lastRun.error ?? "unknown error"}. Try again, or check Agent runs.</p>}
               </div>
             ) : (
               <>
-                <TargetBadge matchId={m.id} busy={busy} />
+                <TargetBadge matchId={m.id} busy={busy} isPrepare={preparing} />
                 <ResumeDiff match={m} matchId={m.id} editable />
                 <div className="mt-4 flex flex-wrap items-center gap-2 border-t border-border pt-4">
                   <a href={`/api/matches/${m.id}/resume?format=docx`} download className={buttonClass({ size: "sm" })}>
@@ -437,7 +437,7 @@ export function MatchDetail({ id, compact = false }: { id: string; compact?: boo
 
 
 /** The exact resume that would be sent for this job, scored against it, against your target. */
-function TargetBadge({ matchId, busy }: { matchId: string; busy: boolean }) {
+function TargetBadge({ matchId, busy, isPrepare }: { matchId: string; busy: boolean; isPrepare: boolean }) {
   const { data } = useQuery({ queryKey: ["ats-target", matchId], queryFn: () => api.get<{ score: number; target: number; ok: boolean }>(`/matches/${matchId}/ats-target`) });
   if (!data) return null;
   return (
@@ -448,7 +448,7 @@ function TargetBadge({ matchId, busy }: { matchId: string; busy: boolean }) {
       ) : (
         <span className="text-text-3">No target set</span>
       )}
-      {!data.ok && <PrepareDialog matchId={matchId} disabled={busy} />}
+      {!data.ok && <PrepareDialog matchId={matchId} disabled={busy && isPrepare} waiting={busy && !isPrepare} />}
     </div>
   );
 }

@@ -305,10 +305,10 @@ export function usePrepare() {
   return useMutation({
     mutationFn: (id: string) => api.post<Run>(`/matches/${id}/prepare`),
     onSuccess: () => {
-      agentToast("tailor", "On it. Your tailored resume and draft email will appear here in a few seconds.");
+      agentToast("tailor", "On it. The tailored resume and draft email appear in Approvals in about a minute (after any run already going). Nothing is sent until you approve.");
       invalidate("runs", "overview", "match", "matches");
     },
-    onError: (e: Error) => toast.error(e.message),
+    onError: (e: Error) => toast.error(`Couldn't start preparing: ${e.message}`),
   });
 }
 

@@ -217,9 +217,9 @@ async def prepare(match_id: uuid.UUID, user: UserDep, session: SessionDep, body:
             p.resume = body.resume.model_dump()
         if body.target is not None:
             p.preferences = {**(p.preferences or {}), "ats_target": body.target}
-    run, created = await enqueue_run(session, user.id, trigger="prepare", params={"direct": True, "shortlist_ids": [str(m.id)]})
-    if not created:
-        raise HTTPException(409, "Agents are busy with another run — try again when it finishes")
+    # Never refused because the scheduled search is running: it waits its turn (and goes first in the queue). Asking
+    # twice for the same job returns the run already waiting.
+    run, _ = await enqueue_run(session, user.id, trigger="prepare", params={"direct": True, "shortlist_ids": [str(m.id)]}, wait=True)
     if m.stage == Stage.found:
         apply_stage(m, Stage.shortlisted)
     await session.commit()

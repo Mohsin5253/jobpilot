@@ -206,7 +206,8 @@ async def test_prepare_application_for_any_job(authed):
     low = (await authed.get("/api/matches", params={"stage": "found"})).json()["items"][-1]  # lowest-scored job
     r = await authed.post(f"/api/matches/{low['id']}/prepare")
     assert r.status_code == 202 and r.json()["trigger"] == "prepare"
-    assert (await authed.post(f"/api/matches/{low['id']}/prepare")).status_code == 409  # one run at a time
+    again = await authed.post(f"/api/matches/{low['id']}/prepare")  # a second click: the same run, not an error
+    assert again.status_code == 202 and again.json()["id"] == r.json()["id"]
     assert await _work() == "awaiting_approval"
     run = (await authed.get(f"/api/runs/{r.json()['id']}")).json()
     steps = {s["agent"]: s["status"] for s in run["steps"]}
@@ -214,6 +215,34 @@ async def test_prepare_application_for_any_job(authed):
     assert steps["tailor"] == steps["outreach"] == "completed"
     detail = (await authed.get(f"/api/matches/{low['id']}")).json()
     assert detail["stage"] == "shortlisted" and detail["tailored"] and detail["drafts"][0]["status"] == "pending"
+
+
+async def test_prepare_waits_behind_a_running_search_and_goes_first(authed):
+    """Prepare is never refused because the scheduled search is busy: it queues, jumps ahead of other waiting runs,
+    and the worker still runs one run per user at a time."""
+    from sqlalchemy import text as sql
+
+    from app.db import session_scope
+    from app.services.runs import claim_next
+
+    await _upload(authed)
+    await authed.post("/api/runs")
+    await _work()
+    for d in (await authed.get("/api/drafts")).json():
+        await authed.post(f"/api/drafts/{d['id']}/decision", json={"decision": "reject", "reason": "Wrong role for me"})
+    await _work()
+
+    search = (await authed.post("/api/runs")).json()  # the search is queued ...
+    low = (await authed.get("/api/matches", params={"stage": "found"})).json()["items"][-1]
+    prep = await authed.post(f"/api/matches/{low['id']}/prepare")  # ... and Prepare still works
+    assert prep.status_code == 202 and prep.json()["id"] != search["id"] and prep.json()["status"] == "queued"
+    first = await claim_next("test-worker-1")
+    assert str(first.id) == prep.json()["id"]  # one job first
+    assert await claim_next("test-worker-2") is None  # never two runs of one user at once
+    async with session_scope() as s:  # Prepare done: the search is next
+        await s.execute(sql("UPDATE agent_runs SET status = 'completed', locked_at = NULL WHERE id = :i"), {"i": first.id})
+    nxt = await claim_next("test-worker-2")
+    assert str(nxt.id) == search["id"]
 
 
 async def test_declined_bullet_keeps_original_wording(authed):

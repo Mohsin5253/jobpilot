@@ -53,8 +53,10 @@ class AgeNotConfirmed(PermissionError):
     """DPDP age gate: no processing until the user has confirmed they're 18 or older (demo accounts excepted)."""
 
 
-async def enqueue_run(s: AsyncSession, user_id: uuid.UUID, trigger: str = "manual", params: dict | None = None) -> tuple[AgentRun, bool]:
-    """Returns (run, created). One active run per user at a time. Raises AgeNotConfirmed behind the age gate."""
+async def enqueue_run(s: AsyncSession, user_id: uuid.UUID, trigger: str = "manual", params: dict | None = None, wait: bool = False) -> tuple[AgentRun, bool]:
+    """Returns (run, created). One active run per user at a time: normally an active run is returned instead of a new
+    one. With `wait`, a new run is queued behind it (a one-job Prepare shouldn't fail because the scheduled search is
+    running); the worker still runs a user's runs one at a time. Raises AgeNotConfirmed behind the age gate."""
     adult, demo = (await s.execute(select(User.adult_confirmed_at, User.is_demo).where(User.id == user_id))).one()
     if adult is None and not demo:
         raise AgeNotConfirmed("Confirm you're 18 or older in Settings before the agents can run.")
@@ -62,9 +64,10 @@ async def enqueue_run(s: AsyncSession, user_id: uuid.UUID, trigger: str = "manua
         await s.execute(
             select(AgentRun).where(AgentRun.user_id == user_id, AgentRun.status.in_(ACTIVE)).order_by(AgentRun.created_at.desc())
         )
-    ).scalar_one_or_none()
-    if existing:
-        return existing, False
+    ).scalars().all()
+    same = next((r for r in existing if r.trigger == trigger and (r.params or {}) == (params or {})), None)
+    if same or (existing and not wait):
+        return same or existing[0], False
     run = AgentRun(user_id=user_id, trigger=trigger, status=RunStatus.queued, steps=[], stats={}, params=params or {})
     s.add(run)
     await s.flush()
@@ -82,10 +85,16 @@ async def request_resume(s: AsyncSession, run_id: uuid.UUID) -> None:
 CLAIM_SQL = text(
     """
     WITH c AS (
-        SELECT id FROM agent_runs
-        WHERE status IN ('queued', 'resume_queued')
+        SELECT id FROM agent_runs a
+        WHERE (status IN ('queued', 'resume_queued')
+               -- one run per user at a time: not while another of theirs is running ...
+               AND NOT EXISTS (SELECT 1 FROM agent_runs b WHERE b.user_id = a.user_id AND b.id <> a.id AND b.status = 'running'
+                                 AND b.locked_at >= now() - make_interval(mins => :stale))
+               -- ... and only their next one in line (a one-job Prepare first, then oldest first)
+               AND NOT EXISTS (SELECT 1 FROM agent_runs b WHERE b.user_id = a.user_id AND b.id <> a.id AND b.status IN ('queued', 'resume_queued')
+                                 AND ((b.trigger = 'prepare')::int, a.created_at) > ((a.trigger = 'prepare')::int, b.created_at)))
            OR (status = 'running' AND locked_at < now() - make_interval(mins => :stale))
-        ORDER BY created_at
+        ORDER BY (trigger = 'prepare') DESC, created_at
         FOR UPDATE SKIP LOCKED
         LIMIT 1
     )

@@ -35,6 +35,36 @@ function wakeApi(): Promise<boolean> {
   return waking;
 }
 
+// When the server sends no readable reason (an error page, a timeout), say what happened in plain words. Over HTTP/2
+// the browser's status text is empty, so falling back to it showed a blank message.
+const FALLBACK: Record<number, string> = {
+  400: "That request wasn't valid. Check the details and try again.",
+  403: "You don't have access to that.",
+  404: "That isn't here any more. Refresh the page.",
+  408: "That took too long. Please try again.",
+  409: "That clashes with something that just changed. Refresh and try again.",
+  413: "That file is too large.",
+  429: "Too many tries in a short time. Wait a minute and try again.",
+  500: "Something went wrong on our side. Please try again in a minute.",
+  502: "The server is starting up. Please try again in a minute.",
+  503: "The server is busy or starting up. Please try again in a minute.",
+  504: "The server took too long to answer. Please try again in a minute.",
+};
+
+/** FastAPI errors: a sentence, or a list of field problems ("Email: not a valid email address"). */
+function errorText(body: unknown): string {
+  const detail = (body as { detail?: unknown } | null)?.detail;
+  if (typeof detail === "string") return detail;
+  if (Array.isArray(detail) && detail.length) {
+    const d = detail[0] as { msg?: string; loc?: (string | number)[] };
+    const field = [...(d.loc ?? [])].reverse().find((x) => typeof x === "string" && x !== "body");
+    const msg = (d.msg ?? "").replace(/^(Value error|Assertion failed),\s*/i, "").replace(/:\s*The part after the @-sign.*$/i, "");
+    const label = typeof field === "string" ? field.replace(/_/g, " ").replace(/^\w/, (c) => c.toUpperCase()) : "";
+    return label && msg ? `${label}: ${msg.charAt(0).toLowerCase()}${msg.slice(1)}` : msg;
+  }
+  return "";
+}
+
 async function request<T>(path: string, init: RequestInit = {}, retried = false): Promise<T> {
   const isForm = init.body instanceof FormData;
   const res = await fetch(`/api${path}`, {
@@ -59,12 +89,11 @@ async function request<T>(path: string, init: RequestInit = {}, retried = false)
     throw new ApiError(401, "Session expired");
   }
   if (!res.ok) {
-    let message = res.statusText;
+    let message = "";
     try {
-      const body = await res.json();
-      message = typeof body.detail === "string" ? body.detail : body.detail?.[0]?.msg ?? message;
+      message = errorText(await res.json());
     } catch {}
-    throw new ApiError(res.status, message);
+    throw new ApiError(res.status, message || FALLBACK[res.status] || (res.status >= 500 ? FALLBACK[500] : "That didn't work. Please try again."));
   }
   if (res.status === 204) return undefined as T;
   return res.json() as Promise<T>;

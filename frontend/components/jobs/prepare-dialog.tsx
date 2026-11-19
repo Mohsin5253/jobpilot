@@ -32,7 +32,7 @@ const TARGETS = [80, 85, 90, 95];
  * you've really used and add real figures, then the tailored resume and email are prepared from that resume. The
  * application is only sent once the tailored resume reaches the target.
  */
-export function PrepareDialog({ matchId, disabled, loading, onStarted }: { matchId: string; disabled?: boolean; loading?: boolean; onStarted?: () => void }) {
+export function PrepareDialog({ matchId, disabled, loading, waiting, onStarted }: { matchId: string; disabled?: boolean; loading?: boolean; waiting?: boolean; onStarted?: () => void }) {
   const { data: profile } = useProfile();
   const [open, setOpen] = useState(false);
   const [goal, setGoal] = useState<number>(profile?.preferences?.ats_target || 90);
@@ -41,21 +41,40 @@ export function PrepareDialog({ matchId, disabled, loading, onStarted }: { match
   const [first, setFirst] = useState<number | null>(null);
   const qc = useQueryClient();
   const boost = useMutation({
-    mutationFn: (o: { from?: Resume } = {}) =>
+    mutationFn: (o: { from?: Resume; prev?: number } = {}) =>
       api.post<Boost>("/resume/ai-boost", { match_id: matchId, target: goal, ...(o.from ? { resume: o.from } : {}), confirmed_keywords: picked, figures }),
-    onSuccess: (d) => (setFirst((f) => f ?? d.before), setPicked([]), setFigures({})),
-    onError: (e: Error) => toast.error(e.message),
+    onSuccess: (d, o) => {
+      const was = o?.prev;
+      setFirst((f) => f ?? d.before);
+      setPicked([]);
+      setFigures({});
+      if (!o?.from) return;
+      if (d.reached) toast.success(`Re-scored: ${d.after}. Target ${d.target} reached.`);
+      else if (was != null && d.after > was) toast.success(`Re-scored: ${was} → ${d.after}. ${d.target - d.after} to go for your target.`);
+      else toast.info(`Still ${d.after}: those changes didn't add keywords this job's ATS looks for. Try the ★ skills.`);
+    },
+    onError: (e: Error) => toast.error(`Couldn't check your resume: ${e.message}`),
   });
   const r = boost.data;
   const prepare = useMutation({
     mutationFn: () => api.post(`/matches/${matchId}/prepare`, { target: goal, ...(r ? { resume: r.resume } : {}) }),
     onSuccess: () => {
-      toast.success(r && r.reached ? `Preparing: your resume reaches ${r.after} for this job` : "Preparing your application");
+      const next = "The tailored resume and email will be in Approvals in about a minute; nothing is sent until you approve.";
+      toast.success(
+        waiting
+          ? "Queued: your agents are finishing another run, and this job goes next."
+          : r && r.reached
+            ? `Preparing your application: the resume scores ${r.after} for this job.`
+            : r
+              ? `Preparing your application. Its resume scores ${r.after}, below your target ${r.target}, so it won't be sent until it reaches it.`
+              : "Preparing your application.",
+        { description: next, duration: 8000 },
+      );
       ["overview", "runs", "match", "matches", "profile", "ats-target"].forEach((k) => qc.invalidateQueries({ queryKey: [k] }));
       setOpen(false);
       onStarted?.();
     },
-    onError: (e: Error) => toast.error(e.message),
+    onError: (e: Error) => toast.error(`Couldn't start preparing: ${e.message}`),
   });
   const filled = Object.values(figures).filter((v) => /\d/.test(v)).length;
   const toggle = (k: string) => setPicked((p) => (p.includes(k) ? p.filter((x) => x !== k) : [...p, k]));
@@ -65,6 +84,7 @@ export function PrepareDialog({ matchId, disabled, loading, onStarted }: { match
       <Button variant="primary" disabled={disabled} loading={loading} onClick={() => (boost.reset(), setFirst(null), setOpen(true))}>
         <Sparkles /> Prepare application
       </Button>
+      {waiting && !loading && <p className="max-w-sm text-[12.5px] text-text-3">Your agents are on another run. You can still prepare this one: it goes next.</p>}
       <Dialog open={open} onOpenChange={setOpen}>
         <DialogContent title="Prepare this application" description="First, the ATS score this job's resume must reach. Nothing is invented: you confirm the skills you've used and add your real figures. The application is only sent once the tailored resume reaches the target." className="max-w-[680px]">
           <div className="space-y-4">
@@ -132,7 +152,13 @@ export function PrepareDialog({ matchId, disabled, loading, onStarted }: { match
                 )}
                 <div className="flex flex-wrap gap-2 border-t border-border pt-4">
                   {!r.reached && (
-                    <Button variant="primary" disabled={!picked.length && !filled} loading={boost.isPending} onClick={() => boost.mutate({ from: r.resume })}>
+                    <Button
+                      variant="primary"
+                      disabled={!picked.length && !filled}
+                      title={!picked.length && !filled ? "Tick a skill you've used, or add a figure with a number, first" : undefined}
+                      loading={boost.isPending}
+                      onClick={() => boost.mutate({ from: r.resume, prev: r.after })}
+                    >
                       <Sparkles /> Apply and re-score
                     </Button>
                   )}
@@ -140,6 +166,12 @@ export function PrepareDialog({ matchId, disabled, loading, onStarted }: { match
                     {r.reached ? "Prepare application" : "Prepare anyway (won't send below target)"}
                   </Button>
                 </div>
+                {!r.reached && !picked.length && !filled && (r.missing_keywords.length > 0 || r.needs_figures.length > 0) && (
+                  <p className="text-[12px] text-text-3">To re-score, tick a skill you&rsquo;ve really used or type a figure with a number (for example &ldquo;200 users&rdquo;).</p>
+                )}
+                {!r.reached && Object.values(figures).some((v) => v.trim() && !/\d/.test(v)) && (
+                  <p className="text-[12px] text-[var(--warning)]">A figure needs a number, like &ldquo;40% faster&rdquo; or &ldquo;3 teams&rdquo;.</p>
+                )}
                 <p className="text-[12px] text-text-3">Preparing saves this version as your resume (only the skills and figures you confirmed are added), then tailors it for the job and drafts the email for your approval.</p>
               </>
             )}

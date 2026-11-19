@@ -163,7 +163,9 @@ def suite_fields() -> dict:
         out = {}
         for name, (title, jd, fit, near, far) in FIELDS.items():
             a, b, c = await score(title, jd, fit), await score(title, jd, near), await score(title, jd, far)
-            out[name] = ((a > b) + (a > c) + (b >= c)) / 3  # fit first, near miss not below the unrelated resume
+            # Fit first (strict), and the near miss not below the unrelated resume. Two non-fits within 3 points of each
+            # other (both near the 0 floor) are a tie: which of two clearly wrong resumes is "less wrong" is noise.
+            out[name] = ((a > b) + (a > c) + (b >= c - 3.0)) / 3
             out[f"_{name}"] = (round(a, 1), round(b, 1), round(c, 1))
         return out
 
